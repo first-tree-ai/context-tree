@@ -1,8 +1,15 @@
 # Context Tree Format Specification
 
-## Root
+## Repository and root
 
-A Context Tree is a real filesystem directory containing a required `NODE.md`. A root `SCOPE.md` is optional but, when present, must be a regular UTF-8 file with schema-version-1 YAML frontmatter and a non-empty prose body.
+A shared Context Tree lives in a `github.com` repository identified as
+`OWNER/REPO`. GitHub commit SHAs identify exact shared snapshots. The package
+still operates on local clones and worktrees because validation and editing are
+filesystem operations.
+
+The tree root is a real directory containing `NODE.md`. Optional `SCOPE.md`
+must be a regular UTF-8 file with schema-version-1 frontmatter and non-empty
+prose:
 
 ```yaml
 ---
@@ -12,39 +19,56 @@ relatedRepositories:
 ---
 ```
 
-Related repository references must be credential-free HTTPS or SSH identities.
+`relatedRepositories` remains provider-neutral and accepts at most 64
+credential-free HTTP(S), `ssh://`, or scp-style SSH references. It describes
+related source repositories; it does not identify the Context Tree repository.
 
-## Nodes
+## Nodes and content classes
 
-Every normal or archive-supporting directory requires a `NODE.md`. Every normal node is either:
+The root requires `NODE.md`. A semantic directory represented as a node also
+contains `NODE.md`; organizational directories containing Markdown leaves need
+not. Normal nodes require a non-empty `title` and `owners` array. Optional
+`description` is non-empty prose, and optional `soft_links` contains
+tree-root-relative Markdown files or node directories.
 
-- a directory represented by its `NODE.md`; or
-- a Markdown leaf beside or beneath a directory node.
+- `normal`: root and durable domain decisions.
+- `archive-supporting`: evidence beneath `raw-context/`.
+- `member`: ownership and routing beneath `members/`.
+- `repo-infra`: dot paths, generated output, instructions, build, and CI files.
 
-Normal nodes require:
+Normal content must not depend on archive-supporting content. Symlinks fail
+closed: they may not escape the tree, cross content-class boundaries, or stand
+in for domain directories. Reads default to normal content. Glob patterns are
+case-sensitive and segment-local.
 
-```yaml
----
-title: "Short noun phrase"
-owners: [alice]
----
-```
+`members/NODE.md` is the member index. Every direct member directory requires a
+`NODE.md` with title, owners, type (`human` or `agent`), role, and domains.
 
-`description` is an optional non-empty string. `soft_links` is an optional non-empty string array containing tree-root-relative Markdown files or node directories.
+## Public contracts
 
-## Content classes
+CLI JSON uses `schemaVersion: 1`. Exported strict Zod schemas are the source of
+truth for library and CLI wire contracts. Unknown output properties are
+rejected. Successful command results and runtime or argument failures emit one
+JSON object on stdout; help and version output remain plain text. An invalid
+`verify` report is still emitted and the command exits with status 1.
 
-- `normal`: root and domain decisions.
-- `archive-supporting`: material beneath `raw-context/`.
-- `member`: material beneath `members/`.
-- `repo-infra`: dot paths, generated output, agent instruction files, and build or CI configuration.
+`policy` returns `content` and `schemaVersion`. `read` returns the root, target,
+schema version, and selected entries. `verify` returns the root, schema version,
+validity, findings, and content-class counts. None includes a tree digest or
+per-entry digest. The Git commit SHA is recorded by the surrounding host Git
+workflow rather than computed by the core.
 
-Normal content must not depend on archive/supporting content. Symlinks may not escape the tree, cross content-class boundaries, or represent domain directories.
+## Lifecycle
 
-## Members
+Scaffolding always creates a validation workflow pinned to the package version
+that generated it. New repositories always initialize and publish `main`,
+regardless of the user's Git configuration; the generated workflow filters
+pushes to `main`. Hosted reads require an explicit `OWNER/REPO` and branch, a
+clean matching checkout, fast-forward refresh, validation, and a reported
+commit SHA. Explicitly authorized stale reads are labeled and remain read-only.
 
-`members/NODE.md` is the member index. Each direct member directory requires a `NODE.md` with a non-empty title, owners, type (`human` or `agent`), role, and domains.
-
-## Versioning
-
-Public CLI JSON uses `schemaVersion: 1`. Additive fields may be introduced within version 1. Removing fields, changing meanings, or accepting incompatible tree shapes requires a new schema version and migration guidance.
+Every write starts in an isolated worktree at a freshly fetched base commit.
+The base and final tree must validate; all edits are direct, necessary Markdown
+changes; the full diff is reviewed; publication uses a non-force task-branch
+push and GitHub PR. An invalid base permits only an explicitly requested,
+validator-scoped repair PR. No workflow merges automatically.

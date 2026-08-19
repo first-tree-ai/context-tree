@@ -15,13 +15,24 @@ jobs:
           version: 10.12.1
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.13.0
+          node-version: 22.20.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm build
       - run: node dist/cli/index.mjs verify --tree-path examples/basic
-      - run: pnpm validate:skills
+      - run: pnpm check:package
       - run: npm pack --dry-run
+
+  skill-discovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Discover bundled skills with the pinned Agent Skills CLI
+        env:
+          DO_NOT_TRACK: "1"
+        run: npx --yes skills@1.5.19 add . --list

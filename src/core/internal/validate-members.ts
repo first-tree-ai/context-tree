@@ -3,12 +3,7 @@ import { join } from "node:path";
 
 import { toTreeRelativePosixPath } from "./content-class.js";
 import { readContextDocument, readNonEmptyStringArrayField, readNonEmptyStringField } from "./context-document.js";
-import {
-  formatValidationFinding,
-  type TreeValidationFinding,
-  VALIDATION_CODES,
-  type ValidationCode,
-} from "./validation-finding.js";
+import { type TreeValidationFinding, VALIDATION_CODES, type ValidationCode } from "./validation-finding.js";
 
 const VALID_TYPES = new Set(["human", "agent"]);
 const VALID_STATUSES = new Set(["invited"]);
@@ -185,37 +180,4 @@ export function collectMemberValidationFindings(treeRoot: string): MemberValidat
   }
 
   return { findings };
-}
-
-export function formatLegacyMemberError(finding: TreeValidationFinding): string {
-  switch (finding.code) {
-    case VALIDATION_CODES.memberFrontmatterMissing:
-      return `${finding.path}: no frontmatter found`;
-    case VALIDATION_CODES.memberTitleInvalid:
-      return `${finding.path}: missing or empty 'title' field`;
-    case VALIDATION_CODES.memberOwnersMissing:
-      return `${finding.path}: missing 'owners' field`;
-    case VALIDATION_CODES.memberTypeMissing:
-      return `${finding.path}: missing 'type' field`;
-    case VALIDATION_CODES.memberTypeInvalid:
-    case VALIDATION_CODES.memberStatusInvalid:
-      return `${finding.path}: ${finding.message}`;
-    case VALIDATION_CODES.memberRoleInvalid:
-      return `${finding.path}: missing or empty 'role' field`;
-    case VALIDATION_CODES.memberDomainsInvalid:
-      return `${finding.path}: ${finding.message}`;
-    case VALIDATION_CODES.membersDirectoryMissing:
-      return finding.message;
-    case VALIDATION_CODES.memberNodeMissing:
-      return `${finding.path}: directory exists but missing NODE.md`;
-    case VALIDATION_CODES.memberNodesEmpty:
-      return "members/: no member nodes were found";
-    default:
-      return formatValidationFinding(finding);
-  }
-}
-
-export function runValidateMembers(treeRoot: string): { errors: string[]; exitCode: number } {
-  const errors = collectMemberValidationFindings(treeRoot).findings.map(formatLegacyMemberError);
-  return { errors, exitCode: errors.length === 0 ? 0 : 1 };
 }

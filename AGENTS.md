@@ -1,12 +1,10 @@
 # AGENTS.md
 
-This repository publishes `@first-tree-ai/context-tree`, the portable Context Tree core, CLI, policy, templates, and generic skills.
+This repository publishes `@first-tree-ai/context-tree`, the portable Context Tree core, CLI, policy, templates, and framework-neutral skills.
 
 ## Boundaries
 
-- Keep the package local-first and deterministic. Core and CLI commands must not perform network requests or manage credentials.
-- Do not add First Tree Team authorization, Cloud bindings, chat, telemetry, managed workspace state, or reviewer dispatch.
-- Host Git and forge tools own private-repository authentication.
+- Host Git and GitHub CLI tools own private-repository authentication.
 - Zod schemas are the source of truth for public wire contracts.
 - Use `unknown` plus narrowing; avoid `any`, enums, and unjustified type assertions.
 - Keep public functions explicitly typed and use `import type`.
@@ -23,6 +21,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm validate:skills
+pnpm check:package
 npm pack --dry-run
 ```
 

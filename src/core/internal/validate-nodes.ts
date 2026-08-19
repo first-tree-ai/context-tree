@@ -10,12 +10,7 @@ import {
   readNonEmptyStringField,
 } from "./context-document.js";
 import { readMarkdownLinkTargets, resolveLocalTreeTarget } from "./context-links.js";
-import {
-  formatValidationFinding,
-  type TreeValidationFinding,
-  VALIDATION_CODES,
-  type ValidationCode,
-} from "./validation-finding.js";
+import { type TreeValidationFinding, VALIDATION_CODES, type ValidationCode } from "./validation-finding.js";
 
 const MEMBERS_INDEX_PATH = "members/NODE.md";
 
@@ -277,24 +272,4 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
   }
 
   return { findings, scannedByContentClass };
-}
-
-export function formatLegacyNodeError(finding: TreeValidationFinding): string {
-  switch (finding.code) {
-    case VALIDATION_CODES.frontmatterMissing:
-      return `${finding.path}: missing frontmatter`;
-    case VALIDATION_CODES.titleMissing:
-      return `${finding.path}: missing 'title' field in frontmatter`;
-    case VALIDATION_CODES.ownersMissing:
-      return `${finding.path}: missing 'owners' field in frontmatter`;
-    case VALIDATION_CODES.softLinkBroken:
-      return `${finding.path}: broken soft_links target '${finding.target ?? ""}'`;
-    default:
-      return formatValidationFinding(finding);
-  }
-}
-
-export function runValidateNodes(treeRoot: string): { errors: string[]; exitCode: number } {
-  const errors = collectNodeValidationFindings(treeRoot).findings.map(formatLegacyNodeError);
-  return { errors, exitCode: errors.length === 0 ? 0 : 1 };
 }

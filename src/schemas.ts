@@ -1,10 +1,55 @@
-import { parse } from "yaml";
 import { z } from "zod";
+
+import { parseMarkdownFrontmatter } from "./internal/frontmatter.js";
 
 export const SCHEMA_VERSION = 1 as const;
 export const CONTEXT_TREE_SCOPE_MAX_BYTES = 16 * 1024;
 
-const SHA256_RE = /^[a-f\d]{64}$/u;
+export const VALIDATION_CODES = {
+  rootMissing: "TREE_ROOT_MISSING",
+  directoryNodeMissing: "TREE_DIRECTORY_NODE_MISSING",
+  scopeInvalid: "TREE_SCOPE_INVALID",
+  frontmatterMissing: "TREE_FRONTMATTER_MISSING",
+  frontmatterParse: "TREE_FRONTMATTER_PARSE",
+  titleMissing: "TREE_TITLE_MISSING",
+  titleInvalid: "TREE_TITLE_INVALID",
+  ownersMissing: "TREE_OWNERS_MISSING",
+  ownersInvalid: "TREE_OWNERS_INVALID",
+  descriptionInvalid: "TREE_DESCRIPTION_INVALID",
+  softLinksInvalid: "TREE_SOFT_LINKS_INVALID",
+  softLinkBroken: "TREE_SOFT_LINK_BROKEN",
+  softLinkPathEscape: "TREE_SOFT_LINK_PATH_ESCAPE",
+  softLinkArchiveDependency: "TREE_SOFT_LINK_ARCHIVE_DEPENDENCY",
+  markdownPathEscape: "TREE_MARKDOWN_LINK_PATH_ESCAPE",
+  markdownArchiveDependency: "TREE_MARKDOWN_LINK_ARCHIVE_DEPENDENCY",
+  markdownFileSymlinkBroken: "TREE_MARKDOWN_FILE_SYMLINK_BROKEN",
+  markdownFileSymlinkUnsupported: "TREE_MARKDOWN_FILE_SYMLINK_UNSUPPORTED",
+  markdownFilePathEscape: "TREE_MARKDOWN_FILE_PATH_ESCAPE",
+  markdownFileContentClassMismatch: "TREE_MARKDOWN_FILE_CONTENT_CLASS_MISMATCH",
+  directorySymlinkUnsupported: "TREE_DIRECTORY_SYMLINK_UNSUPPORTED",
+  directorySymlinkPathEscape: "TREE_DIRECTORY_SYMLINK_PATH_ESCAPE",
+  memberFrontmatterMissing: "TREE_MEMBER_FRONTMATTER_MISSING",
+  memberFrontmatterParse: "TREE_MEMBER_FRONTMATTER_PARSE",
+  memberTitleInvalid: "TREE_MEMBER_TITLE_INVALID",
+  memberOwnersMissing: "TREE_MEMBER_OWNERS_MISSING",
+  memberOwnersInvalid: "TREE_MEMBER_OWNERS_INVALID",
+  memberTypeMissing: "TREE_MEMBER_TYPE_MISSING",
+  memberTypeInvalid: "TREE_MEMBER_TYPE_INVALID",
+  memberTypeShape: "TREE_MEMBER_TYPE_SHAPE",
+  memberStatusInvalid: "TREE_MEMBER_STATUS_INVALID",
+  memberStatusShape: "TREE_MEMBER_STATUS_SHAPE",
+  memberRoleInvalid: "TREE_MEMBER_ROLE_INVALID",
+  memberRoleShape: "TREE_MEMBER_ROLE_SHAPE",
+  memberDomainsInvalid: "TREE_MEMBER_DOMAINS_INVALID",
+  memberDomainsShape: "TREE_MEMBER_DOMAINS_SHAPE",
+  membersDirectoryMissing: "TREE_MEMBERS_DIRECTORY_MISSING",
+  memberNodeMissing: "TREE_MEMBER_NODE_MISSING",
+  memberNodesEmpty: "TREE_MEMBER_NODES_EMPTY",
+} as const;
+
+export const CLI_ERROR_CODES = {
+  failed: "CONTEXT_TREE_FAILED",
+} as const;
 
 function hasUnsafeCharacter(value: string): boolean {
   return [...value].some((character) => {
@@ -27,18 +72,18 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   try {
     const parsed = new URL(value);
     if (
-      (parsed.protocol !== "https:" && parsed.protocol !== "ssh:") ||
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:" && parsed.protocol !== "ssh:") ||
       !parsed.hostname ||
       parsed.pathname.split("/").every((part) => part.length === 0) ||
       parsed.password ||
-      (parsed.protocol === "https:" && parsed.username)
+      ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username)
     ) {
       throw new Error("invalid transport");
     }
   } catch {
     context.addIssue({
       code: "custom",
-      message: "Repository URLs must use credential-free HTTPS, ssh://, or scp-like SSH syntax.",
+      message: "Repository URLs must use credential-free HTTP(S), ssh://, or scp-like SSH syntax.",
     });
   }
 });
@@ -46,7 +91,7 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
 export const contextTreeScopeFrontmatterSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
-    relatedRepositories: z.array(credentialFreeRepositoryUrlSchema).max(100).optional(),
+    relatedRepositories: z.array(credentialFreeRepositoryUrlSchema).max(64).optional(),
   })
   .strict();
 
@@ -61,58 +106,111 @@ export function parseContextTreeScope(markdown: string): ContextTreeScope {
   if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_SCOPE_MAX_BYTES) {
     throw new Error(`SCOPE.md exceeds the ${CONTEXT_TREE_SCOPE_MAX_BYTES}-byte limit.`);
   }
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u.exec(markdown);
-  if (!match?.[1]) throw new Error("SCOPE.md must contain YAML frontmatter.");
-  let frontmatter: unknown;
-  try {
-    frontmatter = parse(match[1]);
-  } catch (error) {
-    throw new Error(`SCOPE.md frontmatter is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  const document = parseMarkdownFrontmatter(markdown, { strictDelimiters: true });
+  if (document.frontmatter === "missing") {
+    throw new Error("SCOPE.md must contain YAML frontmatter.");
   }
-  return contextTreeScopeSchema.parse({ frontmatter, body: match[2] ?? "" });
+  if (document.frontmatter === "invalid" || document.data === null) {
+    throw new Error(`SCOPE.md frontmatter is invalid${document.error === undefined ? "." : `: ${document.error}`}`);
+  }
+  return contextTreeScopeSchema.parse({ frontmatter: document.data, body: document.body });
 }
 
 export const contextContentClassSchema = z.enum(["normal", "archive-supporting", "member", "repo-infra"]);
 export type ContextContentClass = z.infer<typeof contextContentClassSchema>;
 
-const writePathSchema = z
-  .string()
-  .min(1)
-  .refine((value) => value.trim() === value, "Paths must not have surrounding whitespace.")
-  .refine((value) => !hasUnsafeCharacter(value), "Paths must not contain control characters.")
-  .refine((value) => !value.includes("\\"), "Paths must use POSIX separators.")
-  .refine((value) => !value.startsWith("/") && !value.split("/").includes(".."), "Paths must remain inside the tree.")
-  .refine((value) => value.endsWith(".md"), "Context Tree write operations may target only Markdown files.");
+export const validationCodeSchema = z.enum(VALIDATION_CODES);
+export type ValidationCode = z.infer<typeof validationCodeSchema>;
 
-export const contextTreeWriteOperationSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("create"), path: writePathSchema, content: z.string() }).strict(),
-  z
-    .object({
-      op: z.literal("replace"),
-      path: writePathSchema,
-      expectedSha256: z.string().regex(SHA256_RE),
-      content: z.string(),
-    })
-    .strict(),
-  z.object({ op: z.literal("delete"), path: writePathSchema, expectedSha256: z.string().regex(SHA256_RE) }).strict(),
-]);
-
-export const contextTreeWritePlanSchema = z
+export const treeValidationFindingSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
-    expectedTreeDigest: z.string().regex(SHA256_RE),
-    operations: z.array(contextTreeWriteOperationSchema).min(1).max(100),
+    code: validationCodeSchema,
+    message: z.string(),
+    path: z.string(),
+    target: z.string().optional(),
   })
-  .strict()
-  .superRefine((value, context) => {
-    const paths = new Set<string>();
-    for (const operation of value.operations) {
-      if (paths.has(operation.path)) {
-        context.addIssue({ code: "custom", message: `Duplicate write target: ${operation.path}` });
-      }
-      paths.add(operation.path);
-    }
-  });
+  .strict();
+export type TreeValidationFinding = z.infer<typeof treeValidationFindingSchema>;
 
-export type ContextTreeWriteOperation = z.infer<typeof contextTreeWriteOperationSchema>;
-export type ContextTreeWritePlan = z.infer<typeof contextTreeWritePlanSchema>;
+export const contextContentClassCountsSchema = z
+  .object({
+    normal: z.number().int().nonnegative(),
+    "archive-supporting": z.number().int().nonnegative(),
+    member: z.number().int().nonnegative(),
+    "repo-infra": z.number().int().nonnegative(),
+  })
+  .strict();
+export type ContextContentClassCounts = z.infer<typeof contextContentClassCountsSchema>;
+
+export const contextTreePolicySchema = z
+  .object({
+    content: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+  })
+  .strict();
+export type ContextTreePolicy = z.infer<typeof contextTreePolicySchema>;
+
+export const contextTreeReadEntrySchema = z
+  .object({
+    content: z.string().optional(),
+    contentClass: contextContentClassSchema,
+    depth: z.number().int().nonnegative(),
+    description: z.string().optional(),
+    kind: z.enum(["directory", "file"]),
+    owners: z.array(z.string()),
+    path: z.string(),
+    title: z.string(),
+  })
+  .strict();
+export type ContextTreeReadEntry = z.infer<typeof contextTreeReadEntrySchema>;
+
+export const contextTreeReadResultSchema = z
+  .object({
+    entries: z.array(contextTreeReadEntrySchema),
+    root: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    target: z.string(),
+  })
+  .strict();
+export type ContextTreeReadResult = z.infer<typeof contextTreeReadResultSchema>;
+
+export const verifyTreeReportSchema = z
+  .object({
+    findings: z.array(treeValidationFindingSchema),
+    ok: z.boolean(),
+    root: z.string(),
+    scannedByContentClass: contextContentClassCountsSchema,
+    schemaVersion: z.literal(SCHEMA_VERSION),
+  })
+  .strict();
+export type VerifyTreeReport = z.infer<typeof verifyTreeReportSchema>;
+
+export const scaffoldTreeResultSchema = z
+  .object({
+    files: z.array(z.string()),
+    root: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    verification: verifyTreeReportSchema,
+  })
+  .strict();
+export type ScaffoldTreeResult = z.infer<typeof scaffoldTreeResultSchema>;
+
+export const contextTreeCliErrorCodeSchema = z.enum(CLI_ERROR_CODES);
+export type ContextTreeCliErrorCode = z.infer<typeof contextTreeCliErrorCodeSchema>;
+
+export const contextTreeCliErrorSchema = z
+  .object({
+    code: contextTreeCliErrorCodeSchema,
+    message: z.string(),
+  })
+  .strict();
+export type ContextTreeCliError = z.infer<typeof contextTreeCliErrorSchema>;
+
+export const contextTreeCliErrorEnvelopeSchema = z
+  .object({
+    error: contextTreeCliErrorSchema,
+    ok: z.literal(false),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+  })
+  .strict();
+export type ContextTreeCliErrorEnvelope = z.infer<typeof contextTreeCliErrorEnvelopeSchema>;

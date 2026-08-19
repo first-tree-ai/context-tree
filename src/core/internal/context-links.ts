@@ -1,10 +1,12 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, posix, relative, resolve } from "node:path";
+import { posix, relative, resolve } from "node:path";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 
-import { type ContextContentClass, classifyContextContent } from "./content-class.js";
-import { isRecord } from "./shared.js";
+import { isRecord } from "../../internal/value.js";
+import type { ContextContentClass } from "../../schemas.js";
+import { isPathInside } from "../path.js";
+import { classifyContextContent } from "./content-class.js";
 
 export type LocalTreeTarget = {
   contentClass: ContextContentClass;
@@ -41,11 +43,6 @@ export function isTreeLocalTarget(target: string): boolean {
   return (
     trimmed.length > 0 && !trimmed.startsWith("#") && !trimmed.startsWith("//") && !/^[a-z][a-z\d+.-]*:/iu.test(trimmed)
   );
-}
-
-function pathIsInside(root: string, target: string): boolean {
-  const relativePath = relative(root, target);
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 function targetExists(path: string, softLink: boolean): boolean {
@@ -93,7 +90,7 @@ export function resolveLocalTreeTarget(options: {
   );
   const absoluteRoot = resolve(options.treeRoot);
   const absoluteTarget = resolve(absoluteRoot, relativePath);
-  const lexicalEscape = !pathIsInside(absoluteRoot, absoluteTarget);
+  const lexicalEscape = !isPathInside(absoluteRoot, absoluteTarget);
   let contentClass = classifyContextContent(relativePath);
 
   if (lexicalEscape) {
@@ -108,7 +105,7 @@ export function resolveLocalTreeTarget(options: {
   try {
     const realRoot = realpathSync(absoluteRoot);
     const realTarget = realpathSync(absoluteTarget);
-    if (!pathIsInside(realRoot, realTarget)) {
+    if (!isPathInside(realRoot, realTarget)) {
       return { contentClass, escaped: true, exists: true, relativePath };
     }
     contentClass = classifyContextContent(relative(realRoot, realTarget).replace(/\\/gu, "/"));

@@ -1,10 +1,11 @@
 import type { Dirent } from "node:fs";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { join, relative } from "node:path";
 
-export type ContextContentClass = "normal" | "archive-supporting" | "member" | "repo-infra";
+import type { ContextContentClass, ContextContentClassCounts } from "../../schemas.js";
+import { isPathInside } from "../path.js";
 
-export type ContextContentClassCounts = Record<ContextContentClass, number>;
+export type { ContextContentClassCounts } from "../../schemas.js";
 
 export type ContextMarkdownFile = {
   absolutePath: string;
@@ -70,17 +71,22 @@ export function emptyContentClassCounts(): ContextContentClassCounts {
   };
 }
 
+export function isSafeCanonicalMarkdown(file: ContextMarkdownFile): boolean {
+  return (
+    file.contentClass !== "repo-infra" &&
+    !file.escaped &&
+    !file.unresolved &&
+    !file.unsupported &&
+    file.canonicalContentClass === file.contentClass
+  );
+}
+
 function readDirectoryEntries(path: string): Dirent[] {
   try {
     return readdirSync(path, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
   } catch {
     return [];
   }
-}
-
-function pathIsInside(root: string, target: string): boolean {
-  const relativePath = relative(root, target);
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 export function inspectRepoInfraMarkdownFile(treeRoot: string, relativePath: string): RepoInfraMarkdownInspection {
@@ -100,7 +106,7 @@ export function inspectRepoInfraMarkdownFile(treeRoot: string, relativePath: str
       }
       const realTreeRoot = realpathSync(treeRoot);
       const realTarget = realpathSync(absolutePath);
-      if (!pathIsInside(realTreeRoot, realTarget)) {
+      if (!isPathInside(realTreeRoot, realTarget)) {
         return { kind: "invalid" };
       }
       const canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
@@ -147,7 +153,7 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
             if (contentClass !== "repo-infra" || entry.name.endsWith(".md")) {
               directorySymlinks.push({
                 contentClass,
-                escaped: !pathIsInside(realTreeRoot, realpathSync(absolutePath)),
+                escaped: !isPathInside(realTreeRoot, realpathSync(absolutePath)),
                 relativePath,
               });
             }
@@ -160,7 +166,7 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
             let canonicalRelativePath = relativePath;
             try {
               const realTarget = realpathSync(absolutePath);
-              escaped = !pathIsInside(realTreeRoot, realTarget);
+              escaped = !isPathInside(realTreeRoot, realTarget);
               canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
               if (!escaped) {
                 canonicalContentClass = classifyContextContent(canonicalRelativePath);
@@ -233,7 +239,7 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
       if (symbolicLink) {
         try {
           const realTarget = realpathSync(absolutePath);
-          escaped = !pathIsInside(realTreeRoot, realTarget);
+          escaped = !isPathInside(realTreeRoot, realTarget);
           canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
           if (!escaped) {
             canonicalContentClass = classifyContextContent(canonicalRelativePath);

@@ -6,11 +6,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/agent-team-foundation/context-tree.git"
+    "url": "git+https://github.com/first-tree-ai/context-tree.git"
   },
-  "homepage": "https://github.com/agent-team-foundation/context-tree#readme",
+  "homepage": "https://github.com/first-tree-ai/context-tree#readme",
   "bugs": {
-    "url": "https://github.com/agent-team-foundation/context-tree/issues"
+    "url": "https://github.com/first-tree-ai/context-tree/issues"
   },
   "keywords": [
     "agents",
@@ -37,10 +37,6 @@
     "./schemas": {
       "types": "./dist/schemas.d.mts",
       "import": "./dist/schemas.mjs"
-    },
-    "./cli": {
-      "types": "./dist/cli/api.d.mts",
-      "import": "./dist/cli/api.mjs"
     }
   },
   "files": [
@@ -54,16 +50,18 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown src/index.ts src/schemas.ts src/cli/api.ts src/cli/index.ts --format esm --dts",
+    "build": "tsdown src/index.ts src/schemas.ts src/cli/index.ts --format esm --dts",
     "check": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "validate:skills": "for d in skills/*; do python3 scripts/quick_validate_skill.py \"$d\" || exit 1; done",
+    "test": "pnpm build && vitest run",
+    "validate:skills": "vitest run tests/skills.test.ts",
+    "check:package": "pnpm build && publint && attw --pack . --profile esm-only",
+    "check:names": "vitest run tests/names.test.ts",
     "prepack": "pnpm build && pnpm validate:skills"
   },
   "dependencies": {
-    "commander": "^13.1.0",
+    "commander": "^15.0.0",
     "gray-matter": "^4.0.3",
     "mdast-util-from-markdown": "^2.0.3",
     "yaml": "^2.8.3",
@@ -71,7 +69,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
+    "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^22.16.0",
+    "publint": "^0.3.16",
     "tsdown": "^0.21.4",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

@@ -1,15 +1,7 @@
-import { readFileSync } from "node:fs";
+import { type ParsedMarkdownFrontmatter, parseMarkdownFrontmatter } from "../../internal/frontmatter.js";
+import { readUtf8File } from "./filesystem.js";
 
-import matter from "gray-matter";
-
-import { isRecord } from "./shared.js";
-
-export type ContextDocument = {
-  body: string;
-  data: Record<string, unknown> | null;
-  error?: string;
-  frontmatter: "invalid" | "missing" | "valid";
-};
+export type ContextDocument = ParsedMarkdownFrontmatter;
 
 export type NodeMetadata = {
   description?: string;
@@ -22,56 +14,12 @@ export type ContextField<T> =
   | { present: true; valid: false }
   | { present: true; valid: true; value: T };
 
-const FRONTMATTER_SOURCE_RE = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n|\s*$)/u;
-
-function splitFrontmatterSource(source: string): { body: string; hasFrontmatter: boolean } {
-  const match = source.match(FRONTMATTER_SOURCE_RE);
-  if (match === null) {
-    return { body: source, hasFrontmatter: false };
-  }
-
-  return {
-    body: source.slice(match[0].length),
-    hasFrontmatter: true,
-  };
-}
-
 export function readContextDocument(path: string): ContextDocument {
-  let source: string;
-
   try {
-    source = readFileSync(path, "utf-8");
+    return parseMarkdownFrontmatter(readUtf8File(path));
   } catch (error) {
     return {
       body: "",
-      data: null,
-      error: error instanceof Error ? error.message : String(error),
-      frontmatter: "invalid",
-    };
-  }
-
-  const sourceParts = splitFrontmatterSource(source);
-  if (!matter.test(source) || !sourceParts.hasFrontmatter) {
-    return { body: source, data: null, frontmatter: "missing" };
-  }
-
-  try {
-    const parsed = matter(source);
-    const data: unknown = parsed.data;
-
-    if (!isRecord(data)) {
-      return {
-        body: parsed.content,
-        data: null,
-        error: "frontmatter must be a YAML mapping",
-        frontmatter: "invalid",
-      };
-    }
-
-    return { body: parsed.content, data, frontmatter: "valid" };
-  } catch (error) {
-    return {
-      body: sourceParts.body,
       data: null,
       error: error instanceof Error ? error.message : String(error),
       frontmatter: "invalid",

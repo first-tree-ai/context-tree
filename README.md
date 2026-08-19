@@ -1,17 +1,15 @@
 # Context Tree
 
-`@first-tree-ai/context-tree` is the portable, local-first implementation of Context Tree: a Git-native format for durable decisions, constraints, ownership, and cross-domain relationships.
+`@first-tree-ai/context-tree` is the portable core for a GitHub-backed Context
+Tree: durable decisions, constraints, ownership, and cross-domain relationships
+stored as Markdown in a private GitHub repository. It ships deterministic local
+scaffolding, validation, scoped reading, the canonical policy, Zod contracts,
+and framework-neutral agent skills.
 
-It ships:
-
-- a reusable TypeScript API;
-- the `context-tree` CLI;
-- structural verification and mechanical audit evidence;
-- guarded local write plans;
-- read, write, and audit agent skills;
-- the canonical policy and scaffold templates.
-
-It does not require a First Tree account and does not contain First Tree Team authorization, Cloud bindings, chat, telemetry, or reviewer dispatch.
+The core and CLI never make network requests or manage credentials. The skills
+use the host's existing `git` and `gh` authentication only for an explicitly
+authorized GitHub `OWNER/REPO` and branch. GitHub Enterprise Server and other
+forges are unsupported.
 
 ## Install
 
@@ -20,77 +18,74 @@ pnpm add @first-tree-ai/context-tree
 pnpm exec context-tree --help
 ```
 
-For a global command:
+Or install the CLI globally:
 
 ```bash
 npm install --global @first-tree-ai/context-tree
-context-tree --help
 ```
 
-Node.js 22.13 or newer is required.
-
-## Quick start
+Bundled skills can be installed with the Agent Skills CLI:
 
 ```bash
-context-tree init --tree-path ./context-tree --title "Acme" --owner alice
+npx skills add first-tree-ai/context-tree --list
+npx skills add first-tree-ai/context-tree --skill context-tree-read
+```
+
+## CLI
+
+The CLI exposes exactly four commands: `init`, `policy`, `read`, and `verify`.
+Successful command results and runtime or argument failures emit one versioned
+JSON object on stdout. Help and version output remain plain text.
+
+```bash
+context-tree init \
+  --repository acme/context \
+  --tree-path ./context-tree \
+  --title "Acme" \
+  --owner alice
 context-tree policy
 context-tree verify --tree-path ./context-tree
 context-tree read --tree-path ./context-tree --content
-context-tree audit --tree-path ./context-tree --json
 ```
 
-The CLI is deliberately local-only. It never clones, fetches, pulls, pushes, opens a PR, or manages credentials.
+Scaffolding is create-only and always includes GitHub Actions validation pinned
+to the package version that created the tree. New repositories always start on
+`main`, independently of the user's Git configuration. The init skill verifies,
+commits, creates a private GitHub repository, and pushes `main`.
 
-## Private repositories
+Reads default to normal content. Select member, archive-supporting, or all
+classes only when needed. The read skill clones or fast-forward refreshes an
+explicit checkout, requires it to be clean, and reports the exact Git commit
+SHA. If GitHub is unavailable, a stale read requires explicit authorization and
+is clearly labeled; stale state can never become the base for a write.
 
-Clone or fetch a private tree with ordinary host Git authentication, then point the CLI at the checkout:
+Writes are normal file edits performed by the write skill, not a CLI command.
+Every write requires a concrete source artifact, freshly fetches the explicit
+base branch, creates an isolated worktree at its exact commit, verifies the base,
+edits only necessary Markdown, verifies again, inspects the complete diff,
+commits, non-force pushes, and opens a GitHub PR. The skill never merges. An
+invalid base blocks semantic changes; an explicit repair request may produce a
+repair-only PR limited to validator findings.
 
-```bash
-git clone git@github.com:acme/context-tree.git
-context-tree verify --tree-path ./context-tree
-```
-
-HTTPS uses the configured Git credential helper. SSH uses the configured SSH agent, keys, and `~/.ssh/config`. Agent-run network operations should set `GIT_TERMINAL_PROMPT=0` so missing access fails rather than opening a prompt.
-
-Never put tokens in repository URLs, write plans, tree content, or logs. Forge API authentication through `gh` or `glab` is separate from Git transport authentication.
-
-## Guarded writes
-
-`context-tree write` accepts an explicit JSON plan:
-
-```json
-{
-  "schemaVersion": 1,
-  "expectedTreeDigest": "<digest from read or audit>",
-  "operations": [
-    {
-      "op": "replace",
-      "path": "systems/runtime.md",
-      "expectedSha256": "<file digest from read>",
-      "content": "---\ntitle: \"Runtime\"\nowners: [alice]\n---\n\n# Runtime\n"
-    }
-  ]
-}
-```
-
-Dry-run first:
-
-```bash
-context-tree write --tree-path ./context-tree --plan ./plan.json --dry-run
-context-tree write --tree-path ./context-tree --plan ./plan.json
-```
-
-The complete prospective tree must verify before live files change. The command performs no Git commit or remote operation.
-
-## Library
+## Library integration
 
 ```ts
-import { auditTree, readContextTreePolicy, readTree, verifyTree } from "@first-tree-ai/context-tree";
+import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "@first-tree-ai/context-tree";
+import { contextTreeReadResultSchema, verifyTreeReportSchema } from "@first-tree-ai/context-tree/schemas";
 
-const policy = readContextTreePolicy();
+scaffoldTree({
+  owner: "alice",
+  path: "./context-tree",
+  repository: "acme/context",
+  title: "Acme",
+});
 const verification = verifyTree("./context-tree");
 const relevant = readTree("./context-tree", { path: "systems", content: true });
-const evidence = auditTree("./context-tree");
+
+verifyTreeReportSchema.parse(verification);
+contextTreeReadResultSchema.parse(relevant);
 ```
 
-See [the format specification](docs/specification.md) and [integration guide](docs/integration.md).
+Git commit SHAs identify shared snapshots. Read entries, read results,
+verification reports, and policy results intentionally contain no hashes or
+digest fields. See [the format specification](docs/specification.md).

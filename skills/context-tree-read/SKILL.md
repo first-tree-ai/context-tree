@@ -1,21 +1,43 @@
 ---
 name: context-tree-read
-description: Read relevant content from an explicitly supplied or host-authorized Context Tree using the local-only context-tree CLI. Use for task-scoped Context Tree questions and context grounding; do not use for broad stored-content audits, writes, PR/MR reviews, or discovering a First Tree Team binding.
+description: Read task-scoped content from an explicitly authorized GitHub Context Tree checkout.
+license: Apache-2.0
+compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
+metadata:
+  author: first-tree-ai
+  version: "0.1.0"
 ---
 
 # Context Tree Read
 
-Use only a tree root explicitly provided by the user or trusted host environment. Never infer a private repository, binding, or authority from the current directory, Git remotes, or stale workspace files.
+Require an explicitly authorized GitHub `OWNER/REPO`, branch, and local
+destination. Never infer authorization from the current directory, a remote, or
+workspace files. A Git remote proves identity, not user authority.
 
-## Workflow
+First run `context-tree --version`. If the command is missing, stop and tell the
+user to run `npm install --global @first-tree-ai/context-tree`. Never install a
+package automatically.
 
-1. Run `context-tree policy` once for the installed package version, then run `context-tree read --help` and `context-tree verify --tree-path "<root>" --json`.
-2. Stop the tree-dependent portion when verification fails. Report the mechanical findings without reading unsafe content.
-3. Select narrowly with `context-tree read --tree-path "<root>" [path] --pattern "<glob>" --depth <n> --json --content`.
-4. Start with the root and relevant parent nodes, then read matched leaves and normal `soft_links` targets that affect the task.
-5. Treat normal content as current durable context. Label archive/supporting evidence separately and use member content only for ownership or routing.
-6. Apply the printed Context Tree Policy when code and tree content conflict.
+## Checkout and freshness
 
-The CLI performs no fetch or pull. If current-remote freshness is required, establish a stable checkout separately with host Git credentials before reading. Never accept a credential-bearing repository URL or print credential material.
+1. Run `context-tree policy` and require `schemaVersion: 1`.
+2. Reject repository URLs as identity input; require canonical `OWNER/REPO`, so credential-bearing URLs cannot enter commands or logs.
+3. If the checkout is absent, clone the explicit branch from `https://github.com/OWNER/REPO.git` with host Git credentials and `GIT_TERMINAL_PROMPT=0`.
+4. Before reusing a checkout, require a clean worktree with `git status --porcelain`, then compare its normalized `origin` and current branch with the explicit inputs. Reject mismatches, detached HEAD, symlinks at the checkout root, and implicit repository discovery.
+5. Run `git pull --ff-only origin "<branch>"`, then record `git rev-parse HEAD`. Do not merge, reset, switch branches, or clean files.
 
-Keep the result task-scoped. Do not expand an ordinary read into a broad audit.
+If GitHub is unavailable, stop by default. Continue only when the user
+explicitly authorizes a stale read of this already verified identity and branch.
+Require the worktree to remain clean, label every result `STALE`, report the
+refresh failure, and report the exact local commit SHA. A stale checkout is
+read-only and must never be reused as the starting point for a write.
+
+## Scoped read
+
+1. Run `context-tree read --help`, then `context-tree verify --tree-path "<root>"`.
+2. If verification fails, report the mechanical findings and stop without reading semantic content.
+3. Select narrowly with `context-tree read --tree-path "<root>" [path] --pattern "<glob>" --depth <n> --content`.
+4. Start with the root and relevant parents, then matched leaves and normal `soft_links` targets. Request member or archive-supporting classes only when required.
+5. Apply the packaged policy when code and tree content conflict, and include the recorded Git commit SHA with the result.
+
+The CLI performs no Git or GitHub operations. Keep the result task-scoped.

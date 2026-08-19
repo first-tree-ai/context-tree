@@ -1,21 +1,14 @@
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
-import { parseContextTreeScope } from "../schemas.js";
-import type { ContextContentClassCounts } from "./internal/content-class.js";
-import { classifyContextContent } from "./internal/content-class.js";
+import { parseContextTreeScope, SCHEMA_VERSION, type VerifyTreeReport } from "../schemas.js";
+import { readUtf8File } from "./internal/filesystem.js";
 import { collectMemberValidationFindings } from "./internal/validate-members.js";
 import { collectNodeValidationFindings } from "./internal/validate-nodes.js";
 import { type TreeValidationFinding, VALIDATION_CODES } from "./internal/validation-finding.js";
 import { resolveTreeRoot } from "./path.js";
 
-export type VerifyTreeReport = {
-  findings: TreeValidationFinding[];
-  ok: boolean;
-  root: string;
-  scannedByContentClass: ContextContentClassCounts;
-  schemaVersion: 1;
-};
+export type { VerifyTreeReport } from "../schemas.js";
 
 function scopeFindings(root: string): TreeValidationFinding[] {
   const path = join(root, "SCOPE.md");
@@ -25,7 +18,7 @@ function scopeFindings(root: string): TreeValidationFinding[] {
     if (entry.isSymbolicLink() || !entry.isFile()) {
       throw new Error("SCOPE.md must be a regular root file and must not be a symlink.");
     }
-    parseContextTreeScope(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path)));
+    parseContextTreeScope(readUtf8File(path));
     return [];
   } catch (error) {
     return [
@@ -48,38 +41,6 @@ function deduplicate(findings: TreeValidationFinding[]): TreeValidationFinding[]
   });
 }
 
-function directoryNodeFindings(root: string): TreeValidationFinding[] {
-  const findings: TreeValidationFinding[] = [];
-
-  function walk(directory: string, relativeDirectory: string): void {
-    const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
-      left.name.localeCompare(right.name),
-    );
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
-      const contentClass = classifyContextContent(relativePath);
-      if (contentClass === "repo-infra") continue;
-
-      const absolutePath = join(directory, entry.name);
-      if (
-        (contentClass === "normal" || contentClass === "archive-supporting") &&
-        !existsSync(join(absolutePath, "NODE.md"))
-      ) {
-        findings.push({
-          code: VALIDATION_CODES.directoryNodeMissing,
-          message: "directory exists but is missing NODE.md",
-          path: `${relativePath}/NODE.md`,
-        });
-      }
-      walk(absolutePath, relativePath);
-    }
-  }
-
-  walk(root, "");
-  return findings;
-}
-
 export function verifyTree(treePath: string): VerifyTreeReport {
   const root = resolveTreeRoot(treePath);
   const nodeResult = collectNodeValidationFindings(root);
@@ -91,7 +52,6 @@ export function verifyTree(treePath: string): VerifyTreeReport {
   const findings = deduplicate([
     ...rootFinding,
     ...scopeFindings(root),
-    ...directoryNodeFindings(root),
     ...nodeResult.findings,
     ...memberResult.findings,
   ]);
@@ -101,6 +61,6 @@ export function verifyTree(treePath: string): VerifyTreeReport {
     ok: findings.length === 0,
     root,
     scannedByContentClass: nodeResult.scannedByContentClass,
-    schemaVersion: 1,
+    schemaVersion: SCHEMA_VERSION,
   };
 }
