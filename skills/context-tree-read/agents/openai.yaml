@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Read"
+  short_description: "Read relevant Context Tree decisions safely"
+  default_prompt: "Use $context-tree-read to read the relevant decisions from this explicitly supplied Context Tree."
