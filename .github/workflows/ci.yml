@@ -4,6 +4,17 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+
+env:
+  NPM_PACKAGE_NAME: '@first-tree-ai/context-tree'
+  PNPM_VERSION: '10.12.1'
+  NODE_VERSION: '22.20.0'
+  # npm trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.x.
+  TRUSTED_PUBLISHING_NPM_VERSION: '11.5.1'
 
 jobs:
   test:
@@ -36,3 +47,171 @@ jobs:
         env:
           DO_NOT_TRACK: "1"
         run: npx --yes skills@1.5.19 add . --list
+
+  # Every push to main publishes a staging build under the `staging` dist-tag.
+  # `npm i @first-tree-ai/context-tree@staging` therefore always resolves to the
+  # newest build of main, and never to something older than the last stable.
+  publish-staging:
+    name: Publish staging package
+    needs: [test, skill-discovery]
+    if: >-
+      github.repository == 'first-tree-ai/context-tree'
+      && github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for npm trusted publishing: lets the job mint an OIDC token
+      # that npm exchanges for short-lived publish credentials. No NPM_TOKEN.
+      id-token: write
+    concurrency:
+      # Queue staging publishes instead of cancelling: a cancelled run could be
+      # interrupted mid-publish.
+      group: npm-publish-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Use trusted-publishing npm client
+        run: npm install --global "npm@${TRUSTED_PUBLISHING_NPM_VERSION}"
+
+      # devDependencies must stay installed: `npm publish` re-runs the `prepack`
+      # script (`pnpm build && pnpm validate:skills`) against this tree.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve staging version
+        id: resolve
+        run: |
+          set -euo pipefail
+          BASE="$(node -p "require('./package.json').version.split('-')[0]")"
+          IFS='.' read -r MAJOR MINOR PATCH <<<"$BASE"
+          # Bump the patch BEFORE attaching the prerelease suffix. SemVer ranks
+          # `X.Y.Z-alpha.N` *below* `X.Y.Z`, so reusing the current base would
+          # publish staging builds that sort older than the last stable release.
+          VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-alpha.$(date -u +%Y%m%d%H%M)"
+          echo "version=${VERSION}" >>"$GITHUB_OUTPUT"
+          echo "Base ${BASE} -> staging ${VERSION}"
+
+      - name: Check registry for an existing publish
+        id: guard
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -uo pipefail
+          OUTPUT="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version 2>&1)"; STATUS=$?
+          if [ "$STATUS" -eq 0 ] && [ -n "$OUTPUT" ]; then
+            echo "::warning::${NPM_PACKAGE_NAME}@${VERSION} is already published; skipping."
+            echo "publish=false" >>"$GITHUB_OUTPUT"
+          elif printf '%s' "$OUTPUT" | grep -q 'E404'; then
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::Unexpected npm view failure for ${NPM_PACKAGE_NAME}@${VERSION}: ${OUTPUT}"
+            exit 1
+          fi
+
+      # Rewrites package.json only on the runner; never committed back to git.
+      # The rewrite must land before publish so `prepack` bakes the staging
+      # version into the tarball that `context-tree --version` reports.
+      - name: Apply staging version
+        if: steps.guard.outputs.publish == 'true'
+        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        if: steps.guard.outputs.publish == 'true'
+        run: npm publish --tag staging --access public --provenance
+
+  # Pushing a version tag publishes the production package at that exact
+  # version. The tag is the source of truth; package.json is rewritten to match.
+  publish-release:
+    name: Publish production package
+    needs: [test, skill-discovery]
+    if: >-
+      github.repository == 'first-tree-ai/context-tree'
+      && github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: npm-publish-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Use trusted-publishing npm client
+        run: npm install --global "npm@${TRUSTED_PUBLISHING_NPM_VERSION}"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Resolve release version and dist-tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' is not a semver release tag (expected X.Y.Z or vX.Y.Z)."
+            exit 1
+          fi
+          # A prerelease tag publishes under its own identifier so it can never
+          # take over `latest`; only a clean X.Y.Z tag moves the stable channel.
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            DIST_TAG="${PRERELEASE%%.*}"
+            [[ "$DIST_TAG" =~ ^[A-Za-z][0-9A-Za-z-]*$ ]] || DIST_TAG="next"
+          else
+            DIST_TAG="latest"
+          fi
+          MANIFEST="$(node -p "require('./package.json').version")"
+          if [ "$MANIFEST" != "$VERSION" ]; then
+            echo "::notice::package.json is ${MANIFEST}; tag ${TAG} wins, publishing ${VERSION}."
+          fi
+          echo "version=${VERSION}" >>"$GITHUB_OUTPUT"
+          echo "dist_tag=${DIST_TAG}" >>"$GITHUB_OUTPUT"
+          echo "Tag ${TAG} -> ${VERSION} (dist-tag ${DIST_TAG})"
+
+      - name: Check registry for an existing publish
+        id: guard
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -uo pipefail
+          OUTPUT="$(npm view "${NPM_PACKAGE_NAME}@${VERSION}" version 2>&1)"; STATUS=$?
+          if [ "$STATUS" -eq 0 ] && [ -n "$OUTPUT" ]; then
+            echo "::warning::${NPM_PACKAGE_NAME}@${VERSION} is already published; skipping."
+            echo "publish=false" >>"$GITHUB_OUTPUT"
+          elif printf '%s' "$OUTPUT" | grep -q 'E404'; then
+            echo "publish=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::Unexpected npm view failure for ${NPM_PACKAGE_NAME}@${VERSION}: ${OUTPUT}"
+            exit 1
+          fi
+
+      - name: Apply release version
+        if: steps.guard.outputs.publish == 'true'
+        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        if: steps.guard.outputs.publish == 'true'
+        run: npm publish --tag "${{ steps.resolve.outputs.dist_tag }}" --access public --provenance
