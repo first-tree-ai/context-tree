@@ -127,7 +127,11 @@ jobs:
       # version into the tarball that `context-tree --version` reports.
       - name: Apply staging version
         if: steps.guard.outputs.publish == 'true'
-        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+        run: |
+          npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+          # tests/skills.test.ts (run by prepack) asserts every skill declares
+          # the package version, so the frontmatter has to move with it.
+          node scripts/sync-skill-versions.mjs
 
       - name: Publish to npm
         if: steps.guard.outputs.publish == 'true'
@@ -216,7 +220,9 @@ jobs:
 
       - name: Apply release version
         if: steps.guard.outputs.publish == 'true'
-        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+        run: |
+          npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
+          node scripts/sync-skill-versions.mjs
 
       - name: Publish to npm
         if: steps.guard.outputs.publish == 'true'
