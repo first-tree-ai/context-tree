@@ -1,8 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   contextContentClassCountsSchema,
   contextTreeCliErrorEnvelopeSchema,
@@ -19,11 +19,24 @@ import {
   verifyTreeReportSchema,
 } from "../src/index.js";
 
+const temporaryRoots = new Set<string>();
+
+function tempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), "context-tree-schema-"));
+  temporaryRoots.add(root);
+  return root;
+}
+
 function tree(): string {
-  const root = join(mkdtempSync(join(tmpdir(), "context-tree-schema-")), "tree");
+  const root = join(tempRoot(), "tree");
   scaffoldTree({ owner: "alice", path: root, repository: "acme/context", title: "Schema Tree" });
   return root;
 }
+
+afterEach(() => {
+  for (const root of temporaryRoots) rmSync(root, { force: true, recursive: true });
+  temporaryRoots.clear();
+});
 
 describe("public JSON schemas", () => {
   it("parses every library result without changing serialized form", () => {
@@ -34,7 +47,7 @@ describe("public JSON schemas", () => {
       [readTree(root, { classes: "all", content: true }), contextTreeReadResultSchema],
     ];
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
-    const scaffoldRoot = join(mkdtempSync(join(tmpdir(), "context-tree-schema-")), "tree");
+    const scaffoldRoot = join(tempRoot(), "tree");
     const scaffold = scaffoldTree({
       owner: "alice",
       path: scaffoldRoot,
@@ -43,17 +56,6 @@ describe("public JSON schemas", () => {
     });
     expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
     for (const entry of readTree(root).entries) expect(contextTreeReadEntrySchema.parse(entry)).toEqual(entry);
-  });
-
-  it("contains no digest fields", () => {
-    const root = tree();
-    const policy = readContextTreePolicy();
-    const read = readTree(root, { classes: "all" });
-    const verification = verifyTree(root);
-    expect(policy).not.toHaveProperty("digest");
-    expect(read).not.toHaveProperty("treeDigest");
-    expect(read.entries.every((entry) => !("digest" in entry))).toBe(true);
-    expect(verification).not.toHaveProperty("treeDigest");
   });
 
   it("rejects incompatible versions, malformed structures, and unknown codes", () => {

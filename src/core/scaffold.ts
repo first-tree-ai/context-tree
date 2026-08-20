@@ -20,8 +20,6 @@ export type ScaffoldTreeOptions = {
   title: string;
 };
 
-export type { ScaffoldTreeResult } from "../schemas.js";
-
 export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
   const root = resolve(options.path);
   const destination = lstatSync(root, { throwIfNoEntry: false });

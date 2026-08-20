@@ -1,16 +1,12 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { type TreeValidationFinding, VALIDATION_CODES, type ValidationCode } from "../../schemas.js";
 import { toTreeRelativePosixPath } from "./content-class.js";
 import { readContextDocument, readNonEmptyStringArrayField, readNonEmptyStringField } from "./context-document.js";
-import { type TreeValidationFinding, VALIDATION_CODES, type ValidationCode } from "./validation-finding.js";
 
 const VALID_TYPES = new Set(["human", "agent"]);
 const VALID_STATUSES = new Set(["invited"]);
-
-export type MemberValidationResult = {
-  findings: TreeValidationFinding[];
-};
 
 function addFinding(findings: TreeValidationFinding[], code: ValidationCode, path: string, message: string): void {
   findings.push({ code, message, path });
@@ -105,7 +101,7 @@ function validateMember(nodePath: string, treeRoot: string): TreeValidationFindi
   return findings;
 }
 
-export function collectMemberValidationFindings(treeRoot: string): MemberValidationResult {
+export function collectMemberValidationFindings(treeRoot: string): TreeValidationFinding[] {
   const membersDir = join(treeRoot, "members");
   const findings: TreeValidationFinding[] = [];
 
@@ -116,13 +112,13 @@ export function collectMemberValidationFindings(treeRoot: string): MemberValidat
       "members/",
       `Members directory not found: ${membersDir}`,
     );
-    return { findings };
+    return findings;
   }
 
   try {
     const membersStat = lstatSync(membersDir);
     if (membersStat.isSymbolicLink()) {
-      return { findings };
+      return findings;
     }
     if (!membersStat.isDirectory()) {
       addFinding(
@@ -131,7 +127,7 @@ export function collectMemberValidationFindings(treeRoot: string): MemberValidat
         "members/",
         `Members directory not found: ${membersDir}`,
       );
-      return { findings };
+      return findings;
     }
   } catch {
     addFinding(
@@ -140,7 +136,7 @@ export function collectMemberValidationFindings(treeRoot: string): MemberValidat
       "members/",
       `Members directory not found: ${membersDir}`,
     );
-    return { findings };
+    return findings;
   }
 
   let memberCount = 0;
@@ -179,5 +175,5 @@ export function collectMemberValidationFindings(treeRoot: string): MemberValidat
     addFinding(findings, VALIDATION_CODES.memberNodesEmpty, "members/", "no member nodes were found");
   }
 
-  return { findings };
+  return findings;
 }

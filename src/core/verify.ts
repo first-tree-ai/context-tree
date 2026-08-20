@@ -1,14 +1,17 @@
 import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
-import { parseContextTreeScope, SCHEMA_VERSION, type VerifyTreeReport } from "../schemas.js";
+import {
+  parseContextTreeScope,
+  SCHEMA_VERSION,
+  type TreeValidationFinding,
+  VALIDATION_CODES,
+  type VerifyTreeReport,
+} from "../schemas.js";
 import { readUtf8File } from "./internal/filesystem.js";
 import { collectMemberValidationFindings } from "./internal/validate-members.js";
 import { collectNodeValidationFindings } from "./internal/validate-nodes.js";
-import { type TreeValidationFinding, VALIDATION_CODES } from "./internal/validation-finding.js";
 import { resolveTreeRoot } from "./path.js";
-
-export type { VerifyTreeReport } from "../schemas.js";
 
 function scopeFindings(root: string): TreeValidationFinding[] {
   const path = join(root, "SCOPE.md");
@@ -44,17 +47,12 @@ function deduplicate(findings: TreeValidationFinding[]): TreeValidationFinding[]
 export function verifyTree(treePath: string): VerifyTreeReport {
   const root = resolveTreeRoot(treePath);
   const nodeResult = collectNodeValidationFindings(root);
-  const memberResult = collectMemberValidationFindings(root);
+  const memberFindings = collectMemberValidationFindings(root);
   const rootNode = join(root, "NODE.md");
   const rootFinding: TreeValidationFinding[] = existsSync(rootNode)
     ? []
     : [{ code: VALIDATION_CODES.rootMissing, message: "root NODE.md is missing", path: "NODE.md" }];
-  const findings = deduplicate([
-    ...rootFinding,
-    ...scopeFindings(root),
-    ...nodeResult.findings,
-    ...memberResult.findings,
-  ]);
+  const findings = deduplicate([...rootFinding, ...scopeFindings(root), ...nodeResult.findings, ...memberFindings]);
 
   return {
     findings,

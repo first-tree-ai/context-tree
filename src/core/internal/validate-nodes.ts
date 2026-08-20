@@ -1,8 +1,6 @@
-import {
-  type ContextContentClassCounts,
-  collectContextMarkdownContent,
-  emptyContentClassCounts,
-} from "./content-class.js";
+import type { ContextContentClassCounts, TreeValidationFinding, ValidationCode } from "../../schemas.js";
+import { VALIDATION_CODES } from "../../schemas.js";
+import { collectContextMarkdownContent, emptyContentClassCounts } from "./content-class.js";
 import {
   type ContextDocument,
   readContextDocument,
@@ -10,7 +8,6 @@ import {
   readNonEmptyStringField,
 } from "./context-document.js";
 import { readMarkdownLinkTargets, resolveLocalTreeTarget } from "./context-links.js";
-import { type TreeValidationFinding, VALIDATION_CODES, type ValidationCode } from "./validation-finding.js";
 
 const MEMBERS_INDEX_PATH = "members/NODE.md";
 

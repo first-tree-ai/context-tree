@@ -1,11 +1,9 @@
 import type { Dirent } from "node:fs";
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import type { ContextContentClass, ContextContentClassCounts } from "../../schemas.js";
 import { isPathInside } from "../path.js";
-
-export type { ContextContentClassCounts } from "../../schemas.js";
 
 export type ContextMarkdownFile = {
   absolutePath: string;
@@ -28,8 +26,6 @@ export type ContextMarkdownCollection = {
   directorySymlinks: ContextDirectorySymlink[];
   files: ContextMarkdownFile[];
 };
-
-export type RepoInfraMarkdownInspection = { kind: "absent" } | { kind: "invalid" } | { kind: "valid"; source: string };
 
 const GENERATED_DIRECTORY_NAMES = new Set(["node_modules", "__pycache__", "dist", "build", ".next", ".turbo"]);
 const REPO_INFRA_MARKDOWN_FILES = new Set(["AGENTS.md", "CLAUDE.md"]);
@@ -86,44 +82,6 @@ function readDirectoryEntries(path: string): Dirent[] {
     return readdirSync(path, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
   } catch {
     return [];
-  }
-}
-
-export function inspectRepoInfraMarkdownFile(treeRoot: string, relativePath: string): RepoInfraMarkdownInspection {
-  const absolutePath = join(treeRoot, relativePath);
-  let entry: ReturnType<typeof lstatSync>;
-
-  try {
-    entry = lstatSync(absolutePath);
-  } catch {
-    return { kind: "absent" };
-  }
-
-  if (entry.isSymbolicLink()) {
-    try {
-      if (!statSync(absolutePath).isFile()) {
-        return { kind: "invalid" };
-      }
-      const realTreeRoot = realpathSync(treeRoot);
-      const realTarget = realpathSync(absolutePath);
-      if (!isPathInside(realTreeRoot, realTarget)) {
-        return { kind: "invalid" };
-      }
-      const canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
-      if (classifyContextContent(canonicalRelativePath) !== "repo-infra") {
-        return { kind: "invalid" };
-      }
-    } catch {
-      return { kind: "invalid" };
-    }
-  } else if (!entry.isFile()) {
-    return { kind: "invalid" };
-  }
-
-  try {
-    return { kind: "valid", source: readFileSync(absolutePath, "utf-8") };
-  } catch {
-    return { kind: "invalid" };
   }
 }
 

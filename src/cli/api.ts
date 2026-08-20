@@ -12,15 +12,13 @@ import {
   SCHEMA_VERSION,
 } from "../schemas.js";
 
-export type ContextTreeCliIo = {
+type ContextTreeCliIo = {
   cwd: () => string;
-  stderr: (value: string) => void;
   stdout: (value: string) => void;
 };
 
 const defaultIo: ContextTreeCliIo = {
   cwd: () => process.cwd(),
-  stderr: (value) => process.stderr.write(value),
   stdout: (value) => process.stdout.write(value),
 };
 
@@ -49,7 +47,7 @@ function parseClass(value: string | undefined): ContextContentClass[] | "all" | 
   return [contextContentClassSchema.parse(value)];
 }
 
-export function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
+function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   const program = new Command()
     .name("context-tree")
     .description("Portable tools for scaffolding, reading, and validating Context Trees.")

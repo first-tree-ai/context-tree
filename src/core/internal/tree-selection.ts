@@ -2,11 +2,11 @@ import { basename, dirname, posix } from "node:path";
 
 import { toPosixPath } from "../path.js";
 
-export function normalizeTreeTarget(value: string | undefined, operation: "Read"): string {
+export function normalizeTreeTarget(value: string | undefined): string {
   if (!value || value === ".") return "";
   const normalized = posix.normalize(toPosixPath(value).replace(/^\.\//u, ""));
   if (normalized === ".." || normalized.startsWith("../") || normalized.startsWith("/")) {
-    throw new Error(`${operation} target is outside the Context Tree: ${value}`);
+    throw new Error(`Read target is outside the Context Tree: ${value}`);
   }
   return normalized.replace(/\/$/u, "");
 }

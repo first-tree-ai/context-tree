@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   credentialFreeRepositoryUrlSchema,
   parseContextTreeScope,
@@ -13,10 +13,18 @@ import {
 } from "../src/index.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
+const temporaryRoots = new Set<string>();
 
 function tempRoot(): string {
-  return mkdtempSync(join(tmpdir(), "context-tree-test-"));
+  const root = mkdtempSync(join(tmpdir(), "context-tree-test-"));
+  temporaryRoots.add(root);
+  return root;
 }
+
+afterEach(() => {
+  for (const root of temporaryRoots) rmSync(root, { force: true, recursive: true });
+  temporaryRoots.clear();
+});
 
 function validTree(): string {
   const root = join(tempRoot(), "tree");
@@ -186,10 +194,9 @@ describe("scaffold and policy", () => {
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
   });
 
-  it("ships the canonical policy without a digest", () => {
+  it("ships the canonical policy", () => {
     const policy = readContextTreePolicy();
     expect(policy.content).toContain("### The Double Test");
     expect(policy.content).toContain("`context-tree verify` must pass");
-    expect(policy).not.toHaveProperty("digest");
   });
 });

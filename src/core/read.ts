@@ -24,8 +24,6 @@ import {
 } from "./internal/tree-selection.js";
 import { isPathInside, resolveTreeRoot } from "./path.js";
 
-export type { ContextTreeReadEntry, ContextTreeReadResult } from "../schemas.js";
-
 export type ReadTreeOptions = {
   classes?: ContextContentClass[] | "all";
   content?: boolean;
@@ -51,7 +49,7 @@ function allSafeMarkdown(root: string): Array<{
 
 export function readTree(treePath: string, options: ReadTreeOptions = {}): ContextTreeReadResult {
   const root = resolveTreeRoot(treePath);
-  const target = normalizeTreeTarget(options.path, "Read");
+  const target = normalizeTreeTarget(options.path);
   const absoluteTarget = resolve(root, target);
   if (!isPathInside(root, absoluteTarget)) throw new Error("Read target escapes the Context Tree root.");
   const targetEntry = lstatSync(absoluteTarget);

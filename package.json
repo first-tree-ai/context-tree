@@ -56,7 +56,8 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
     "validate:skills": "vitest run tests/skills.test.ts",
-    "check:package": "pnpm build && publint && attw --pack . --profile esm-only",
+    "check:package": "pnpm build && publint && attw --pack . --profile esm-only && pnpm package:e2e",
+    "package:e2e": "node scripts/package-e2e.mjs",
     "check:names": "vitest run tests/names.test.ts",
     "prepack": "pnpm build && pnpm validate:skills"
   },

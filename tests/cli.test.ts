@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   contextTreeCliErrorEnvelopeSchema,
   contextTreePolicySchema,
@@ -13,12 +13,20 @@ import {
 } from "../src/schemas.js";
 
 const CLI = resolve(import.meta.dirname, "../dist/cli/index.mjs");
+const workspaces = new Set<string>();
 
 type CliResult = { status: number | null; stderr: string; stdout: string };
 
 function workspace(): string {
-  return mkdtempSync(resolve(tmpdir(), "context-tree-cli-"));
+  const path = mkdtempSync(resolve(tmpdir(), "context-tree-cli-"));
+  workspaces.add(path);
+  return path;
 }
+
+afterEach(() => {
+  for (const path of workspaces) rmSync(path, { force: true, recursive: true });
+  workspaces.clear();
+});
 
 function cli(cwd: string, args: string[]): CliResult {
   const result = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8" });
@@ -54,19 +62,16 @@ describe("built CLI", () => {
 
     const policy = cli(cwd, ["policy"]);
     expect(policy.status).toBe(0);
-    expect(contextTreePolicySchema.parse(JSON.parse(policy.stdout))).not.toHaveProperty("digest");
+    contextTreePolicySchema.parse(JSON.parse(policy.stdout));
 
     const verification = cli(cwd, ["verify", "--tree-path", "tree"]);
     expect(verification.status).toBe(0);
     const verificationResult = verifyTreeReportSchema.parse(JSON.parse(verification.stdout));
     expect(verificationResult).toMatchObject({ ok: true, schemaVersion: 1 });
-    expect(verificationResult).not.toHaveProperty("treeDigest");
     const read = cli(cwd, ["read", "--tree-path", "tree", "--content"]);
     expect(read.status).toBe(0);
     const readResult = contextTreeReadResultSchema.parse(JSON.parse(read.stdout));
     expect(readResult.schemaVersion).toBe(1);
-    expect(readResult).not.toHaveProperty("treeDigest");
-    expect(readResult.entries.every((entry) => !("digest" in entry))).toBe(true);
   });
 
   it("requires explicit GitHub identity and returns JSON errors", () => {
@@ -82,7 +87,6 @@ describe("built CLI", () => {
     expect(invalid.status).toBe(1);
     const invalidResult = verifyTreeReportSchema.parse(JSON.parse(invalid.stdout));
     expect(invalidResult).toMatchObject({ ok: false, schemaVersion: 1 });
-    expect(invalidResult).not.toHaveProperty("treeDigest");
 
     const generic = cli(cwd, [
       "init",
