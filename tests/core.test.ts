@@ -123,6 +123,8 @@ describe("scoped reading", () => {
     expect(readTree(root).entries.map((entry) => entry.path)).toEqual([
       ".",
       "decisions/runtime.md",
+      "memory",
+      "memory/platform.md",
       "platform",
       "SCOPE.md",
     ]);
@@ -130,7 +132,16 @@ describe("scoped reading", () => {
     expect(readTree(root, { classes: ["member"] }).entries.map((entry) => entry.path)).toEqual([
       "members",
       "members/alice",
+      "members/alice/memory.md",
     ]);
+    expect(readTree(root).entries.map((entry) => entry.path)).not.toContain("members/alice/memory.md");
+    expect(
+      readTree(root, { path: "members/alice/memory.md", classes: ["member"], content: true }).entries[0],
+    ).toMatchObject({
+      content: expect.stringContaining("Agent-specific working context"),
+      contentClass: "member",
+      path: "members/alice/memory.md",
+    });
     expect(readTree(root, { pattern: "decisions/*" }).entries.map((entry) => entry.path)).toEqual([
       "decisions/runtime.md",
     ]);
@@ -197,6 +208,27 @@ describe("scaffold and policy", () => {
   it("ships the canonical policy", () => {
     const policy = readContextTreePolicy();
     expect(policy.content).toContain("### The Double Test");
+    expect(policy.content).toContain("### Memory Scopes");
+    expect(policy.content).toContain("Memory is not a task log");
+    expect(policy.content).toContain("Prefer the canonical domain tree for actual project decisions and constraints");
+    expect(policy.content).toContain("choose the narrowest audience");
     expect(policy.content).toContain("`context-tree verify` must pass");
   });
+
+  it("accepts trees with no optional memory files", () => {
+    const root = validTree();
+    expect(existsSync(join(root, "memory"))).toBe(false);
+    expect(existsSync(join(root, "members/alice/memory.md"))).toBe(false);
+    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+  });
+
+  it.each(["memory/NODE.md", "memory/platform.md", "members/alice/memory.md"])(
+    "accepts valid trees without optional %s",
+    (relativePath) => {
+      const root = join(tempRoot(), "existing");
+      cpSync(join(FIXTURES, "valid"), root, { recursive: true });
+      rmSync(join(root, relativePath));
+      expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+    },
+  );
 });

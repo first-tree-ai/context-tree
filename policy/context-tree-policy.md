@@ -25,9 +25,9 @@ not belong in the tree.
 
 ### Content Classes And Authority
 
-- **Normal content** — root/domain `NODE.md` and regular domain leaves. It states current durable truth; when a decision changes, rewrite or remove old claims.
+- **Normal content** — root/domain `NODE.md`, regular domain leaves, and shared memory under `memory/`. Canonical domain nodes state current durable truth; when a decision changes, rewrite or remove old claims.
 - **Archive/supporting content** — proposals, meetings, explorations, and raw material such as `raw-context/`. It is evidence, not canonical truth: read it only when asked, when the source is archive/proposal material, or when the task needs archive context. Normal content must not require this class.
-- **Member content** — responsibility, ownership, and review scope such as `members/<id>/NODE.md`. Use it to route or validate *Who*, not as a substitute for normal decision/constraint nodes.
+- **Member content** — responsibility, ownership, and review scope such as `members/<id>/NODE.md`, plus optional private working memory at `members/<id>/memory.md`. Profiles route or validate *Who*; private memory is not a substitute for normal decision/constraint nodes.
 
 ### Code vs Tree Drift Authority
 
@@ -43,8 +43,9 @@ user or host-framework authorization.
 
 Before writing, apply both questions to every candidate fact:
 
-1. **Decision test.** Does this source establish or change something a future
-   agent must respect when making cross-domain choices?
+1. **Decision test.** Does this source establish or change project truth a
+   future agent must respect, or durable learned context whose absence would
+   make its intended audience choose differently?
 2. **Durability test.** If the triggering commit or GitHub PR were rewritten, would
    the decision still stand?
 
@@ -52,6 +53,39 @@ The candidate belongs in the tree only when both answers are yes. Failing the
 decision test means the source is implementation detail; failing the
 durability test means the source captures how something was done this time,
 not what was decided.
+
+### Memory Scopes
+
+Memory is durable learned context whose absence would cause a future agent to
+make a different working decision. It must pass the Double Test before it is
+written. Memory is not a task log, transcript, speculative note, or duplicate
+store for project decisions.
+
+| Question | Destination |
+| --- | --- |
+| Is this a durable project decision, constraint, rationale, or ownership fact? | Existing canonical domain node |
+| Does only the current agent need it? | `members/<agent-id>/memory.md` |
+| Should agents working in one domain know it? | `memory/<domain>.md` |
+| Should agents across domains know it? | `memory/NODE.md` |
+
+Examples: an agent-specific tool preference is private memory; a reusable
+engineering debugging lesson is engineering memory; a repository-wide
+credential-handling rule is global memory; an API pagination decision and its
+rationale belong in the canonical API node, not memory.
+
+Prefer the canonical domain tree for actual project decisions and constraints.
+For genuine memory, choose the narrowest audience that would make different
+future decisions without it. If broader relevance is plausible but not
+established, keep it private instead of publishing it as shared truth. Domain
+scope controls relevance, not authorization; shared means commonly readable,
+not writable by everyone.
+
+Domain and global memory updates require concrete evidence and the existing
+owner-reviewed PR workflow. Promotion moves the canonical statement into the
+shared memory scope and removes or reduces the private copy to a reference; do
+not maintain two independent versions. An agent cannot promote another agent's
+private memory because it must not read that memory. Start with one Markdown
+file per scope and split only when the Add vs Edit policy justifies it.
 
 ### Content Model: What / Why / Who
 

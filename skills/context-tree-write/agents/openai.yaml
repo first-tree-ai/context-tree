@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Write"
-  short_description: "Apply source-backed Context Tree updates"
-  default_prompt: "Use $context-tree-write to reflect this concrete source artifact into the Context Tree."
+  short_description: "Publish durable Context Tree updates"
+  default_prompt: "Use $context-tree-write to update durable Context Tree content from this concrete source artifact and open a pull request."
