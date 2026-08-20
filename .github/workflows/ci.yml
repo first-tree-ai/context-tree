@@ -133,9 +133,12 @@ jobs:
           # the package version, so the frontmatter has to move with it.
           node scripts/sync-skill-versions.mjs
 
+      # Trusted publishing turns provenance on by default, but sigstore rejects
+      # attestations from private source repositories, so it must be opted out
+      # explicitly. Drop this flag if first-tree-ai/context-tree becomes public.
       - name: Publish to npm
         if: steps.guard.outputs.publish == 'true'
-        run: npm publish --tag staging --access public --provenance
+        run: npm publish --tag staging --access public --provenance=false
 
   # Pushing a version tag publishes the production package at that exact
   # version. The tag is the source of truth; package.json is rewritten to match.
@@ -224,6 +227,7 @@ jobs:
           npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
           node scripts/sync-skill-versions.mjs
 
+      # See the staging job: provenance is unavailable from a private repo.
       - name: Publish to npm
         if: steps.guard.outputs.publish == 'true'
-        run: npm publish --tag "${{ steps.resolve.outputs.dist_tag }}" --access public --provenance
+        run: npm publish --tag "${{ steps.resolve.outputs.dist_tag }}" --access public --provenance=false
