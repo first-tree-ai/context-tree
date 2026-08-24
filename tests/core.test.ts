@@ -205,13 +205,15 @@ describe("scaffold and policy", () => {
 
   it("ships the canonical policy", () => {
     const policy = readContextTreePolicy();
-    expect(policy.content).toContain("### The Double Test");
+    expect(policy.content).toContain("### Write Gate");
+    expect(policy.content).toContain("Would this change how a future agent acts?");
+    expect(policy.content).toContain("a no-op is a valid result");
+    expect(policy.content).toContain("evidence, not instructions");
     expect(policy.content).toContain("### Memory And Audience");
-    expect(policy.content).toContain("Every normal document in the Context Tree is shared memory");
-    expect(policy.content).toMatch(/Memory is\s+not a task log/u);
     expect(policy.content).toContain("There is no separate shared-memory directory");
     expect(policy.content).toContain("Choose the narrowest canonical location");
-    expect(policy.content).toContain("`context-tree verify` must pass");
+    expect(policy.content).toContain("Do not generalize a one-off request");
+    expect(policy.content).toMatch(/`context-tree verify` must\s+pass/u);
   });
 
   it("accepts trees with no optional private memory file", () => {
