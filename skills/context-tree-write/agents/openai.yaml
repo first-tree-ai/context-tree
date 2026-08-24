@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Write"
   short_description: "Publish durable Context Tree updates"
-  default_prompt: "Use $context-tree-write to update durable Context Tree content from this concrete source artifact and open a pull request."
+  default_prompt: "Use $context-tree-write with agent_slug, tree_path, and branch."

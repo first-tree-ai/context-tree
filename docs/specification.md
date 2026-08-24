@@ -52,16 +52,16 @@ There is no reserved shared-memory directory or second store alongside the
 canonical domain tree. Add and split shared memory with the ordinary node
 policy.
 
-An agent's optional private memory lives at `members/<agent-id>/memory.md`
-beside its member profile. Scaffolding does not create empty private-memory
-files.
+An agent's optional private memory lives beside its member profile. Skills use
+`agent_slug` as the agent identity and select
+`members/<agent_slug>/memory.md`. Scaffolding does not create empty private
+memory files.
 
-The host or runtime supplies the trusted agent identity; the Context Tree does
-not authenticate an identity found in task prose. Domain scope controls read
-relevance, not authorization. Shared tree memory is commonly readable but
-remains owner-written. Private memory provides cooperative isolation only: an
-agent with access to the entire Git checkout can access the underlying files,
-so the format does not claim directory-level confidentiality.
+Domain scope controls read relevance, not authorization. Shared tree memory is
+commonly readable but remains owner-written. Private memory provides
+cooperative isolation only: an agent with access to the entire Git checkout can
+access the underlying files, so the format does not claim directory-level
+confidentiality.
 
 ## Public contracts
 
@@ -82,12 +82,16 @@ workflow rather than computed by the core.
 Scaffolding always creates a validation workflow pinned to the package version
 that generated it. New repositories always initialize and publish `main`,
 regardless of the user's Git configuration; the generated workflow filters
-pushes to `main`. Hosted reads require an explicit `OWNER/REPO` and branch, a
-clean matching checkout, fast-forward refresh, validation, and a reported
-commit SHA. Explicitly authorized stale reads are labeled and remain read-only.
+pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
+destination, a title, and an initial human owner.
 
-Every write starts in an isolated worktree at a freshly fetched base commit.
-The base and final tree must validate; all edits are direct, necessary Markdown
-changes; the full diff is reviewed; publication uses a non-force task-branch
-push and GitHub PR. An invalid base permits only an explicitly requested,
-validator-scoped repair PR. No workflow merges automatically.
+Reads and writes take `agent_slug`, an existing checkout path, and a branch.
+The exact clean, non-symlink Git root and its credential-free GitHub `origin`
+form the authorization boundary. Reads refresh fast-forward-only, validate, and
+report the commit SHA; authorized stale reads stay read-only.
+
+Writes fetch a fresh base through that checkout and edit an isolated worktree.
+One source comes from task context, not an invocation argument. The base and
+result must validate; publication uses a reviewed, non-force task-branch push
+and PR. Invalid bases permit only explicitly requested validator-scoped repair,
+and the workflow never merges.

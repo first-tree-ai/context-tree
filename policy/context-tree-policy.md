@@ -27,7 +27,7 @@ not belong in the tree.
 
 - **Normal content** — shared memory in the root/domain `NODE.md` files and regular domain leaves. Canonical domain nodes state current durable truth; when a decision changes, rewrite or remove old claims. There is no separate shared-memory directory.
 - **Archive/supporting content** — proposals, meetings, explorations, and raw material such as `raw-context/`. It is evidence, not canonical truth: read it only when asked, when the source is archive/proposal material, or when the task needs archive context. Normal content must not require this class.
-- **Member content** — responsibility, ownership, and review scope such as `members/<id>/NODE.md`, plus optional private working memory at `members/<id>/memory.md`. Profiles route or validate *Who*; private memory is not a substitute for normal decision/constraint nodes.
+- **Member content** — responsibility, ownership, and review scope such as `members/<member-slug>/NODE.md`, plus optional private working memory at `members/<member-slug>/memory.md`. Profiles route or validate *Who*; private memory is not a substitute for normal decision/constraint nodes.
 
 ### Code vs Tree Drift Authority
 
@@ -59,7 +59,7 @@ inferences, or secrets.
 | --- | --- |
 | Should agents across domains know it? | Root `NODE.md` or an existing repository-wide leaf |
 | Should agents working in one domain know it? | The corresponding domain node or leaf |
-| Does only the current agent need it? | `members/<agent-id>/memory.md` |
+| Does only the current agent need it? | `members/<agent_slug>/memory.md` |
 
 Examples: an agent-specific tool preference is private memory; a reusable
 engineering debugging lesson belongs in the engineering domain; a

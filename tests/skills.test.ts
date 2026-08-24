@@ -29,6 +29,20 @@ function splitSkill(source: string): { body: string; frontmatter: Record<string,
   return { body: match[2] ?? "", frontmatter: record(parse(match[1])) };
 }
 
+function skillBody(name: string): string {
+  return splitSkill(readFileSync(join(SKILLS_ROOT, name, "SKILL.md"), "utf8")).body;
+}
+
+function invocationInputs(body: string): string[] {
+  const section = /(?:^|\n)## Invocation inputs\n\n([\s\S]*?)(?=\n## |$)/u.exec(body)?.[1];
+  if (section === undefined) throw new Error("Skill must declare its invocation inputs.");
+  return [...section.matchAll(/^- `([a-z_]+)`:/gmu)].map((match) => nonEmptyString(match[1]));
+}
+
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/gu, " ");
+}
+
 describe("Agent Skills contracts", () => {
   it("ships only init, read, and write skills", () => {
     expect(skillDirectories().map((path) => basename(path))).toEqual([
@@ -82,5 +96,80 @@ describe("Agent Skills contracts", () => {
       const source = readFileSync(join(directory, "SKILL.md"), "utf8");
       expect(source).not.toContain("memory/");
     }
+  });
+
+  it("declares the local-checkout invocation contracts", () => {
+    const init = skillBody("context-tree-init");
+    expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title", "owner"]);
+
+    for (const name of ["context-tree-read", "context-tree-write"]) {
+      const body = skillBody(name);
+      expect(invocationInputs(body)).toEqual(["agent_slug", "tree_path", "branch"]);
+      expect(body).toContain("Treat `agent_slug` as the agent identity");
+      expect(body).toContain("members/<agent_slug>/");
+    }
+  });
+
+  it("omits retired inputs and skill-level policy", () => {
+    for (const name of ["context-tree-init", "context-tree-read", "context-tree-write"]) {
+      const body = skillBody(name);
+      expect(body).not.toMatch(/agent[-_]id/u);
+      expect(body).not.toContain("source_artifact");
+      expect(body).not.toContain("schemaVersion: 1");
+      expect(body).not.toContain("gh auth status");
+    }
+
+    const read = skillBody("context-tree-read");
+    expect(read).not.toContain("^[A-Za-z0-9]");
+    expect(read).not.toContain("`STALE`");
+
+    const write = skillBody("context-tree-write");
+    expect(write).not.toContain("^[A-Za-z0-9]");
+
+    for (const body of [read, write]) {
+      expect(body).not.toMatch(/validate (?:the )?`?agent_slug|agent_slug.*ASCII|starting with a letter/iu);
+    }
+
+    const init = skillBody("context-tree-init");
+    expect(init).not.toContain("--public");
+    expect(init).toContain('gh repo create "OWNER/REPO" --private');
+  });
+
+  it("makes the exact existing checkout the read and write authorization boundary", () => {
+    for (const name of ["context-tree-read", "context-tree-write"]) {
+      const body = compactWhitespace(skillBody(name));
+
+      expect(body).toContain("Never infer the path from the current directory or clone a replacement");
+      expect(body).toContain("real path is identical");
+      expect(body).toContain("git rev-parse --show-toplevel");
+      expect(body).toContain("git status --porcelain");
+      expect(body).toContain("git symbolic-ref --short HEAD");
+      expect(body).toContain("Reject a nested root or detached HEAD");
+      expect(body).toContain("Capture `origin` without logging it");
+      expect(body).toContain("credential-free `github.com` HTTPS or SSH");
+      expect(body).toContain("derive `OWNER/REPO`");
+      expect(body).toContain("not another checkout or remote");
+    }
+  });
+
+  it("preserves refresh, isolation, and publication safeguards", () => {
+    const read = skillBody("context-tree-read");
+    const write = skillBody("context-tree-write");
+
+    expect(read).toContain('git pull --ff-only origin "<branch>"');
+    expect(read).toContain("Treat a stale checkout as read-only");
+    expect(read).toContain("disclose the refresh");
+    expect(read).toContain("exact local commit SHA");
+
+    expect(write).toContain('git fetch origin "<branch>"');
+    expect(write).toContain("fetched commit SHA");
+    expect(write).toContain("temporary worktree at that exact commit");
+    expect(write).toContain("Preserve path containment and never replace or traverse symlinks");
+    expect(write).toContain("Run `context-tree verify");
+    expect(write).toContain("Inspect the complete `git diff`");
+    expect(write).toContain('git push --set-upstream origin "<task-branch>"');
+    expect(write).toContain("Use a non-force push");
+    expect(write).toContain('gh pr create --repo "OWNER/REPO"');
+    expect(write).toContain("Never merge automatically");
   });
 });
