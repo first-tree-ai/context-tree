@@ -5,7 +5,6 @@ export type ContextDocument = ParsedMarkdownFrontmatter;
 
 export type NodeMetadata = {
   description?: string;
-  owners: string[];
   title: string;
 };
 
@@ -68,16 +67,14 @@ export function readNodeMetadata(path: string): NodeMetadata | null {
   }
 
   const title = readNonEmptyStringField(document.data, "title");
-  const owners = readNonEmptyStringArrayField(document.data, "owners");
   const description = readNonEmptyStringField(document.data, "description");
 
-  if (!title.valid || !owners.valid || (description.present && !description.valid)) {
+  if (!title.valid || (description.present && !description.valid)) {
     return null;
   }
 
   return {
     title: title.value,
-    owners: owners.value,
     ...(description.valid ? { description: description.value } : {}),
   };
 }

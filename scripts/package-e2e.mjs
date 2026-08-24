@@ -67,8 +67,6 @@ try {
     "tree",
     "--title",
     "Package E2E",
-    "--owner",
-    "alice",
   ]);
   assert.equal(init.status, 0);
   parseWithInstalledSchema(consumerRoot, "scaffoldTreeResultSchema", init.stdout);

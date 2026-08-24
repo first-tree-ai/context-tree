@@ -1,7 +1,7 @@
 # Context Tree
 
 `@first-tree-ai/context-tree` is the portable core for a GitHub-backed Context
-Tree: durable decisions, constraints, ownership, and cross-domain relationships
+Tree: durable decisions, constraints, and cross-domain relationships
 stored as Markdown in a private GitHub repository. It ships deterministic local
 scaffolding, validation, scoped reading, the canonical policy, Zod contracts,
 and framework-neutral agent skills.
@@ -42,8 +42,7 @@ JSON object on stdout. Help and version output remain plain text.
 context-tree init \
   --repository acme/context \
   --tree-path ./context-tree \
-  --title "Acme" \
-  --owner alice
+  --title "Acme"
 context-tree policy
 context-tree verify --tree-path ./context-tree
 context-tree read --tree-path ./context-tree --content
@@ -69,8 +68,8 @@ creates an isolated worktree at its exact commit, verifies the base, edits only
 necessary Markdown, verifies again, inspects the complete diff, commits,
 non-force pushes, and opens a GitHub PR. The skill never merges. An invalid base
 blocks semantic changes; an explicit repair request may produce a repair-only
-PR limited to validator findings. Read and write treat `agent_slug` as the agent
-identity and use it only under `members/<agent_slug>/`.
+PR limited to validator findings. Read and write use `agent_slug` solely to
+select optional private memory at `members/<agent_slug>/memory.md`.
 
 ## Library integration
 
@@ -79,7 +78,6 @@ import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "@firs
 import { contextTreeReadResultSchema, verifyTreeReportSchema } from "@first-tree-ai/context-tree/schemas";
 
 scaffoldTree({
-  owner: "alice",
   path: "./context-tree",
   repository: "acme/context",
   title: "Acme",

@@ -1,6 +1,5 @@
 ---
 title: "Alice memory"
-owners: [alice]
 ---
 
 # Alice memory

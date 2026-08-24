@@ -1,6 +1,5 @@
 ---
 title: "Runtime baseline"
-owners: [example-owner]
 soft_links:
   - systems
 ---

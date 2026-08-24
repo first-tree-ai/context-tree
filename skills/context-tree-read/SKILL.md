@@ -1,6 +1,6 @@
 ---
 name: context-tree-read
-description: Read task-relevant shared memory and ownership from an explicitly supplied existing GitHub Context Tree checkout.
+description: Read task-relevant shared memory from an explicitly supplied existing GitHub Context Tree checkout.
 license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
@@ -16,8 +16,8 @@ metadata:
 - `tree_path`: existing Context Tree Git checkout
 - `branch`: expected branch
 
-Treat `agent_slug` as the agent identity and use it only below
-`members/<agent_slug>/`.
+Treat `agent_slug` as the agent identity and use it solely to select the optional
+private-memory path `members/<agent_slug>/memory.md`.
 
 Read only from `tree_path`. Its explicit path authorizes that exact worktree and
 verified `origin`, not another checkout or remote. Never infer the path from the
@@ -45,15 +45,8 @@ base a write on it.
 ## Read
 
 1. Run `context-tree verify --tree-path "<tree_path>"`; on failure, report the findings and stop before reading semantic content.
-2. Require the agent profile and read it with:
-
-   ```bash
-   context-tree read --tree-path "<tree_path>" "members/<agent_slug>" \
-     --class member --depth 0 --content
-   ```
-
-3. Read the root, relevant profile domains, task-relevant leaves, and normal-class `soft_links` targets with narrow `context-tree read --tree-path "<tree_path>"` selections.
-4. If `members/<agent_slug>/memory.md` exists, read only that file. Never read all members or use `--class all`.
+2. Read the root, task-relevant leaves, and normal-class `soft_links` targets with narrow `context-tree read --tree-path "<tree_path>"` selections.
+3. If `members/<agent_slug>/memory.md` exists, read only that file with `--class member --content`. Never require a profile, read all members, or use `--class all`.
 
 Missing scoped memory is not an error and must not be created or repaired.
 Archive content is non-canonical evidence; read it only when needed and ignore

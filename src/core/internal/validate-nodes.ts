@@ -9,8 +9,6 @@ import {
 } from "./context-document.js";
 import { readMarkdownLinkTargets, resolveLocalTreeTarget } from "./context-links.js";
 
-const MEMBERS_INDEX_PATH = "members/NODE.md";
-
 export type NodeValidationResult = {
   findings: TreeValidationFinding[];
   scannedByContentClass: ContextContentClassCounts;
@@ -51,13 +49,6 @@ function validateRequiredNodeMetadata(
     addFinding(findings, VALIDATION_CODES.titleMissing, path, "missing 'title' field in frontmatter");
   } else if (!title.valid) {
     addFinding(findings, VALIDATION_CODES.titleInvalid, path, "'title' must be a non-empty string");
-  }
-
-  const owners = readNonEmptyStringArrayField(document.data, "owners");
-  if (!owners.present) {
-    addFinding(findings, VALIDATION_CODES.ownersMissing, path, "missing 'owners' field in frontmatter");
-  } else if (!owners.valid) {
-    addFinding(findings, VALIDATION_CODES.ownersInvalid, path, "'owners' must be a non-empty string array");
   }
 
   const description = readNonEmptyStringField(document.data, "description");
@@ -185,7 +176,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
   for (const file of content.files) {
     // Root SCOPE.md has its own strict, domain-neutral routing schema. It is
     // normal durable content, but not a NODE and therefore does not require
-    // title/owners or participate in ordinary node-link validation.
+    // title or participate in ordinary node-link validation.
     if (file.relativePath === "SCOPE.md") continue;
     scannedByContentClass[file.contentClass] += 1;
 
@@ -235,9 +226,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
     }
 
     const document = readContextDocument(file.absolutePath);
-    const personalMemberContent = file.contentClass === "member" && file.relativePath !== MEMBERS_INDEX_PATH;
-
-    if (personalMemberContent) {
+    if (file.contentClass === "member") {
       if (document.frontmatter === "missing") {
         continue;
       }
@@ -256,7 +245,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
 
     validateRequiredNodeMetadata(document, file.relativePath, findings);
     validateSoftLinks({
-      allowArchive: file.contentClass === "member",
+      allowArchive: false,
       document,
       findings,
       path: file.relativePath,

@@ -100,13 +100,13 @@ describe("Agent Skills contracts", () => {
 
   it("declares the local-checkout invocation contracts", () => {
     const init = skillBody("context-tree-init");
-    expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title", "owner"]);
+    expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title"]);
 
     for (const name of ["context-tree-read", "context-tree-write"]) {
       const body = skillBody(name);
       expect(invocationInputs(body)).toEqual(["agent_slug", "tree_path", "branch"]);
       expect(body).toContain("Treat `agent_slug` as the agent identity");
-      expect(body).toContain("members/<agent_slug>/");
+      expect(body).toContain("members/<agent_slug>/memory.md");
     }
   });
 

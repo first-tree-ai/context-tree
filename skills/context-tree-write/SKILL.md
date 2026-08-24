@@ -21,8 +21,8 @@ issue, commit discussion, decision document, meeting note, or pasted source.
 That source is evidence in the task context, not a duplicated invocation input.
 Without concrete evidence, stop. Use one concrete source per PR.
 
-Treat `agent_slug` as the agent identity and use it only below
-`members/<agent_slug>/`.
+Treat `agent_slug` as the agent identity and use it solely to select the optional
+private-memory path `members/<agent_slug>/memory.md`.
 
 Use only `tree_path`. Its explicit path authorizes that exact worktree and
 verified `origin`, not another checkout or remote. Never infer the path from the
@@ -57,13 +57,13 @@ moves a fact to shared context and removes the private duplicate.
 If the base is invalid, block all semantic edits. Continue only for an explicit
 repair request. Repair only reported findings when authorized evidence
 determines the exact correction; otherwise stop. Make a repair-only PR and
-never invent owners, decisions, structure, or business content. The complete
+never invent decisions, structure, or business content. The complete
 repaired tree must pass verification before publication.
 
 ## Source-backed edit
 
-1. Read only the source, target, parent, relevant `soft_links`, and ownership profiles needed for the change.
-2. Edit an existing node unless the Add vs Edit policy requires a new one. Require explicit authority to change ownership, change a node with `decisionLocksCode: true`, or create a new project domain.
+1. Read only the source, target, parent, and relevant `soft_links` needed for the change.
+2. Edit an existing node unless the Add vs Edit policy requires a new one. Require explicit user or host authority to change a node with `decisionLocksCode: true` or create a new top-level domain.
 3. Edit only necessary regular, non-symlink Markdown in the task worktree. Preserve path containment and never replace or traverse symlinks.
 4. Run `context-tree verify --tree-path "<task-worktree>"` on the final tree.
 5. Inspect the complete `git diff`, including every changed path and full patch. Stop if it contains anything outside the authorized Context Tree change.

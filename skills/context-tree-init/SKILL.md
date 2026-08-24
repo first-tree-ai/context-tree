@@ -12,7 +12,7 @@ metadata:
 
 Use this skill only to create a new Context Tree; never update an existing tree.
 Require the user to provide a GitHub `OWNER/REPO`, a local destination that is
-absent or empty, a tree title, and an initial owner. Always use `main`; do not
+absent or empty, and a tree title. Always use `main`; do not
 accept a configurable branch. Support only `github.com`, not GitHub Enterprise
 Server or other forges.
 
@@ -25,12 +25,11 @@ package automatically.
 - `repository`: canonical `OWNER/REPO`
 - `tree_path`: absent or empty destination
 - `title`: tree title
-- `owner`: initial human owner
 
 ## Create and publish
 
-1. Validate all four inputs. Require canonical `OWNER/REPO`, not a URL, so credentials cannot enter commands or logs. Require `tree_path` to be absent or empty.
-2. Run `context-tree policy`, then `context-tree init --repository "OWNER/REPO" --tree-path "<tree_path>" --title "<title>" --owner "<owner>"`.
+1. Validate all three inputs. Require canonical `OWNER/REPO`, not a URL, so credentials cannot enter commands or logs. Require `tree_path` to be absent or empty.
+2. Run `context-tree policy`, then `context-tree init --repository "OWNER/REPO" --tree-path "<tree_path>" --title "<title>"`.
 3. Run `context-tree verify --tree-path "<tree_path>"` and require a valid result.
 4. In the explicit destination, run `git init --initial-branch=main`, add only the scaffolded files, inspect the complete staged diff, and commit.
 5. Run `gh repo create "OWNER/REPO" --private --source "<tree_path>" --remote origin --push`. Publish `main` only.

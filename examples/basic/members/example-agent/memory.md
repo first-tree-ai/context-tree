@@ -1,6 +1,5 @@
 ---
 title: "Example agent memory"
-owners: [example-agent]
 ---
 
 # Example agent memory

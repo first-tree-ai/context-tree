@@ -28,12 +28,12 @@ afterEach(() => {
 
 function validTree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ owner: "alice", path: root, repository: "acme/context", title: "Acme" });
+  scaffoldTree({ path: root, repository: "acme/context", title: "Acme" });
   return root;
 }
 
 function node(title: string): string {
-  return `---\ntitle: "${title}"\nowners: [alice]\n---\n\n# ${title}\n`;
+  return `---\ntitle: "${title}"\n---\n\n# ${title}\n`;
 }
 
 describe("schema version 1", () => {
@@ -68,20 +68,17 @@ describe("schema version 1", () => {
 });
 
 describe("verification", () => {
-  it("reports metadata, member, SCOPE, Markdown, and soft-link failures", () => {
+  it("reports metadata, SCOPE, Markdown, and soft-link failures", () => {
     const root = validTree();
     writeFileSync(join(root, "SCOPE.md"), "not frontmatter\n");
     writeFileSync(join(root, "bad.md"), "# Missing metadata\n[Outside](../secret.md)\n");
-    writeFileSync(join(root, "NODE.md"), '---\ntitle: "Root"\nowners: [alice]\nsoft_links: [missing.md]\n---\n');
-    writeFileSync(join(root, "members/alice/NODE.md"), '---\ntitle: "Alice"\nowners: []\ntype: robot\n---\n');
+    writeFileSync(join(root, "NODE.md"), '---\ntitle: "Root"\nsoft_links: [missing.md]\n---\n');
 
     const codes = new Set(verifyTree(root).findings.map((finding) => finding.code));
     expect(codes.has("TREE_SCOPE_INVALID")).toBe(true);
     expect(codes.has("TREE_FRONTMATTER_MISSING")).toBe(true);
     expect(codes.has("TREE_MARKDOWN_LINK_PATH_ESCAPE")).toBe(true);
     expect(codes.has("TREE_SOFT_LINK_BROKEN")).toBe(true);
-    expect(codes.has("TREE_MEMBER_OWNERS_INVALID")).toBe(true);
-    expect(codes.has("TREE_MEMBER_TYPE_INVALID")).toBe(true);
   });
 
   it("rejects invalid UTF-8 and symlinks that escape or cross content classes", () => {
@@ -104,14 +101,13 @@ describe("verification", () => {
     expect(codes).toContain("TREE_DIRECTORY_SYMLINK_PATH_ESCAPE");
   });
 
-  it("requires root and direct member nodes", () => {
+  it("requires the root but permits profile-free member directories", () => {
     const root = validTree();
-    mkdirSync(join(root, "members/bob"));
+    mkdirSync(join(root, "members/bob"), { recursive: true });
     writeFileSync(join(root, "members/bob/notes.md"), "notes");
     rmSync(join(root, "NODE.md"));
     const codes = verifyTree(root).findings.map((finding) => finding.code);
-    expect(codes).toContain("TREE_ROOT_MISSING");
-    expect(codes).toContain("TREE_MEMBER_NODE_MISSING");
+    expect(codes).toEqual(["TREE_ROOT_MISSING"]);
   });
 });
 
@@ -128,8 +124,6 @@ describe("scoped reading", () => {
     ]);
     expect(readTree(root, { path: "platform", depth: 0 }).entries.map((entry) => entry.path)).toEqual(["platform"]);
     expect(readTree(root, { classes: ["member"] }).entries.map((entry) => entry.path)).toEqual([
-      "members",
-      "members/alice",
       "members/alice/memory.md",
     ]);
     expect(readTree(root).entries.map((entry) => entry.path)).not.toContain("members/alice/memory.md");
@@ -169,10 +163,11 @@ describe("scaffold and policy", () => {
     expect(workflow).toContain('branches: ["main"]');
     expect(workflow).toContain("@first-tree-ai/context-tree@0.1.0 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
 
   it("rejects malformed GitHub identities", () => {
-    const base = { owner: "alice", path: join(tempRoot(), "tree"), title: "Acme" };
+    const base = { path: join(tempRoot(), "tree"), title: "Acme" };
     for (const repository of [
       "https://github.com/acme/context",
       "acme-/context",
@@ -197,7 +192,7 @@ describe("scaffold and policy", () => {
     symlinkSync(realDirectory, linkedDirectory);
     symlinkSync(join(temporary, "missing"), danglingLink);
     writeFileSync(file, "not a directory\n");
-    const options = { owner: "alice", repository: "acme/context", title: "Acme" };
+    const options = { repository: "acme/context", title: "Acme" };
     expect(() => scaffoldTree({ ...options, path: linkedDirectory })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: danglingLink })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
@@ -216,16 +211,23 @@ describe("scaffold and policy", () => {
     expect(policy.content).toMatch(/`context-tree verify` must\s+pass/u);
   });
 
-  it("accepts trees with no optional private memory file", () => {
+  it("scaffolds no members directory or optional private memory file", () => {
     const root = validTree();
+    expect(existsSync(join(root, "members"))).toBe(false);
     expect(existsSync(join(root, "members/alice/memory.md"))).toBe(false);
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
-  it("accepts a valid tree without optional private memory", () => {
+  it("accepts a valid tree without the optional members directory", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
-    rmSync(join(root, "members/alice/memory.md"));
+    rmSync(join(root, "members"), { recursive: true });
+    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+  });
+
+  it("treats owners as inert unknown metadata", () => {
+    const root = validTree();
+    writeFileSync(join(root, "legacy.md"), '---\ntitle: "Legacy metadata"\nowners: false\n---\n');
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 });

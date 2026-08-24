@@ -77,7 +77,6 @@ export function readTree(treePath: string, options: ReadTreeOptions = {}): Conte
       contentClass: file.contentClass,
       depth,
       kind: entry.kind,
-      owners: metadata?.owners ?? [],
       path: entry.path || ".",
       title: entry.title,
       ...(metadata?.description ? { description: metadata.description } : {}),

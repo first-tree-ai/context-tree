@@ -1,6 +1,5 @@
 ---
 title: "Platform"
-owners: [alice]
 ---
 
 # Platform

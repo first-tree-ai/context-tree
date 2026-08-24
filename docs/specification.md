@@ -27,22 +27,19 @@ related source repositories; it does not identify the Context Tree repository.
 
 The root requires `NODE.md`. A semantic directory represented as a node also
 contains `NODE.md`; organizational directories containing Markdown leaves need
-not. Normal nodes require a non-empty `title` and `owners` array. Optional
+not. Normal nodes require only a non-empty `title`. Optional
 `description` is non-empty prose, and optional `soft_links` contains
 tree-root-relative Markdown files or node directories.
 
 - `normal`: root and durable domain decisions.
 - `archive-supporting`: evidence beneath `raw-context/`.
-- `member`: ownership and routing beneath `members/`.
+- `member`: optional private agent memory beneath `members/`.
 - `repo-infra`: dot paths, generated output, instructions, build, and CI files.
 
 Normal content must not depend on archive-supporting content. Symlinks fail
 closed: they may not escape the tree, cross content-class boundaries, or stand
 in for domain directories. Reads default to normal content. Glob patterns are
 case-sensitive and segment-local.
-
-`members/NODE.md` is the member index. Every direct member directory requires a
-`NODE.md` with title, owners, type (`human` or `agent`), role, and domains.
 
 ## Memory model
 
@@ -52,30 +49,33 @@ There is no reserved shared-memory directory or second store alongside the
 canonical domain tree. Add and split shared memory with the ordinary node
 policy.
 
-An agent's optional private memory lives beside its member profile. Skills use
-`agent_slug` as the agent identity and select
-`members/<agent_slug>/memory.md`. Scaffolding does not create empty private
-memory files.
+An agent's optional private memory lives at `members/<agent_slug>/memory.md`.
+The `members/` directory, agent directory, and memory file are all optional;
+there is no member index or required profile. Skills use `agent_slug` only to
+select that private path. Scaffolding does not create empty private memory files.
 
 Domain scope controls read relevance, not authorization. Shared tree memory is
-commonly readable but remains owner-written. Private memory provides
+commonly readable but writes still require authorization from the user or host
+and follow the GitHub workflow. Private memory provides
 cooperative isolation only: an agent with access to the entire Git checkout can
 access the underlying files, so the format does not claim directory-level
 confidentiality.
 
 ## Public contracts
 
-CLI JSON uses `schemaVersion: 1`. Exported strict Zod schemas are the source of
-truth for library and CLI wire contracts. Unknown output properties are
-rejected. Successful command results and runtime or argument failures emit one
-JSON object on stdout; help and version output remain plain text. An invalid
-`verify` report is still emitted and the command exits with status 1.
+CLI JSON uses `schemaVersion: 1`. Version 1 was redefined before deployment;
+owner-bearing contracts have no compatibility layer. Exported strict Zod
+schemas are the source of truth for library and CLI wire contracts. Unknown
+output properties are rejected. Successful command results and runtime or
+argument failures emit one JSON object on stdout; help and version output remain
+plain text. An invalid `verify` report is still emitted and the command exits
+with status 1.
 
 `policy` returns `content` and `schemaVersion`. `read` returns the root, target,
-schema version, and selected entries. `verify` returns the root, schema version,
-validity, findings, and content-class counts. None includes a tree digest or
-per-entry digest. The Git commit SHA is recorded by the surrounding host Git
-workflow rather than computed by the core.
+schema version, and selected entries without ownership fields. `verify` returns
+the root, schema version, validity, findings, and content-class counts. None
+includes a tree digest or per-entry digest. The Git commit SHA is recorded by
+the surrounding host Git workflow rather than computed by the core.
 
 ## Lifecycle
 
@@ -83,7 +83,7 @@ Scaffolding always creates a validation workflow pinned to the package version
 that generated it. New repositories always initialize and publish `main`,
 regardless of the user's Git configuration; the generated workflow filters
 pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
-destination, a title, and an initial human owner.
+destination, and a title.
 
 Reads and writes take `agent_slug`, an existing checkout path, and a branch.
 The exact clean, non-symlink Git root and its credential-free GitHub `origin`
