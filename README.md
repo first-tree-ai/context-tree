@@ -68,8 +68,8 @@ creates an isolated worktree at its exact commit, verifies the base, edits only
 necessary Markdown, verifies again, inspects the complete diff, commits,
 non-force pushes, and opens a GitHub PR. The skill never merges. An invalid base
 blocks semantic changes; an explicit repair request may produce a repair-only
-PR limited to validator findings. Read and write use `agent_slug` solely to
-select optional private memory at `members/<agent_slug>/memory.md`.
+PR limited to validator findings. Read and write use `agent-slug` solely to
+select optional private memory at `members/<agent-slug>/memory.md`.
 
 ## Library integration
 

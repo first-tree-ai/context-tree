@@ -12,7 +12,7 @@ metadata:
 
 ## Invocation inputs
 
-- `agent_slug`: agent identity
+- `agent-slug`: agent identity
 - `tree_path`: existing fetch-only Context Tree Git checkout
 - `branch`: explicit base branch
 
@@ -21,8 +21,8 @@ issue, commit discussion, decision document, meeting note, or pasted source.
 That source is evidence in the task context, not a duplicated invocation input.
 Without concrete evidence, stop. Use one concrete source per PR.
 
-Treat `agent_slug` as the agent identity and use it solely to select the optional
-private-memory path `members/<agent_slug>/memory.md`.
+Treat `agent-slug` as the agent identity and use it solely to select the optional
+private-memory path `members/<agent-slug>/memory.md`.
 
 Use only `tree_path`. Its explicit path authorizes that exact worktree and
 verified `origin`, not another checkout or remote. Never infer the path from the
@@ -41,7 +41,7 @@ push, or PR.
 
 Write qualifying content into the narrowest authoritative node or leaf. Add or
 split nodes only when the policy requires it; do not create another shared
-memory store. Use only `members/<agent_slug>/memory.md` for private memory.
+memory store. Use only `members/<agent-slug>/memory.md` for private memory.
 Never inspect another member's memory or create an empty memory file. Promotion
 moves a fact to shared context and removes the private duplicate.
 

@@ -36,7 +36,7 @@ function skillBody(name: string): string {
 function invocationInputs(body: string): string[] {
   const section = /(?:^|\n)## Invocation inputs\n\n([\s\S]*?)(?=\n## |$)/u.exec(body)?.[1];
   if (section === undefined) throw new Error("Skill must declare its invocation inputs.");
-  return [...section.matchAll(/^- `([a-z_]+)`:/gmu)].map((match) => nonEmptyString(match[1]));
+  return [...section.matchAll(/^- `([a-z_-]+)`:/gmu)].map((match) => nonEmptyString(match[1]));
 }
 
 function compactWhitespace(value: string): string {
@@ -104,9 +104,9 @@ describe("Agent Skills contracts", () => {
 
     for (const name of ["context-tree-read", "context-tree-write"]) {
       const body = skillBody(name);
-      expect(invocationInputs(body)).toEqual(["agent_slug", "tree_path", "branch"]);
-      expect(body).toContain("Treat `agent_slug` as the agent identity");
-      expect(body).toContain("members/<agent_slug>/memory.md");
+      expect(invocationInputs(body)).toEqual(["agent-slug", "tree_path", "branch"]);
+      expect(body).toContain("Treat `agent-slug` as the agent identity");
+      expect(body).toContain("members/<agent-slug>/memory.md");
     }
   });
 
@@ -127,12 +127,29 @@ describe("Agent Skills contracts", () => {
     expect(write).not.toContain("^[A-Za-z0-9]");
 
     for (const body of [read, write]) {
-      expect(body).not.toMatch(/validate (?:the )?`?agent_slug|agent_slug.*ASCII|starting with a letter/iu);
+      expect(body).not.toMatch(/validate (?:the )?`?agent-slug|agent-slug.*ASCII|starting with a letter/iu);
     }
 
     const init = skillBody("context-tree-init");
     expect(init).not.toContain("--public");
     expect(init).toContain('gh repo create "OWNER/REPO" --private');
+  });
+
+  it("uses only agent-slug in shipped skills and documentation", () => {
+    const paths = [
+      resolve(import.meta.dirname, "../README.md"),
+      resolve(import.meta.dirname, "../docs/specification.md"),
+      resolve(import.meta.dirname, "../policy/context-tree-policy.md"),
+      ...skillDirectories().flatMap((directory) => [
+        join(directory, "SKILL.md"),
+        join(directory, "agents/openai.yaml"),
+      ]),
+    ];
+
+    for (const path of paths) {
+      const source = readFileSync(path, "utf8");
+      expect(source).not.toMatch(/agent_slug|member_slug|member-slug/u);
+    }
   });
 
   it("makes the exact existing checkout the read and write authorization boundary", () => {

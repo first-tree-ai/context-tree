@@ -49,9 +49,9 @@ There is no reserved shared-memory directory or second store alongside the
 canonical domain tree. Add and split shared memory with the ordinary node
 policy.
 
-An agent's optional private memory lives at `members/<agent_slug>/memory.md`.
+An agent's optional private memory lives at `members/<agent-slug>/memory.md`.
 The `members/` directory, agent directory, and memory file are all optional;
-there is no member index or required profile. Skills use `agent_slug` only to
+there is no member index or required profile. Skills use `agent-slug` only to
 select that private path. Scaffolding does not create empty private memory files.
 
 Domain scope controls read relevance, not authorization. Shared tree memory is
@@ -85,7 +85,7 @@ regardless of the user's Git configuration; the generated workflow filters
 pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
 destination, and a title.
 
-Reads and writes take `agent_slug`, an existing checkout path, and a branch.
+Reads and writes take `agent-slug`, an existing checkout path, and a branch.
 The exact clean, non-symlink Git root and its credential-free GitHub `origin`
 form the authorization boundary. Reads refresh fast-forward-only, validate, and
 report the commit SHA; authorized stale reads stay read-only.
