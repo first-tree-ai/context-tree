@@ -2,8 +2,8 @@
 
 ### What A Context Tree Is
 
-The Context Tree is durable context, not a source-code mirror, wiki dump, or
-task log. It records current decisions, constraints, ownership, and
+The Context Tree is durable shared memory, not a source-code mirror, wiki dump,
+or task log. It records current decisions, constraints, ownership, and
 cross-domain relationships with enough rationale that a future reader does
 not have to reconstruct them from GitHub PRs, chat logs, or tribal knowledge.
 
@@ -25,7 +25,7 @@ not belong in the tree.
 
 ### Content Classes And Authority
 
-- **Normal content** — root/domain `NODE.md`, regular domain leaves, and shared memory under `memory/`. Canonical domain nodes state current durable truth; when a decision changes, rewrite or remove old claims.
+- **Normal content** — shared memory in the root/domain `NODE.md` files and regular domain leaves. Canonical domain nodes state current durable truth; when a decision changes, rewrite or remove old claims. There is no separate shared-memory directory.
 - **Archive/supporting content** — proposals, meetings, explorations, and raw material such as `raw-context/`. It is evidence, not canonical truth: read it only when asked, when the source is archive/proposal material, or when the task needs archive context. Normal content must not require this class.
 - **Member content** — responsibility, ownership, and review scope such as `members/<id>/NODE.md`, plus optional private working memory at `members/<id>/memory.md`. Profiles route or validate *Who*; private memory is not a substitute for normal decision/constraint nodes.
 
@@ -54,38 +54,35 @@ decision test means the source is implementation detail; failing the
 durability test means the source captures how something was done this time,
 not what was decided.
 
-### Memory Scopes
+### Memory And Audience
 
-Memory is durable learned context whose absence would cause a future agent to
-make a different working decision. It must pass the Double Test before it is
-written. Memory is not a task log, transcript, speculative note, or duplicate
-store for project decisions.
+Every normal document in the Context Tree is shared memory. Memory is durable
+context whose absence would cause a future agent to make a different 
+working decision. It must pass the Double Test before it is written. Memory is
+not a task log, transcript, speculative note, or duplicate store alongside the
+canonical domain tree.
 
 | Question | Destination |
 | --- | --- |
-| Is this a durable project decision, constraint, rationale, or ownership fact? | Existing canonical domain node |
+| Should agents across domains know it? | Root `NODE.md` or an existing repository-wide leaf |
+| Should agents working in one domain know it? | The corresponding domain node or leaf |
 | Does only the current agent need it? | `members/<agent-id>/memory.md` |
-| Should agents working in one domain know it? | `memory/<domain>.md` |
-| Should agents across domains know it? | `memory/NODE.md` |
 
 Examples: an agent-specific tool preference is private memory; a reusable
-engineering debugging lesson is engineering memory; a repository-wide
-credential-handling rule is global memory; an API pagination decision and its
-rationale belong in the canonical API node, not memory.
+engineering debugging lesson belongs in the engineering domain; a
+repository-wide credential-handling rule belongs at the root; and an API
+pagination decision and its rationale belong in the canonical API node.
 
-Prefer the canonical domain tree for actual project decisions and constraints.
-For genuine memory, choose the narrowest audience that would make different
-future decisions without it. If broader relevance is plausible but not
-established, keep it private instead of publishing it as shared truth. Domain
-scope controls relevance, not authorization; shared means commonly readable,
-not writable by everyone.
+Choose the narrowest canonical location whose audience would make different
+future decisions without the memory. If broader relevance is plausible but not
+established, keep it in the relevant domain instead of publishing it at the
+root. Domain scope controls relevance, not authorization; shared means commonly
+readable, not writable by everyone.
 
-Domain and global memory updates require concrete evidence and the existing
-owner-reviewed PR workflow. Promotion moves the canonical statement into the
-shared memory scope and removes or reduces the private copy to a reference; do
-not maintain two independent versions. An agent cannot promote another agent's
-private memory because it must not read that memory. Start with one Markdown
-file per scope and split only when the Add vs Edit policy justifies it.
+Shared-memory updates require concrete evidence. Promotion moves the canonical statement from private memory into
+the appropriate root or domain node and removes or reduces the private copy to
+a reference; do not maintain two independent versions. An agent cannot promote
+another agent's private memory because it must not read that memory.
 
 ### Content Model: What / Why / Who
 

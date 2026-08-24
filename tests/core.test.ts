@@ -123,8 +123,6 @@ describe("scoped reading", () => {
     expect(readTree(root).entries.map((entry) => entry.path)).toEqual([
       ".",
       "decisions/runtime.md",
-      "memory",
-      "memory/platform.md",
       "platform",
       "SCOPE.md",
     ]);
@@ -208,27 +206,24 @@ describe("scaffold and policy", () => {
   it("ships the canonical policy", () => {
     const policy = readContextTreePolicy();
     expect(policy.content).toContain("### The Double Test");
-    expect(policy.content).toContain("### Memory Scopes");
-    expect(policy.content).toContain("Memory is not a task log");
-    expect(policy.content).toContain("Prefer the canonical domain tree for actual project decisions and constraints");
-    expect(policy.content).toContain("choose the narrowest audience");
+    expect(policy.content).toContain("### Memory And Audience");
+    expect(policy.content).toContain("Every normal document in the Context Tree is shared memory");
+    expect(policy.content).toMatch(/Memory is\s+not a task log/u);
+    expect(policy.content).toContain("There is no separate shared-memory directory");
+    expect(policy.content).toContain("Choose the narrowest canonical location");
     expect(policy.content).toContain("`context-tree verify` must pass");
   });
 
-  it("accepts trees with no optional memory files", () => {
+  it("accepts trees with no optional private memory file", () => {
     const root = validTree();
-    expect(existsSync(join(root, "memory"))).toBe(false);
     expect(existsSync(join(root, "members/alice/memory.md"))).toBe(false);
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
-  it.each(["memory/NODE.md", "memory/platform.md", "members/alice/memory.md"])(
-    "accepts valid trees without optional %s",
-    (relativePath) => {
-      const root = join(tempRoot(), "existing");
-      cpSync(join(FIXTURES, "valid"), root, { recursive: true });
-      rmSync(join(root, relativePath));
-      expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
-    },
-  );
+  it("accepts a valid tree without optional private memory", () => {
+    const root = join(tempRoot(), "existing");
+    cpSync(join(FIXTURES, "valid"), root, { recursive: true });
+    rmSync(join(root, "members/alice/memory.md"));
+    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+  });
 });

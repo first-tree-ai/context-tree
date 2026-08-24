@@ -44,21 +44,24 @@ case-sensitive and segment-local.
 `members/NODE.md` is the member index. Every direct member directory requires a
 `NODE.md` with title, owners, type (`human` or `agent`), role, and domains.
 
-## Memory conventions
+## Memory model
 
-Memory uses ordinary Markdown and existing frontmatter. Shared global memory
-lives at `memory/NODE.md`, shared domain memory at `memory/<domain>.md`, and an
-agent's private memory at `members/<agent-id>/memory.md` beside its normal
-member profile. All memory files are optional. Scaffolding does not create
-empty memory files or speculative domain scopes.
+The Context Tree itself is shared memory. Repository-wide memory belongs in the
+root `NODE.md`; domain memory belongs in the corresponding domain node or leaf.
+There is no reserved shared-memory directory or second store alongside the
+canonical domain tree. Add and split shared memory with the ordinary node
+policy.
+
+An agent's optional private memory lives at `members/<agent-id>/memory.md`
+beside its member profile. Scaffolding does not create empty private-memory
+files.
 
 The host or runtime supplies the trusted agent identity; the Context Tree does
 not authenticate an identity found in task prose. Domain scope controls read
-relevance, not authorization. Shared memory is commonly readable but remains
-owner-written. Private memory provides cooperative isolation only: an agent
-with access to the entire Git checkout can access the underlying files, so the
-format does not claim directory-level confidentiality. One Markdown file per
-scope is sufficient until the ordinary node-splitting policy justifies more.
+relevance, not authorization. Shared tree memory is commonly readable but
+remains owner-written. Private memory provides cooperative isolation only: an
+agent with access to the entire Git checkout can access the underlying files,
+so the format does not claim directory-level confidentiality.
 
 ## Public contracts
 

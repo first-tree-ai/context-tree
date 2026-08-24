@@ -9,3 +9,7 @@ owners: [example-owner]
 ## Decision
 
 Durable system decisions live under `systems/`.
+
+## Constraints
+
+- When host behavior appears inconsistent, confirm checkout identity before diagnosing tree content.

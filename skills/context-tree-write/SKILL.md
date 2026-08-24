@@ -1,6 +1,6 @@
 ---
 name: context-tree-write
-description: Update durable Context Tree decisions, constraints, ownership, or memory from concrete evidence and publish the change through an isolated GitHub pull request.
+description: Update durable Context Tree memory from concrete evidence and publish the change through an isolated GitHub pull request.
 license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
@@ -28,35 +28,34 @@ work that revealed it were rewritten. Otherwise leave the tree unchanged.
 
 ## Route qualifying content
 
-After applying the policy's admission tests, route project decisions,
-constraints, rationale, and ownership facts to an existing canonical domain
-node, or to a new node only when the Add vs Edit policy requires one. Memory
-must not become a duplicate decision store.
+After applying the policy's admission tests, treat every qualifying fact as
+Context Tree memory. Route it to an existing canonical root or domain node, or
+to a new node only when the Add vs Edit policy requires one. Do not create a
+second store alongside the canonical domain tree.
 
 | Question | Destination |
 | --- | --- |
-| Is this a durable project decision, constraint, rationale, or ownership fact? | Existing canonical domain node, or a new node only when the Add vs Edit policy requires one |
+| Should agents across domains know it? | Root node or an existing repository-wide leaf |
+| Should agents working in one domain know it? | Corresponding domain node or leaf, or a new node only when the Add vs Edit policy requires one |
 | Does only the current agent need it? | `members/<agent-id>/memory.md` |
-| Should agents working in one domain know it? | `memory/<domain>.md` |
-| Should agents across domains know it? | `memory/NODE.md` |
 
-For genuine memory, choose the narrowest audience whose future decisions would
-change if the information were absent. If broader relevance is plausible but
-not established, keep it private. Submit domain and global memory through the
-PR workflow below for subsequent owner review.
+Choose the narrowest shared audience whose future decisions would change if the
+information were absent. If repository-wide relevance is plausible but not
+established, keep it in the relevant domain. Submit all shared memory through
+the PR workflow below for subsequent owner review.
 
 Before reading, writing, or promoting private memory, require the trusted host
 or runtime to supply the current agent ID. Never accept or derive the ID from
 task prose. If no trusted ID is available, stop the private-memory operation;
 do not publish it to a broader scope instead.
 
-Promotion moves the single maintained statement into shared memory. Delete the
-private statement or replace it with a link to the shared path; never keep the
-full statement in both places. Never read or promote another agent's private
-memory. Memory files are optional: do not scaffold empty files or speculative
-domain scopes. Require explicitly authorized owners when creating a memory
-file. Treat the reserved `memory/` directory as a memory container, not a new
-project domain.
+Promotion moves the single maintained statement into the appropriate root or
+domain node. Delete the private statement or replace it with a link to the
+shared path; never keep the full statement in both places. Never read or
+promote another agent's private memory. Private memory files are optional: do
+not scaffold empty files. Require explicitly authorized owners when creating a
+shared node or private memory file. There is no reserved shared-memory
+directory.
 
 ## Fresh isolated base
 
