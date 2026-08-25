@@ -1,21 +1,11 @@
-import matter from "gray-matter";
 import { parse } from "yaml";
 
 import { isRecord } from "./value.js";
 
-export type ParsedMarkdownFrontmatter = {
-  body: string;
-  data: Record<string, unknown> | null;
-  error?: string;
-  frontmatter: "invalid" | "missing" | "valid";
-};
-
-export type ParseMarkdownFrontmatterOptions = {
-  strictDelimiters?: boolean;
-};
-
-const STRICT_FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u;
-const PERMISSIVE_FRONTMATTER_RE = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\s*\r?\n|\s*$)([\s\S]*)$/u;
+export type ParsedMarkdownFrontmatter =
+  | { body: string; data: null; error: string; frontmatter: "invalid" }
+  | { body: string; data: null; frontmatter: "missing" }
+  | { body: string; data: Record<string, unknown>; frontmatter: "valid" };
 
 function parseYamlMapping(source: string): Record<string, unknown> {
   const value: unknown = parse(source);
@@ -25,33 +15,55 @@ function parseYamlMapping(source: string): Record<string, unknown> {
   return value;
 }
 
-const MATTER_OPTIONS = { engines: { yaml: parseYamlMapping } };
+type Line = {
+  end: number;
+  start: number;
+  value: string;
+};
 
-export function parseMarkdownFrontmatter(
-  source: string,
-  options: ParseMarkdownFrontmatterOptions = {},
-): ParsedMarkdownFrontmatter {
-  const pattern = options.strictDelimiters === true ? STRICT_FRONTMATTER_RE : PERMISSIVE_FRONTMATTER_RE;
-  const match = pattern.exec(source);
-  if (!matter.test(source) || match === null) {
+function readLine(source: string, start: number): Line {
+  const newline = source.indexOf("\n", start);
+  const end = newline === -1 ? source.length : newline + 1;
+  const contentEnd = newline === -1 ? source.length : source.charCodeAt(newline - 1) === 13 ? newline - 1 : newline;
+  return { end, start, value: source.slice(start, contentEnd) };
+}
+
+export function parseMarkdownFrontmatter(source: string): ParsedMarkdownFrontmatter {
+  const opening = readLine(source, 0);
+  if (opening.value !== "---") {
     return { body: source, data: null, frontmatter: "missing" };
   }
 
-  try {
-    const parsed = matter(source, MATTER_OPTIONS);
-    const data: unknown = parsed.data;
-    if (!isRecord(data)) {
-      return {
-        body: parsed.content,
-        data: null,
-        error: "frontmatter must be a YAML mapping",
-        frontmatter: "invalid",
-      };
+  let closing: Line | undefined;
+  let lineStart = opening.end;
+  while (lineStart < source.length) {
+    const line = readLine(source, lineStart);
+    if (line.value === "---") {
+      closing = line;
+      break;
     }
-    return { body: parsed.content, data, frontmatter: "valid" };
+    lineStart = line.end;
+  }
+
+  if (closing === undefined) {
+    return {
+      body: "",
+      data: null,
+      error: "frontmatter closing delimiter is missing",
+      frontmatter: "invalid",
+    };
+  }
+
+  const body = source.slice(closing.end);
+  try {
+    return {
+      body,
+      data: parseYamlMapping(source.slice(opening.end, closing.start)),
+      frontmatter: "valid",
+    };
   } catch (error) {
     return {
-      body: match[2] ?? "",
+      body,
       data: null,
       error: error instanceof Error ? error.message : String(error),
       frontmatter: "invalid",

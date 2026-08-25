@@ -1,6 +1,6 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Portable Context Tree schemas, tooling, and agent skills.",
   "type": "module",
   "license": "Apache-2.0",
@@ -63,7 +63,6 @@
   },
   "dependencies": {
     "commander": "^15.0.0",
-    "gray-matter": "^4.0.3",
     "mdast-util-from-markdown": "^2.0.3",
     "yaml": "^2.8.3",
     "zod": "^4.0.0"

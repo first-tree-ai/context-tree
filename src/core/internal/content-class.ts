@@ -1,28 +1,31 @@
-import type { Dirent } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 import type { ContextContentClass, ContextContentClassCounts } from "../../schemas.js";
 import { isPathInside } from "../path.js";
 
-export type ContextMarkdownFile = {
+type MarkdownTargetInspection =
+  | { kind: "content-class-mismatch"; canonicalRelativePath: string }
+  | { kind: "escaped" }
+  | { kind: "regular" }
+  | { kind: "unresolved" }
+  | { kind: "unsupported" };
+
+type ContextMarkdownFile = {
   absolutePath: string;
-  canonicalContentClass: ContextContentClass;
-  canonicalRelativePath: string;
   contentClass: ContextContentClass;
-  escaped: boolean;
+  inspection: MarkdownTargetInspection;
   relativePath: string;
-  unsupported: boolean;
-  unresolved: boolean;
 };
 
-export type ContextDirectorySymlink = {
-  contentClass: ContextContentClass;
+type ContextDirectorySymlink = {
   escaped: boolean;
   relativePath: string;
 };
 
-export type ContextMarkdownCollection = {
+type ContextMarkdownCollection = {
+  directories: string[];
   directorySymlinks: ContextDirectorySymlink[];
   files: ContextMarkdownFile[];
 };
@@ -31,7 +34,7 @@ const GENERATED_DIRECTORY_NAMES = new Set(["node_modules", "__pycache__", "dist"
 const REPO_INFRA_MARKDOWN_FILES = new Set(["AGENTS.md", "CLAUDE.md"]);
 const MANAGED_SYMLINK_PATHS = new Set(["WHITEPAPER.md"]);
 
-export function toTreeRelativePosixPath(treeRoot: string, targetPath: string): string {
+function toTreeRelativePosixPath(treeRoot: string, targetPath: string): string {
   return relative(treeRoot, targetPath).replace(/\\/gu, "/");
 }
 
@@ -40,15 +43,11 @@ export function classifyContextContent(relativePath: string): ContextContentClas
   const parts = normalized.split("/").filter((part) => part.length > 0);
 
   if (
-    parts.length === 0 ||
     parts.some((part) => part.startsWith(".") || GENERATED_DIRECTORY_NAMES.has(part)) ||
+    parts[0] === "scripts" ||
     REPO_INFRA_MARKDOWN_FILES.has(parts.at(-1) ?? "")
   ) {
     return "repo-infra";
-  }
-
-  if (parts[0] === "raw-context") {
-    return "archive-supporting";
   }
 
   if (parts[0] === "members") {
@@ -61,20 +60,9 @@ export function classifyContextContent(relativePath: string): ContextContentClas
 export function emptyContentClassCounts(): ContextContentClassCounts {
   return {
     normal: 0,
-    "archive-supporting": 0,
     member: 0,
     "repo-infra": 0,
   };
-}
-
-export function isSafeCanonicalMarkdown(file: ContextMarkdownFile): boolean {
-  return (
-    file.contentClass !== "repo-infra" &&
-    !file.escaped &&
-    !file.unresolved &&
-    !file.unsupported &&
-    file.canonicalContentClass === file.contentClass
-  );
 }
 
 function readDirectoryEntries(path: string): Dirent[] {
@@ -85,7 +73,41 @@ function readDirectoryEntries(path: string): Dirent[] {
   }
 }
 
+type CanonicalTarget = { kind: "escaped" } | { kind: "resolved"; relativePath: string } | { kind: "unresolved" };
+
+function canonicalTarget(realTreeRoot: string, path: string): CanonicalTarget {
+  try {
+    const realTarget = realpathSync(path);
+    if (!isPathInside(realTreeRoot, realTarget)) return { kind: "escaped" };
+    return { kind: "resolved", relativePath: toTreeRelativePosixPath(realTreeRoot, realTarget) };
+  } catch {
+    return { kind: "unresolved" };
+  }
+}
+
+function inspectMarkdownSymlink(
+  realTreeRoot: string,
+  absolutePath: string,
+  contentClass: ContextContentClass,
+): MarkdownTargetInspection {
+  let targetStat: Stats;
+  try {
+    targetStat = statSync(absolutePath);
+  } catch {
+    return { kind: "unresolved" };
+  }
+
+  const target = canonicalTarget(realTreeRoot, absolutePath);
+  if (target.kind !== "resolved") return target;
+  if (!targetStat.isFile()) return { kind: "unsupported" };
+  if (classifyContextContent(target.relativePath) !== contentClass) {
+    return { kind: "content-class-mismatch", canonicalRelativePath: target.relativePath };
+  }
+  return { kind: "regular" };
+}
+
 export function collectContextMarkdownContent(treeRoot: string): ContextMarkdownCollection {
+  const directories: string[] = [];
   const directorySymlinks: ContextDirectorySymlink[] = [];
   const files: ContextMarkdownFile[] = [];
   const realTreeRoot = realpathSync(treeRoot);
@@ -98,6 +120,7 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
 
       if (entry.isDirectory()) {
         if (contentClass !== "repo-infra") {
+          directories.push(relativePath);
           walk(absolutePath);
         }
         continue;
@@ -109,50 +132,12 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
           const targetStat = statSync(absolutePath);
           if (targetStat.isDirectory()) {
             if (contentClass !== "repo-infra" || entry.name.endsWith(".md")) {
+              const target = canonicalTarget(realTreeRoot, absolutePath);
               directorySymlinks.push({
-                contentClass,
-                escaped: !isPathInside(realTreeRoot, realpathSync(absolutePath)),
+                escaped: target.kind === "escaped",
                 relativePath,
               });
             }
-            continue;
-          }
-
-          if (!targetStat.isFile() && entry.name.endsWith(".md")) {
-            let escaped = false;
-            let canonicalContentClass = contentClass;
-            let canonicalRelativePath = relativePath;
-            try {
-              const realTarget = realpathSync(absolutePath);
-              escaped = !isPathInside(realTreeRoot, realTarget);
-              canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
-              if (!escaped) {
-                canonicalContentClass = classifyContextContent(canonicalRelativePath);
-              }
-            } catch {
-              files.push({
-                absolutePath,
-                canonicalContentClass,
-                canonicalRelativePath,
-                contentClass,
-                escaped: false,
-                relativePath,
-                unsupported: false,
-                unresolved: true,
-              });
-              continue;
-            }
-
-            files.push({
-              absolutePath,
-              canonicalContentClass,
-              canonicalRelativePath,
-              contentClass,
-              escaped,
-              relativePath,
-              unsupported: true,
-              unresolved: false,
-            });
             continue;
           }
         } catch {
@@ -162,13 +147,9 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
           if (entry.name.endsWith(".md")) {
             files.push({
               absolutePath,
-              canonicalContentClass: contentClass,
-              canonicalRelativePath: relativePath,
               contentClass,
-              escaped: false,
+              inspection: { kind: "unresolved" },
               relativePath,
-              unsupported: false,
-              unresolved: true,
             });
           }
           continue;
@@ -183,43 +164,17 @@ export function collectContextMarkdownContent(treeRoot: string): ContextMarkdown
         continue;
       }
 
-      try {
-        if (!statSync(absolutePath).isFile()) {
-          continue;
-        }
-      } catch {
-        continue;
-      }
-
-      let escaped = false;
-      let canonicalContentClass = contentClass;
-      let canonicalRelativePath = relativePath;
-      if (symbolicLink) {
-        try {
-          const realTarget = realpathSync(absolutePath);
-          escaped = !isPathInside(realTreeRoot, realTarget);
-          canonicalRelativePath = toTreeRelativePosixPath(realTreeRoot, realTarget);
-          if (!escaped) {
-            canonicalContentClass = classifyContextContent(canonicalRelativePath);
-          }
-        } catch {
-          continue;
-        }
-      }
-
       files.push({
         absolutePath,
-        canonicalContentClass,
-        canonicalRelativePath,
         contentClass,
-        escaped,
+        inspection: symbolicLink
+          ? inspectMarkdownSymlink(realTreeRoot, absolutePath, contentClass)
+          : { kind: "regular" },
         relativePath,
-        unsupported: false,
-        unresolved: false,
       });
     }
   }
 
   walk(treeRoot);
-  return { directorySymlinks, files };
+  return { directories, directorySymlinks, files };
 }

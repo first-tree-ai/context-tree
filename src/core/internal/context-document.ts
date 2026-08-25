@@ -3,12 +3,14 @@ import { readUtf8File } from "./filesystem.js";
 
 export type ContextDocument = ParsedMarkdownFrontmatter;
 
-export type NodeMetadata = {
+type ParsedNodeDocument = {
+  body: string;
+  frontmatter: Record<string, unknown>;
   description?: string;
   title: string;
 };
 
-export type ContextField<T> =
+type ContextField<T> =
   | { present: false; valid: false }
   | { present: true; valid: false }
   | { present: true; valid: true; value: T };
@@ -60,9 +62,9 @@ export function readNonEmptyStringArrayField(data: Record<string, unknown>, key:
   return { present: true, valid: true, value: items };
 }
 
-export function readNodeMetadata(path: string): NodeMetadata | null {
+export function readNodeDocument(path: string): ParsedNodeDocument | null {
   const document = readContextDocument(path);
-  if (document.frontmatter !== "valid" || document.data === null) {
+  if (document.frontmatter !== "valid") {
     return null;
   }
 
@@ -74,6 +76,8 @@ export function readNodeMetadata(path: string): NodeMetadata | null {
   }
 
   return {
+    body: document.body,
+    frontmatter: document.data,
     title: title.value,
     ...(description.valid ? { description: description.value } : {}),
   };

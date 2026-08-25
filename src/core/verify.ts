@@ -2,7 +2,7 @@ import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  parseContextTreeScope,
+  parseContextTreeRootNode,
   SCHEMA_VERSION,
   type TreeValidationFinding,
   VALIDATION_CODES,
@@ -12,22 +12,24 @@ import { readUtf8File } from "./internal/filesystem.js";
 import { collectNodeValidationFindings } from "./internal/validate-nodes.js";
 import { resolveTreeRoot } from "./path.js";
 
-function scopeFindings(root: string): TreeValidationFinding[] {
-  const path = join(root, "SCOPE.md");
-  if (!existsSync(path)) return [];
+function rootNodeFindings(root: string): TreeValidationFinding[] {
+  const path = join(root, "NODE.md");
+  if (!existsSync(path)) {
+    return [{ code: VALIDATION_CODES.rootMissing, message: "root NODE.md is missing", path: "NODE.md" }];
+  }
   try {
     const entry = lstatSync(path);
     if (entry.isSymbolicLink() || !entry.isFile()) {
-      throw new Error("SCOPE.md must be a regular root file and must not be a symlink.");
+      throw new Error("Root NODE.md must be a regular file and must not be a symlink.");
     }
-    parseContextTreeScope(readUtf8File(path));
+    parseContextTreeRootNode(readUtf8File(path));
     return [];
   } catch (error) {
     return [
       {
-        code: VALIDATION_CODES.scopeInvalid,
+        code: VALIDATION_CODES.rootNodeInvalid,
         message: error instanceof Error ? error.message : String(error),
-        path: "SCOPE.md",
+        path: "NODE.md",
       },
     ];
   }
@@ -46,11 +48,7 @@ function deduplicate(findings: TreeValidationFinding[]): TreeValidationFinding[]
 export function verifyTree(treePath: string): VerifyTreeReport {
   const root = resolveTreeRoot(treePath);
   const nodeResult = collectNodeValidationFindings(root);
-  const rootNode = join(root, "NODE.md");
-  const rootFinding: TreeValidationFinding[] = existsSync(rootNode)
-    ? []
-    : [{ code: VALIDATION_CODES.rootMissing, message: "root NODE.md is missing", path: "NODE.md" }];
-  const findings = deduplicate([...rootFinding, ...scopeFindings(root), ...nodeResult.findings]);
+  const findings = deduplicate([...rootNodeFindings(root), ...nodeResult.findings]);
 
   return {
     findings,

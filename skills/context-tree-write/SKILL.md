@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
   author: first-tree-ai
-  version: "0.1.0"
+  version: "0.1.1"
 ---
 
 # Context Tree Write
@@ -22,8 +22,9 @@ That source is evidence in the task context, not a duplicated invocation input.
 Without concrete evidence, stop. Use one concrete source per write and commit,
 including a repair-only write.
 
-Treat `agent_slug` as the agent identity and use it solely to select the optional
-private-memory path `members/<agent_slug>/memory.md`.
+Treat `agent_slug` as the agent identity and use it to prioritize the optional
+member path `members/<agent_slug>/`. Do not write to a member directory that is not your own.
+If you do not yet have a member directory, create one.
 
 Use only `tree_path`. Its explicit path authorizes that exact worktree and
 verified `origin`, not another checkout or remote. Never infer the path from the
@@ -42,8 +43,8 @@ push, or PR.
 
 Write qualifying content into the narrowest authoritative node or leaf. Add or
 split nodes only when the policy requires it; do not create another shared
-memory store. Use only `members/<agent_slug>/memory.md` for private memory.
-Never inspect another member's memory or create an empty memory file. Promotion
+memory store. Use `members/<agent_slug>/memory.md` for private memory and ensure
+every created directory has a `NODE.md`. Do not write to a member directory that is not your own. Promotion
 moves a fact to shared context and removes the private duplicate.
 
 ## Authorize and fetch the base

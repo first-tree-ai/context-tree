@@ -7,39 +7,43 @@ A shared Context Tree lives in a `github.com` repository identified as
 still operates on local clones and worktrees because validation and editing are
 filesystem operations.
 
-The tree root is a real directory containing `NODE.md`. Optional `SCOPE.md`
-must be a regular UTF-8 file with schema-version-1 frontmatter and non-empty
-prose:
+The tree root is a real directory containing a regular, non-symlink `NODE.md`.
+That root node is both the tree manifest and the repository-wide context node.
+It must contain non-empty prose and schema-version-1 frontmatter:
 
 ```yaml
 ---
 schemaVersion: 1
+title: "Service Context"
+description: "Durable decisions shared across service domains."
 relatedRepositories:
   - https://github.com/acme/service.git
 ---
 ```
 
-`relatedRepositories` remains provider-neutral and accepts at most 64
+Root-only `schemaVersion` is required. Root-only `relatedRepositories` is
+optional, remains provider-neutral, and accepts at most 64
 credential-free HTTP(S), `ssh://`, or scp-style SSH references. It describes
 related source repositories; it does not identify the Context Tree repository.
+Neither root-only field is valid on domain nodes or Markdown leaves. A legacy
+`SCOPE.md` has no special meaning and is validated as an ordinary leaf.
 
 ## Nodes and content classes
 
-The root requires `NODE.md`. A semantic directory represented as a node also
-contains `NODE.md`; organizational directories containing Markdown leaves need
-not. Normal nodes require only a non-empty `title`. Optional
+The root requires the manifest fields above in `NODE.md`. Every semantic
+directory contains `NODE.md`, including `members/` and each member directory.
+Nodes and leaves require a non-empty `title`. Optional
 `description` is non-empty prose, and optional `soft_links` contains
 tree-root-relative Markdown files or node directories.
 
 - `normal`: root and durable domain decisions.
-- `archive-supporting`: evidence beneath `raw-context/`.
-- `member`: optional private agent memory beneath `members/`.
-- `repo-infra`: dot paths, generated output, instructions, build, and CI files.
+- `member`: member-oriented context beneath `members/`.
+- `repo-infra`: dot paths, generated output, root `scripts/`, instructions, build, and CI files.
 
-Normal content must not depend on archive-supporting content. Symlinks fail
-closed: they may not escape the tree, cross content-class boundaries, or stand
-in for domain directories. Reads default to normal content. Glob patterns are
-case-sensitive and segment-local.
+`raw-context/` has no reserved meaning and follows ordinary node rules.
+Symlinks fail closed: they may not escape the tree, cross content-class
+boundaries, or stand in for domain directories. Repository infrastructure is
+excluded from semantic validation and reads.
 
 ## Memory model
 
@@ -51,15 +55,15 @@ policy.
 
 An agent's optional private memory lives at `members/<agent_slug>/memory.md`.
 The `members/` directory, agent directory, and memory file are all optional;
-there is no member index or required profile. Skills use `agent_slug` only to
-select that private path. Scaffolding does not create empty private memory files.
+when present, each directory requires its ordinary `NODE.md` index. Skills use
+`agent_slug` to avoid unrelated member content by default. Scaffolding does not
+create empty private memory files.
 
 Domain scope controls read relevance, not authorization. Shared tree memory is
 commonly readable but writes still require authorization from the user or host
-and follow the GitHub workflow. Private memory provides
-cooperative isolation only: an agent with access to the entire Git checkout can
-access the underlying files, so the format does not claim directory-level
-confidentiality.
+and follow the GitHub workflow. Member boundaries are relevance guidance only:
+the library and CLI apply no member-level access restriction, and the format
+claims no directory-level confidentiality.
 
 ## Public contracts
 
@@ -72,18 +76,22 @@ plain text. An invalid `verify` report is still emitted and the command exits
 with status 1.
 
 `policy` returns `content` and `schemaVersion`. `read` returns the root, target,
-schema version, and selected entries without ownership fields. `verify` returns
+schema version, a selected node with its complete parsed frontmatter and body,
+and sorted immediate child summaries. `verify` returns
 the root, schema version, validity, findings, and content-class counts. None
 includes a tree digest or per-entry digest. The Git commit SHA is recorded by
 the surrounding host Git workflow rather than computed by the core.
 
 ## Lifecycle
 
-Scaffolding always creates a validation workflow pinned to the package version
-that generated it. New repositories always initialize and publish `main`,
-regardless of the user's Git configuration; the generated workflow filters
-pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
-destination, and a title.
+Scaffolding creates exactly two files: root `NODE.md` and
+`.github/workflows/validate-context-tree.yml`. The workflow is pinned to the
+package version that generated it. Init takes canonical `OWNER/REPO` and an
+optional absent or empty destination. It requires Git, runs ordinary `git init`, and uses the
+unborn branch selected by Git's effective `init.defaultBranch` configuration or
+compiled fallback. The generated workflow filters pushes to that exact branch.
+The local tree title and default destination name come from `REPO`. The core and
+CLI perform no GitHub or credential operations.
 
 Reads take `agent_slug`, an existing checkout path, and `branch`. Writes take
 `agent_slug`, an existing fetch-only checkout path, and the authoritative

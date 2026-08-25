@@ -1,46 +1,7 @@
 export { readContextTreePolicy } from "./core/policy.js";
-export {
-  classifyTreePath,
-  type ReadTreeOptions,
-  readTree,
-} from "./core/read.js";
+export { readTree } from "./core/read.js";
 export {
   type ScaffoldTreeOptions,
   scaffoldTree,
 } from "./core/scaffold.js";
 export { verifyTree } from "./core/verify.js";
-export {
-  CLI_ERROR_CODES,
-  CONTEXT_TREE_SCOPE_MAX_BYTES,
-  type ContextContentClass,
-  type ContextContentClassCounts,
-  type ContextTreeCliError,
-  type ContextTreeCliErrorCode,
-  type ContextTreeCliErrorEnvelope,
-  type ContextTreePolicy,
-  type ContextTreeReadEntry,
-  type ContextTreeReadResult,
-  type ContextTreeScope,
-  contextContentClassCountsSchema,
-  contextContentClassSchema,
-  contextTreeCliErrorCodeSchema,
-  contextTreeCliErrorEnvelopeSchema,
-  contextTreeCliErrorSchema,
-  contextTreePolicySchema,
-  contextTreeReadEntrySchema,
-  contextTreeReadResultSchema,
-  contextTreeScopeFrontmatterSchema,
-  contextTreeScopeSchema,
-  credentialFreeRepositoryUrlSchema,
-  parseContextTreeScope,
-  SCHEMA_VERSION,
-  type ScaffoldTreeResult,
-  scaffoldTreeResultSchema,
-  type TreeValidationFinding,
-  treeValidationFindingSchema,
-  VALIDATION_CODES,
-  type ValidationCode,
-  type VerifyTreeReport,
-  validationCodeSchema,
-  verifyTreeReportSchema,
-} from "./schemas.js";

@@ -1,19 +1,27 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  credentialFreeRepositoryUrlSchema,
-  parseContextTreeScope,
-  readContextTreePolicy,
-  readTree,
-  scaffoldTree,
-  verifyTree,
-} from "../src/index.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { credentialFreeRepositoryUrlSchema, parseContextTreeRootNode } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
+const EXAMPLES = resolve(import.meta.dirname, "../examples");
 const temporaryRoots = new Set<string>();
+const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
 
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "context-tree-test-"));
@@ -22,13 +30,24 @@ function tempRoot(): string {
 }
 
 afterEach(() => {
+  if (originalGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal;
+  if (originalGitConfigNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+  else process.env.GIT_CONFIG_NOSYSTEM = originalGitConfigNoSystem;
   for (const root of temporaryRoots) rmSync(root, { force: true, recursive: true });
   temporaryRoots.clear();
 });
 
+beforeEach(() => {
+  const config = join(tempRoot(), "gitconfig");
+  writeFileSync(config, "[init]\n\tdefaultBranch = trunk\n");
+  process.env.GIT_CONFIG_GLOBAL = config;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
+});
+
 function validTree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context", title: "Acme" });
+  scaffoldTree({ path: root, repository: "acme/context" });
   return root;
 }
 
@@ -37,14 +56,21 @@ function node(title: string): string {
 }
 
 describe("schema version 1", () => {
-  it("keeps SCOPE relatedRepositories provider-neutral and credential-free", () => {
-    for (const repository of [
+  it("keeps root NODE relatedRepositories provider-neutral and credential-free", () => {
+    const validRepositories = [
       "http://git.example.test/acme/tree.git",
       "https://github.com/acme/tree.git",
       "ssh://git@git.example.test/acme/tree.git",
       "git@git.example.test:acme/tree.git",
-    ]) {
+    ];
+    for (const repository of validRepositories) {
       expect(credentialFreeRepositoryUrlSchema.safeParse(repository).success, repository).toBe(true);
+      const root = validTree();
+      writeFileSync(
+        join(root, "NODE.md"),
+        `---\nschemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - ${repository}\n---\n\n# Root\n`,
+      );
+      expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
     }
     for (const repository of [
       "https://token@github.com/acme/tree.git",
@@ -54,13 +80,28 @@ describe("schema version 1", () => {
       expect(credentialFreeRepositoryUrlSchema.safeParse(repository).success, repository).toBe(false);
     }
     expect(
-      parseContextTreeScope(
-        "---\nschemaVersion: 1\nrelatedRepositories:\n  - https://gitlab.example/acme/source.git\n---\n\nScope\n",
+      parseContextTreeRootNode(
+        '---\nschemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - https://gitlab.example/acme/source.git\n---\n\n# Root\n',
       ).frontmatter.relatedRepositories,
     ).toEqual(["https://gitlab.example/acme/source.git"]);
   });
 
-  it("verifies existing organizational directories without NODE.md", () => {
+  it("rejects missing schemaVersion and malformed relatedRepositories on the root node", () => {
+    for (const frontmatter of [
+      'title: "Root"',
+      'schemaVersion: 2\ntitle: "Root"',
+      'schemaVersion: 1\ntitle: "Root"\nrelatedRepositories: invalid',
+      'schemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - https://token@github.com/acme/tree.git',
+    ]) {
+      const root = validTree();
+      writeFileSync(join(root, "NODE.md"), `---\n${frontmatter}\n---\n\n# Root\n`);
+      expect(verifyTree(root).findings).toEqual([
+        expect.objectContaining({ code: "TREE_ROOT_NODE_INVALID", path: "NODE.md" }),
+      ]);
+    }
+  });
+
+  it("verifies indexed organizational directories", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true, schemaVersion: 1 });
@@ -68,17 +109,91 @@ describe("schema version 1", () => {
 });
 
 describe("verification", () => {
-  it("reports metadata, SCOPE, Markdown, and soft-link failures", () => {
+  it("ships a valid indexed example tree", () => {
+    expect(verifyTree(join(EXAMPLES, "basic"))).toMatchObject({ findings: [], ok: true });
+  });
+
+  it("reports root manifest, Markdown, and soft-link failures", () => {
     const root = validTree();
-    writeFileSync(join(root, "SCOPE.md"), "not frontmatter\n");
     writeFileSync(join(root, "bad.md"), "# Missing metadata\n[Outside](../secret.md)\n");
     writeFileSync(join(root, "NODE.md"), '---\ntitle: "Root"\nsoft_links: [missing.md]\n---\n');
 
     const codes = new Set(verifyTree(root).findings.map((finding) => finding.code));
-    expect(codes.has("TREE_SCOPE_INVALID")).toBe(true);
+    expect(codes.has("TREE_ROOT_NODE_INVALID")).toBe(true);
     expect(codes.has("TREE_FRONTMATTER_MISSING")).toBe(true);
     expect(codes.has("TREE_MARKDOWN_LINK_PATH_ESCAPE")).toBe(true);
     expect(codes.has("TREE_SOFT_LINK_BROKEN")).toBe(true);
+  });
+
+  it("preserves findings for valid, missing, escaping, symlinked, and non-local links", () => {
+    const root = validTree();
+    writeFileSync(join(root, "target.md"), node("Target"));
+    const outside = join(tempRoot(), "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "NODE.md"), node("Outside"));
+    symlinkSync(outside, join(root, "escaped-directory"));
+    writeFileSync(
+      join(root, "links.md"),
+      [
+        "---",
+        'title: "Links"',
+        "soft_links:",
+        "  - target.md",
+        "  - missing.md",
+        "  - ../outside.md",
+        "  - escaped-directory",
+        "  - https://example.com/context",
+        "---",
+        "",
+        "[Valid](target.md)",
+        "[Missing](missing.md)",
+        "[Lexical escape](../outside.md)",
+        "[Symlink escape](escaped-directory)",
+        "[Non-local](https://example.com/context)",
+      ].join("\n"),
+    );
+
+    const findings = verifyTree(root).findings.filter((finding) => finding.path === "links.md");
+    expect(findings.filter((finding) => finding.target === "target.md")).toEqual([]);
+    expect(findings.filter((finding) => finding.target === "missing.md").map((finding) => finding.code)).toEqual([
+      "TREE_SOFT_LINK_BROKEN",
+    ]);
+    expect(findings.filter((finding) => finding.target === "../outside.md").map((finding) => finding.code)).toEqual([
+      "TREE_SOFT_LINK_BROKEN",
+      "TREE_SOFT_LINK_PATH_ESCAPE",
+      "TREE_MARKDOWN_LINK_PATH_ESCAPE",
+    ]);
+    expect(findings.filter((finding) => finding.target === "escaped-directory").map((finding) => finding.code)).toEqual(
+      ["TREE_SOFT_LINK_PATH_ESCAPE", "TREE_MARKDOWN_LINK_PATH_ESCAPE"],
+    );
+    expect(
+      findings.filter((finding) => finding.target === "https://example.com/context").map((finding) => finding.code),
+    ).toEqual(["TREE_SOFT_LINK_BROKEN"]);
+  });
+
+  it("rejects invalid root manifest fields and root-only fields on domain nodes", () => {
+    const root = validTree();
+    writeFileSync(join(root, "NODE.md"), '---\nschemaVersion: 2\ntitle: "Root"\n---\n\n# Root\n');
+    writeFileSync(join(root, "domain.md"), '---\ntitle: "Domain"\nrelatedRepositories: []\n---\n\n# Domain\n');
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_ROOT_NODE_INVALID", path: "NODE.md" }),
+        expect.objectContaining({ code: "TREE_ROOT_ONLY_FIELDS", path: "domain.md" }),
+      ]),
+    );
+  });
+
+  it("treats legacy SCOPE.md as an invalid ordinary leaf", () => {
+    const root = validTree();
+    writeFileSync(join(root, "SCOPE.md"), "---\nschemaVersion: 1\n---\n\nLegacy scope\n");
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_ROOT_ONLY_FIELDS", path: "SCOPE.md" }),
+        expect.objectContaining({ code: "TREE_TITLE_MISSING", path: "SCOPE.md" }),
+      ]),
+    );
   });
 
   it("rejects invalid UTF-8 and symlinks that escape or cross content classes", () => {
@@ -90,9 +205,11 @@ describe("verification", () => {
     const outsideDirectory = join(tempRoot(), "outside-directory");
     mkdirSync(outsideDirectory);
     symlinkSync(outsideDirectory, join(root, "escape-directory"));
-    mkdirSync(join(root, "raw-context"));
-    writeFileSync(join(root, "raw-context/evidence.md"), "# Evidence\n");
-    symlinkSync(join(root, "raw-context/evidence.md"), join(root, "cross.md"));
+    mkdirSync(join(root, "members/alice"), { recursive: true });
+    writeFileSync(join(root, "members/NODE.md"), node("Members"));
+    writeFileSync(join(root, "members/alice/NODE.md"), node("Alice"));
+    writeFileSync(join(root, "members/alice/memory.md"), node("Memory"));
+    symlinkSync(join(root, "members/alice/memory.md"), join(root, "cross.md"));
 
     const codes = verifyTree(root).findings.map((finding) => finding.code);
     expect(codes).toContain("TREE_FRONTMATTER_PARSE");
@@ -101,73 +218,130 @@ describe("verification", () => {
     expect(codes).toContain("TREE_DIRECTORY_SYMLINK_PATH_ESCAPE");
   });
 
-  it("requires the root but permits profile-free member directories", () => {
+  it("accepts safe file symlinks and rejects dangling or unsupported symlinks", () => {
+    const root = validTree();
+    writeFileSync(join(root, "target.md"), node("Target"));
+    symlinkSync(join(root, "target.md"), join(root, "regular.md"));
+    symlinkSync(join(root, "missing.md"), join(root, "dangling.md"));
+    mkdirSync(join(root, "directory"));
+    writeFileSync(join(root, "directory/NODE.md"), node("Directory"));
+    symlinkSync(join(root, "directory"), join(root, "linked-directory"));
+
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_MARKDOWN_FILE_SYMLINK_BROKEN", path: "dangling.md" }),
+        expect.objectContaining({ code: "TREE_DIRECTORY_SYMLINK_UNSUPPORTED", path: "linked-directory" }),
+      ]),
+    );
+    expect(findings.some((finding) => finding.path === "regular.md")).toBe(false);
+  });
+
+  it("requires NODE.md in normal and member directories", () => {
     const root = validTree();
     mkdirSync(join(root, "members/bob"), { recursive: true });
-    writeFileSync(join(root, "members/bob/notes.md"), "notes");
-    rmSync(join(root, "NODE.md"));
-    const codes = verifyTree(root).findings.map((finding) => finding.code);
-    expect(codes).toEqual(["TREE_ROOT_MISSING"]);
+    writeFileSync(join(root, "members/bob/notes.md"), node("Notes"));
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "members" }),
+        expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "members/bob" }),
+      ]),
+    );
+  });
+
+  it("ignores repository infrastructure and treats raw-context as ordinary content", () => {
+    const root = validTree();
+    mkdirSync(join(root, ".github/unindexed"), { recursive: true });
+    mkdirSync(join(root, "scripts/unindexed"), { recursive: true });
+    mkdirSync(join(root, "raw-context/notes"), { recursive: true });
+    writeFileSync(join(root, "raw-context/NODE.md"), node("Raw context"));
+    writeFileSync(join(root, "raw-context/notes/evidence.md"), node("Evidence"));
+    const findings = verifyTree(root).findings;
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "raw-context/notes" }),
+    );
+    expect(findings.some((finding) => finding.path.includes(".github") || finding.path.includes("scripts"))).toBe(
+      false,
+    );
   });
 });
 
-describe("scoped reading", () => {
-  it("selects normal content by default and supports depth, patterns, classes, and content", () => {
+describe("indexed reading", () => {
+  it("returns a selected body and immediate child summaries", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
 
-    expect(readTree(root).entries.map((entry) => entry.path)).toEqual([
-      ".",
-      "decisions/runtime.md",
-      "platform",
-      "SCOPE.md",
-    ]);
-    expect(readTree(root, { path: "platform", depth: 0 }).entries.map((entry) => entry.path)).toEqual(["platform"]);
-    expect(readTree(root, { classes: ["member"] }).entries.map((entry) => entry.path)).toEqual([
-      "members/alice/memory.md",
-    ]);
-    expect(readTree(root).entries.map((entry) => entry.path)).not.toContain("members/alice/memory.md");
-    expect(
-      readTree(root, { path: "members/alice/memory.md", classes: ["member"], content: true }).entries[0],
-    ).toMatchObject({
-      content: expect.stringContaining("Agent-specific working context"),
+    const rootRead = readTree(root);
+    expect(rootRead.node).toMatchObject({ body: expect.stringContaining("Canonical durable context"), path: "." });
+    expect(rootRead.node.body).not.toContain("schemaVersion:");
+    expect(rootRead.children.map((child) => child.path)).toEqual(["members", "opentag.md", "product"]);
+    expect(rootRead.children.map((child) => child.path)).not.toContain("product/runtime.md");
+
+    expect(readTree(root, "members").children.map((child) => child.path)).toEqual(["members/alice"]);
+    expect(readTree(root, "members/alice/memory.md").node).toMatchObject({
+      body: expect.stringContaining("Agent-specific working context"),
       contentClass: "member",
       path: "members/alice/memory.md",
     });
-    expect(readTree(root, { pattern: "decisions/*" }).entries.map((entry) => entry.path)).toEqual([
-      "decisions/runtime.md",
-    ]);
-    expect(readTree(root, { pattern: "Decisions/*" }).entries).toEqual([]);
-    expect(readTree(root, { path: "decisions/runtime.md", content: true }).entries[0]).toMatchObject({
-      content: expect.any(String),
-      depth: 0,
-      kind: "file",
-    });
+    expect(readTree(root, "members/alice/memory.md").children).toEqual([]);
+    expect(readTree(root)).toEqual(readTree(root, "NODE.md"));
+    expect(readTree(root, "product")).toEqual(readTree(root, "product/NODE.md"));
   });
 
-  it("excludes unsafe Markdown and rejects escaping or missing targets", () => {
+  it("retains complete metadata without expanding soft links", () => {
+    const root = validTree();
+    mkdirSync(join(root, "domain"));
+    writeFileSync(
+      join(root, "domain/NODE.md"),
+      '---\ntitle: "Domain"\ndescription: "Summary"\nsoft_links: [target.md]\nextension: true\n---\n\n# Domain\n',
+    );
+    writeFileSync(join(root, "domain/target.md"), node("Target"));
+    const result = readTree(root, "domain");
+    expect(result.node.frontmatter).toEqual({
+      description: "Summary",
+      extension: true,
+      soft_links: ["target.md"],
+      title: "Domain",
+    });
+    expect(result.children.map((child) => child.path)).toEqual(["domain/target.md"]);
+  });
+
+  it("rejects infrastructure, unsafe, escaping, or missing targets", () => {
     const root = validTree();
     const outside = join(tempRoot(), "outside.md");
     writeFileSync(outside, node("Outside"));
     symlinkSync(outside, join(root, "escape.md"));
-    expect(readTree(root, { classes: "all" }).entries.map((entry) => entry.path)).not.toContain("escape.md");
-    expect(() => readTree(root, { path: "../outside" })).toThrow(/outside/u);
-    expect(() => readTree(root, { path: "missing" })).toThrow();
+    expect(() => readTree(root, "escape.md")).toThrow(/real file/u);
+    expect(() => readTree(root, "../outside")).toThrow(/outside/u);
+    expect(() => readTree(root, "missing")).toThrow();
+    expect(() => readTree(root, ".github")).toThrow(/infrastructure/u);
+    expect(() => readTree(root, "scripts")).toThrow(/infrastructure/u);
   });
 });
 
 describe("scaffold and policy", () => {
-  it("always includes version-pinned GitHub validation for main", () => {
+  it("derives the root title verbatim from the repository name", () => {
+    const root = join(tempRoot(), "tree");
+    scaffoldTree({ path: root, repository: "acme/my-context" });
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain('title: "my-context"');
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("schemaVersion: 1");
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("# my-context");
+    expect(existsSync(join(root, "SCOPE.md"))).toBe(false);
+    expect(readTree(root)).toMatchObject({ children: [], node: { path: "." } });
+  });
+
+  it("includes version-pinned GitHub validation for the authoritative default branch", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
-    expect(workflow).toContain('branches: ["main"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.0 verify");
+    expect(workflow).toContain('branches: ["trunk"]');
+    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.1 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
 
   it("rejects malformed GitHub identities", () => {
-    const base = { path: join(tempRoot(), "tree"), title: "Acme" };
+    const base = { path: join(tempRoot(), "tree") };
     for (const repository of [
       "https://github.com/acme/context",
       "acme-/context",
@@ -192,10 +366,71 @@ describe("scaffold and policy", () => {
     symlinkSync(realDirectory, linkedDirectory);
     symlinkSync(join(temporary, "missing"), danglingLink);
     writeFileSync(file, "not a directory\n");
-    const options = { repository: "acme/context", title: "Acme" };
+    const options = { repository: "acme/context" };
     expect(() => scaffoldTree({ ...options, path: linkedDirectory })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: danglingLink })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
+  });
+
+  it("uses Git's effective default branch and initializes the repository", () => {
+    const root = validTree();
+    expect(existsSync(join(root, ".git"))).toBe(true);
+    expect(readFileSync(join(root, ".git/HEAD"), "utf8")).toBe("ref: refs/heads/trunk\n");
+    expect(readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8")).toContain(
+      'branches: ["trunk"]',
+    );
+  });
+
+  it("preserves the case and spelling of Git's selected branch", () => {
+    writeFileSync(process.env.GIT_CONFIG_GLOBAL ?? "", "[init]\n\tdefaultBranch = Trunk_2\n");
+    const root = join(tempRoot(), "case-preserving");
+    scaffoldTree({ path: root, repository: "acme/context" });
+    expect(readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8")).toContain(
+      'branches: ["Trunk_2"]',
+    );
+  });
+
+  it("validates repository and destination safety before initializing Git", () => {
+    const malformed = join(tempRoot(), "malformed");
+    expect(() => scaffoldTree({ path: malformed, repository: "https://github.com/acme/context" })).toThrow();
+    expect(existsSync(malformed)).toBe(false);
+
+    const nonEmpty = join(tempRoot(), "non-empty");
+    mkdirSync(nonEmpty);
+    writeFileSync(join(nonEmpty, "keep.txt"), "keep\n");
+    expect(() => scaffoldTree({ path: nonEmpty, repository: "acme/context" })).toThrow(/non-empty directory/u);
+    expect(readdirSync(nonEmpty)).toEqual(["keep.txt"]);
+  });
+
+  it("fails without Git and writes no scaffold files", () => {
+    const root = join(tempRoot(), "missing-git");
+    const originalPath = process.env.PATH;
+    process.env.PATH = tempRoot();
+    try {
+      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/initialize Git repository/u);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+    expect(existsSync(join(root, "NODE.md"))).toBe(false);
+  });
+
+  it("preserves a partial Git repository when branch resolution fails", () => {
+    const root = join(tempRoot(), "unresolved-branch");
+    const bin = tempRoot();
+    const git = join(bin, "git");
+    writeFileSync(git, '#!/bin/sh\nif [ "$1" = "init" ]; then /bin/mkdir -p "$3/.git"; exit 0; fi\nexit 1\n');
+    chmodSync(git, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/resolve the initial Git branch/u);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+    expect(existsSync(join(root, ".git"))).toBe(true);
+    expect(existsSync(join(root, "NODE.md"))).toBe(false);
   });
 
   it("ships the canonical policy", () => {

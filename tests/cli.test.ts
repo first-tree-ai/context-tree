@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -20,6 +20,7 @@ type CliResult = { status: number | null; stderr: string; stdout: string };
 function workspace(): string {
   const path = mkdtempSync(resolve(tmpdir(), "context-tree-cli-"));
   workspaces.add(path);
+  writeFileSync(resolve(path, "gitconfig"), "[init]\n\tdefaultBranch = trunk\n");
   return path;
 }
 
@@ -28,12 +29,16 @@ afterEach(() => {
   workspaces.clear();
 });
 
-function cli(cwd: string, args: string[]): CliResult {
-  const result = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8" });
+function cli(cwd: string, args: string[], environment: NodeJS.ProcessEnv = process.env): CliResult {
+  const result = spawnSync(process.execPath, [CLI, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...environment, GIT_CONFIG_GLOBAL: resolve(cwd, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1" },
+  });
   return { status: result.status, stderr: result.stderr, stdout: result.stdout };
 }
 
-const INIT_ARGS = ["--repository", "acme/context", "--tree-path", "tree", "--title", "CLI Tree"];
+const INIT_ARGS = ["--repository", "acme/context", "--tree-path", "tree"];
 
 describe("built CLI", () => {
   it("exposes only init, policy, read, and verify", () => {
@@ -47,7 +52,7 @@ describe("built CLI", () => {
       "verify",
     ]);
     const version = cli(workspace(), ["--version"]);
-    expect(version).toMatchObject({ status: 0, stderr: "", stdout: "0.1.0\n" });
+    expect(version).toMatchObject({ status: 0, stderr: "", stdout: "0.1.1\n" });
   });
 
   it("runs init, policy, verify, and read with versioned JSON", () => {
@@ -55,11 +60,12 @@ describe("built CLI", () => {
     const initialized = cli(cwd, ["init", ...INIT_ARGS]);
     expect(initialized.status).toBe(0);
     const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
-    expect(scaffold.files).toEqual(["NODE.md", "SCOPE.md", ".github/workflows/validate-context-tree.yml"]);
+    expect(scaffold.files).toEqual(["NODE.md", ".github/workflows/validate-context-tree.yml"]);
+    expect(existsSync(resolve(cwd, "tree/.git"))).toBe(true);
     const workflowPath = resolve(cwd, "tree/.github/workflows/validate-context-tree.yml");
     expect(existsSync(workflowPath)).toBe(true);
-    expect(readFileSync(workflowPath, "utf8")).toContain('branches: ["main"]');
-    expect(readFileSync(workflowPath, "utf8")).toContain("@first-tree-ai/context-tree@0.1.0 verify");
+    expect(readFileSync(workflowPath, "utf8")).toContain('branches: ["trunk"]');
+    expect(readFileSync(workflowPath, "utf8")).toContain("@first-tree-ai/context-tree@0.1.1 verify");
 
     const policy = cli(cwd, ["policy"]);
     expect(policy.status).toBe(0);
@@ -69,15 +75,31 @@ describe("built CLI", () => {
     expect(verification.status).toBe(0);
     const verificationResult = verifyTreeReportSchema.parse(JSON.parse(verification.stdout));
     expect(verificationResult).toMatchObject({ ok: true, schemaVersion: 1 });
-    const read = cli(cwd, ["read", "--tree-path", "tree", "--content"]);
+    const read = cli(cwd, ["read", "--tree-path", "tree"]);
     expect(read.status).toBe(0);
     const readResult = contextTreeReadResultSchema.parse(JSON.parse(read.stdout));
     expect(readResult.schemaVersion).toBe(1);
+    expect(readResult.node.body).toContain("# context");
+  });
+
+  it("defaults init to cwd/REPO and derives its title from REPO", () => {
+    const cwd = workspace();
+    writeFileSync(resolve(cwd, "gitconfig"), "[init]\n\tdefaultBranch = Release_1\n");
+    const initialized = cli(cwd, ["init", "--repository", "acme/my-context"]);
+    expect(initialized.status).toBe(0);
+    const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
+    expect(scaffold.root).toBe(resolve(realpathSync(cwd), "my-context"));
+    expect(readFileSync(resolve(cwd, "my-context/NODE.md"), "utf8")).toContain('title: "my-context"');
+    expect(readFileSync(resolve(cwd, "my-context/NODE.md"), "utf8")).toContain("schemaVersion: 1");
+    expect(existsSync(resolve(cwd, "my-context/SCOPE.md"))).toBe(false);
+    expect(readFileSync(resolve(cwd, "my-context/.github/workflows/validate-context-tree.yml"), "utf8")).toContain(
+      'branches: ["Release_1"]',
+    );
   });
 
   it("requires explicit GitHub identity and returns JSON errors", () => {
     const cwd = workspace();
-    const missingIdentity = cli(cwd, ["init", "--tree-path", "tree", "--title", "Tree"]);
+    const missingIdentity = cli(cwd, ["init", "--tree-path", "tree"]);
     expect(missingIdentity.status).toBe(1);
     contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(missingIdentity.stdout));
     expect(missingIdentity.stderr).toBe("");
@@ -125,5 +147,59 @@ describe("built CLI", () => {
     expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(removedOwner.stdout))).toMatchObject({
       error: { code: "CONTEXT_TREE_FAILED", message: expect.stringContaining("unknown option '--owner'") },
     });
+
+    for (const retired of ["--content", "--depth", "--pattern", "--class"]) {
+      const args = retired === "--content" ? [retired] : [retired, "value"];
+      const result = cli(cwd, ["read", "--tree-path", "tree", ...args]);
+      expect(result.status).toBe(1);
+      expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(result.stdout))).toMatchObject({
+        error: { message: expect.stringContaining(`unknown option '${retired}'`) },
+      });
+    }
+  });
+
+  it("preserves destination safety and rejects retired init options", () => {
+    const cwd = workspace();
+    const destination = resolve(cwd, "existing");
+    mkdirSync(destination);
+    writeFileSync(resolve(destination, "keep.txt"), "keep\n");
+
+    const unsafe = cli(cwd, ["init", "--repository", "acme/context", "--tree-path", "existing"]);
+    expect(unsafe.status).toBe(1);
+    expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(unsafe.stdout))).toMatchObject({
+      error: { message: expect.stringContaining("non-empty directory") },
+    });
+    expect(readFileSync(resolve(destination, "keep.txt"), "utf8")).toBe("keep\n");
+
+    const retiredTitle = cli(cwd, ["init", ...INIT_ARGS, "--title", "Old title"]);
+    expect(retiredTitle.status).toBe(1);
+    expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(retiredTitle.stdout))).toMatchObject({
+      error: { message: expect.stringContaining("unknown option '--title'") },
+    });
+    expect(retiredTitle.stderr).toBe("");
+
+    const retiredDefaultBranch = cli(cwd, ["init", ...INIT_ARGS, "--default-branch", "trunk"]);
+    expect(retiredDefaultBranch.status).toBe(1);
+    expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(retiredDefaultBranch.stdout))).toMatchObject({
+      error: { message: expect.stringContaining("unknown option '--default-branch'") },
+    });
+    expect(retiredDefaultBranch.stderr).toBe("");
+  });
+
+  it("returns a sanitized JSON error when Git cannot initialize", () => {
+    const cwd = workspace();
+    const destination = resolve(cwd, "git-failure");
+    const failed = cli(cwd, ["init", "--repository", "acme/context", "--tree-path", "git-failure"], {
+      ...process.env,
+      PATH: resolve(cwd, "missing-bin"),
+    });
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toBe("");
+    expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(failed.stdout))).toMatchObject({
+      error: { code: "CONTEXT_TREE_FAILED", message: expect.stringContaining("initialize Git repository") },
+      ok: false,
+      schemaVersion: 1,
+    });
+    expect(existsSync(resolve(destination, "NODE.md"))).toBe(false);
   });
 });

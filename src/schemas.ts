@@ -3,12 +3,13 @@ import { z } from "zod";
 import { parseMarkdownFrontmatter } from "./internal/frontmatter.js";
 
 export const SCHEMA_VERSION = 1 as const;
-export const CONTEXT_TREE_SCOPE_MAX_BYTES = 16 * 1024;
+export const CONTEXT_TREE_ROOT_NODE_MAX_BYTES = 16 * 1024;
 
 export const VALIDATION_CODES = {
   rootMissing: "TREE_ROOT_MISSING",
+  rootNodeInvalid: "TREE_ROOT_NODE_INVALID",
+  rootOnlyFields: "TREE_ROOT_ONLY_FIELDS",
   directoryNodeMissing: "TREE_DIRECTORY_NODE_MISSING",
-  scopeInvalid: "TREE_SCOPE_INVALID",
   frontmatterMissing: "TREE_FRONTMATTER_MISSING",
   frontmatterParse: "TREE_FRONTMATTER_PARSE",
   titleMissing: "TREE_TITLE_MISSING",
@@ -17,9 +18,7 @@ export const VALIDATION_CODES = {
   softLinksInvalid: "TREE_SOFT_LINKS_INVALID",
   softLinkBroken: "TREE_SOFT_LINK_BROKEN",
   softLinkPathEscape: "TREE_SOFT_LINK_PATH_ESCAPE",
-  softLinkArchiveDependency: "TREE_SOFT_LINK_ARCHIVE_DEPENDENCY",
   markdownPathEscape: "TREE_MARKDOWN_LINK_PATH_ESCAPE",
-  markdownArchiveDependency: "TREE_MARKDOWN_LINK_ARCHIVE_DEPENDENCY",
   markdownFileSymlinkBroken: "TREE_MARKDOWN_FILE_SYMLINK_BROKEN",
   markdownFileSymlinkUnsupported: "TREE_MARKDOWN_FILE_SYMLINK_UNSUPPORTED",
   markdownFilePathEscape: "TREE_MARKDOWN_FILE_PATH_ESCAPE",
@@ -69,35 +68,38 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   }
 });
 
-export const contextTreeScopeFrontmatterSchema = z
+export const contextTreeRootNodeFrontmatterSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
+    title: z.string().trim().min(1),
+    description: z.string().trim().min(1).optional(),
+    soft_links: z.array(z.string().trim().min(1)).min(1).optional(),
     relatedRepositories: z.array(credentialFreeRepositoryUrlSchema).max(64).optional(),
   })
-  .strict();
+  .loose();
 
-export const contextTreeScopeSchema = z.object({
-  frontmatter: contextTreeScopeFrontmatterSchema,
-  body: z.string().trim().min(1, "SCOPE.md must describe what the Context Tree covers."),
+export const contextTreeRootNodeSchema = z.object({
+  frontmatter: contextTreeRootNodeFrontmatterSchema,
+  body: z.string().trim().min(1, "Root NODE.md must contain repository-wide context."),
 });
 
-export type ContextTreeScope = z.infer<typeof contextTreeScopeSchema>;
+export type ContextTreeRootNode = z.infer<typeof contextTreeRootNodeSchema>;
 
-export function parseContextTreeScope(markdown: string): ContextTreeScope {
-  if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_SCOPE_MAX_BYTES) {
-    throw new Error(`SCOPE.md exceeds the ${CONTEXT_TREE_SCOPE_MAX_BYTES}-byte limit.`);
+export function parseContextTreeRootNode(markdown: string): ContextTreeRootNode {
+  if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_ROOT_NODE_MAX_BYTES) {
+    throw new Error(`Root NODE.md exceeds the ${CONTEXT_TREE_ROOT_NODE_MAX_BYTES}-byte limit.`);
   }
-  const document = parseMarkdownFrontmatter(markdown, { strictDelimiters: true });
+  const document = parseMarkdownFrontmatter(markdown);
   if (document.frontmatter === "missing") {
-    throw new Error("SCOPE.md must contain YAML frontmatter.");
+    throw new Error("Root NODE.md must contain YAML frontmatter.");
   }
-  if (document.frontmatter === "invalid" || document.data === null) {
-    throw new Error(`SCOPE.md frontmatter is invalid${document.error === undefined ? "." : `: ${document.error}`}`);
+  if (document.frontmatter === "invalid") {
+    throw new Error(`Root NODE.md frontmatter is invalid: ${document.error}`);
   }
-  return contextTreeScopeSchema.parse({ frontmatter: document.data, body: document.body });
+  return contextTreeRootNodeSchema.parse({ frontmatter: document.data, body: document.body });
 }
 
-export const contextContentClassSchema = z.enum(["normal", "archive-supporting", "member", "repo-infra"]);
+export const contextContentClassSchema = z.enum(["normal", "member", "repo-infra"]);
 export type ContextContentClass = z.infer<typeof contextContentClassSchema>;
 
 export const validationCodeSchema = z.enum(VALIDATION_CODES);
@@ -116,7 +118,6 @@ export type TreeValidationFinding = z.infer<typeof treeValidationFindingSchema>;
 export const contextContentClassCountsSchema = z
   .object({
     normal: z.number().int().nonnegative(),
-    "archive-supporting": z.number().int().nonnegative(),
     member: z.number().int().nonnegative(),
     "repo-infra": z.number().int().nonnegative(),
   })
@@ -131,22 +132,35 @@ export const contextTreePolicySchema = z
   .strict();
 export type ContextTreePolicy = z.infer<typeof contextTreePolicySchema>;
 
-export const contextTreeReadEntrySchema = z
+const contextTreeReadKindSchema = z.enum(["directory", "file"]);
+const contextTreeReadCommonFields = {
+  contentClass: contextContentClassSchema,
+  kind: contextTreeReadKindSchema,
+  path: z.string(),
+};
+
+export const contextTreeReadNodeSchema = z
   .object({
-    content: z.string().optional(),
-    contentClass: contextContentClassSchema,
-    depth: z.number().int().nonnegative(),
-    description: z.string().optional(),
-    kind: z.enum(["directory", "file"]),
-    path: z.string(),
-    title: z.string(),
+    body: z.string(),
+    frontmatter: z.record(z.string(), z.unknown()),
+    ...contextTreeReadCommonFields,
   })
   .strict();
-export type ContextTreeReadEntry = z.infer<typeof contextTreeReadEntrySchema>;
+export type ContextTreeReadNode = z.infer<typeof contextTreeReadNodeSchema>;
+
+export const contextTreeReadChildSchema = z
+  .object({
+    description: z.string().optional(),
+    title: z.string(),
+    ...contextTreeReadCommonFields,
+  })
+  .strict();
+export type ContextTreeReadChild = z.infer<typeof contextTreeReadChildSchema>;
 
 export const contextTreeReadResultSchema = z
   .object({
-    entries: z.array(contextTreeReadEntrySchema),
+    children: z.array(contextTreeReadChildSchema),
+    node: contextTreeReadNodeSchema,
     root: z.string(),
     schemaVersion: z.literal(SCHEMA_VERSION),
     target: z.string(),

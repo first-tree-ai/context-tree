@@ -11,7 +11,7 @@ function isPackageRoot(path: string): boolean {
   if (!existsSync(manifestPath)) return false;
   try {
     const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-    return typeof manifest === "object" && manifest !== null && "name" in manifest && manifest.name === PACKAGE_NAME;
+    return isRecord(manifest) && manifest.name === PACKAGE_NAME;
   } catch {
     return false;
   }
@@ -34,10 +34,18 @@ export function resolvePackagedResource(...segments: string[]): string {
   throw new Error(`Package root is missing while resolving: ${segments.join("/")}`);
 }
 
-export function readPackageManifest(): Record<string, unknown> {
+function readPackageManifest(): Record<string, unknown> {
   const parsed: unknown = JSON.parse(readFileSync(resolvePackagedResource("package.json"), "utf8"));
   if (!isRecord(parsed)) {
     throw new Error("Package metadata is invalid.");
   }
   return parsed;
+}
+
+export function readPackageVersion(): string {
+  const manifest = readPackageManifest();
+  if (typeof manifest.version !== "string") {
+    throw new Error("Package version is missing or invalid.");
+  }
+  return manifest.version;
 }
