@@ -103,15 +103,15 @@ describe("Agent Skills contracts", () => {
     expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title"]);
 
     const read = skillBody("context-tree-read");
-    expect(invocationInputs(read)).toEqual(["agent-slug", "tree_path", "branch"]);
+    expect(invocationInputs(read)).toEqual(["agent_slug", "tree_path", "branch"]);
 
     const write = skillBody("context-tree-write");
-    expect(invocationInputs(write)).toEqual(["agent-slug", "tree_path", "default_branch"]);
+    expect(invocationInputs(write)).toEqual(["agent_slug", "tree_path", "default_branch"]);
     expect(invocationInputs(write)).not.toContain("branch");
 
     for (const body of [read, write]) {
-      expect(body).toContain("Treat `agent-slug` as the agent identity");
-      expect(body).toContain("members/<agent-slug>/memory.md");
+      expect(body).toContain("Treat `agent_slug` as the agent identity");
+      expect(body).toContain("members/<agent_slug>/memory.md");
     }
   });
 
@@ -132,7 +132,7 @@ describe("Agent Skills contracts", () => {
     expect(write).not.toContain("^[A-Za-z0-9]");
 
     for (const body of [read, write]) {
-      expect(body).not.toMatch(/validate (?:the )?`?agent-slug|agent-slug.*ASCII|starting with a letter/iu);
+      expect(body).not.toMatch(/validate (?:the )?`?agent_slug|agent_slug.*ASCII|starting with a letter/iu);
     }
 
     const init = skillBody("context-tree-init");
@@ -140,7 +140,7 @@ describe("Agent Skills contracts", () => {
     expect(init).toContain('gh repo create "OWNER/REPO" --private');
   });
 
-  it("uses only agent-slug in shipped skills and documentation", () => {
+  it("uses only agent_slug in shipped skills and documentation", () => {
     const paths = [
       resolve(import.meta.dirname, "../README.md"),
       resolve(import.meta.dirname, "../docs/specification.md"),
@@ -153,7 +153,7 @@ describe("Agent Skills contracts", () => {
 
     for (const path of paths) {
       const source = readFileSync(path, "utf8");
-      expect(source).not.toMatch(/agent_slug|member_slug|member-slug/u);
+      expect(source).not.toMatch(/agent[-]slug|member_slug|member-slug/u);
     }
   });
 
