@@ -132,7 +132,7 @@ Prefer body sections in this order, omitting any that do not apply:
 `Source`, `Provenance`, or `Shipped-in` section; PR, commit, and issue delivery
 history lives in Git history and GitHub PR descriptions, not node prose.
 
-### Write / Verify / GitHub PR Discipline
+### Write / Verify / Publication Discipline
 
 Default to not writing: a missing node is a question, a noisy node is a trap.
 Writes require concrete evidence and the context needed to interpret it.
@@ -142,9 +142,14 @@ provenance, PR references, or implementation detail. `context-tree verify` must
 pass before any tree commit.
 
 Authorization comes from the user or host and is enforced through the GitHub
-workflow. Every write uses a freshly fetched exact base in an isolated clean
-worktree and changes only necessary non-symlink Markdown. Publish only with a
-non-force task-branch push and GitHub PR; never merge automatically. Keep each
-source-backed tree PR scoped to one source artifact. An invalid base blocks
-semantic changes; only an explicit repair request may produce a repair-only PR
-limited to validator findings.
+workflow. Every write uses a freshly fetched exact supplied default branch in
+an isolated clean worktree and changes only necessary non-symlink Markdown.
+After verification and repository checks, publish the commit directly to that
+branch with a non-force push. Resolve concurrent updates by rebasing unpublished
+work onto the latest default branch, resolving evidence-determined conflicts,
+and verifying the complete result again. If direct publication is denied or
+bounded race retries are exhausted, open a conflict-free, non-force fallback PR
+against the supplied default branch and leave it open. Keep each source-backed
+write and commit scoped to one source artifact. An invalid base blocks semantic
+changes; only an explicit repair request may produce a repair-only write and
+commit limited to validator findings.

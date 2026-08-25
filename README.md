@@ -63,13 +63,18 @@ a write.
 
 Writes are normal file edits performed by the write skill, not a CLI command.
 Every write receives one concrete source through the authorized task context,
-freshly fetches the explicit base branch through a supplied fetch-only checkout,
-creates an isolated worktree at its exact commit, verifies the base, edits only
-necessary Markdown, verifies again, inspects the complete diff, commits,
-non-force pushes, and opens a GitHub PR. The skill never merges. An invalid base
-blocks semantic changes; an explicit repair request may produce a repair-only
-PR limited to validator findings. Read and write use `agent-slug` solely to
-select optional private memory at `members/<agent-slug>/memory.md`.
+accepts an authoritative `default_branch`, freshly fetches that branch through
+a supplied fetch-only checkout, creates an isolated worktree at its exact
+commit, verifies the base, edits only necessary Markdown, verifies again,
+inspects the complete diff, commits, and non-force pushes directly to the
+supplied default branch. Concurrent updates are rebased and verified locally
+with bounded retries. If direct publication is denied or the retry limit is
+exhausted, the skill rebases against the latest default branch and opens a
+conflict-free fallback PR without merging it or requesting reviewers. An
+invalid base blocks semantic changes; an explicit repair request may produce a
+repair-only write and commit limited to validator findings. Each write and
+commit is scoped to one concrete source. Read and write use `agent-slug` solely
+to select optional private memory at `members/<agent-slug>/memory.md`.
 
 ## Library integration
 

@@ -102,9 +102,14 @@ describe("Agent Skills contracts", () => {
     const init = skillBody("context-tree-init");
     expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title"]);
 
-    for (const name of ["context-tree-read", "context-tree-write"]) {
-      const body = skillBody(name);
-      expect(invocationInputs(body)).toEqual(["agent-slug", "tree_path", "branch"]);
+    const read = skillBody("context-tree-read");
+    expect(invocationInputs(read)).toEqual(["agent-slug", "tree_path", "branch"]);
+
+    const write = skillBody("context-tree-write");
+    expect(invocationInputs(write)).toEqual(["agent-slug", "tree_path", "default_branch"]);
+    expect(invocationInputs(write)).not.toContain("branch");
+
+    for (const body of [read, write]) {
       expect(body).toContain("Treat `agent-slug` as the agent identity");
       expect(body).toContain("members/<agent-slug>/memory.md");
     }
@@ -169,24 +174,59 @@ describe("Agent Skills contracts", () => {
     }
   });
 
-  it("preserves refresh, isolation, and publication safeguards", () => {
+  it("preserves refresh and isolated direct-publication safeguards", () => {
     const read = skillBody("context-tree-read");
     const write = skillBody("context-tree-write");
+    const compactWrite = compactWhitespace(write);
 
     expect(read).toContain('git pull --ff-only origin "<branch>"');
     expect(read).toContain("Treat a stale checkout as read-only");
     expect(read).toContain("disclose the refresh");
     expect(read).toContain("exact local commit SHA");
 
-    expect(write).toContain('git fetch origin "<branch>"');
+    expect(write).toContain('git fetch origin "<default_branch>"');
+    expect(write).toContain("git symbolic-ref --short HEAD` to equal `default_branch`");
+    expect(write).toContain("Treat the supplied `default_branch` as authoritative");
+    expect(write).toContain("never query GitHub to discover or replace it");
     expect(write).toContain("fetched commit SHA");
     expect(write).toContain("temporary worktree at that exact commit");
     expect(write).toContain("Preserve path containment and never replace or traverse symlinks");
     expect(write).toContain("Run `context-tree verify");
     expect(write).toContain("Inspect the complete `git diff`");
-    expect(write).toContain('git push --set-upstream origin "<task-branch>"');
+    expect(write).toContain('git push origin HEAD:"<default_branch>"');
     expect(write).toContain("Use a non-force push");
-    expect(write).toContain('gh pr create --repo "OWNER/REPO"');
-    expect(write).toContain("Never merge automatically");
+    expect(write).toContain("initial direct push plus at most two conflict or race retries");
+    expect(write).toContain("git rebase origin/<default_branch>");
+    expect(write).toContain("resolve ordinary conflicts locally");
+    expect(write).toContain("repository-prescribed checks");
+    expect(write).toContain("git diff origin/<default_branch>...HEAD");
+    expect(compactWrite).toContain("inspect the authorized remote refs and existing PRs");
+    expect(write).toContain("permissions, a ruleset, or branch protection");
+    expect(write).toContain('git push --set-upstream origin "<task-branch>"');
+    expect(write).toContain('gh pr create --repo "OWNER/REPO" --base "<default_branch>" --head "<task-branch>"');
+    expect(compactWrite).toContain("Do not publish a conflicting fallback branch");
+    expect(write).toContain("never merge it or request reviewers automatically");
+    expect(write).not.toContain("never force push or push directly to the base branch");
+    expect(write).not.toContain("do not rebase or force-push");
+    expect(write).not.toContain("leave the PR open for humans");
+    expect(write).not.toContain('git fetch origin "<branch>"');
+    expect(write).not.toContain('gh pr create --repo "OWNER/REPO" --base "<branch>"');
+    expect(write).not.toContain("Open a GitHub PR targeting the explicit base");
+  });
+
+  it("does not ship the retired PR-first write contract", () => {
+    const paths = [
+      resolve(import.meta.dirname, "../README.md"),
+      resolve(import.meta.dirname, "../docs/specification.md"),
+      resolve(import.meta.dirname, "../policy/context-tree-policy.md"),
+      join(SKILLS_ROOT, "context-tree-write/SKILL.md"),
+      join(SKILLS_ROOT, "context-tree-write/agents/openai.yaml"),
+    ];
+
+    for (const path of paths) {
+      const source = readFileSync(path, "utf8");
+      expect(source).not.toMatch(/one source per (?:tree )?PR|repair-only PR|PR-first/iu);
+      expect(source).not.toContain("Publish only with a non-force task-branch push and GitHub PR");
+    }
   });
 });
