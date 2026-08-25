@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 
 import { Command, CommanderError } from "commander";
+import { parseGitHubRepositoryIdentity } from "../core/internal/github-repository.js";
 import { readPackageManifest } from "../core/internal/packaged-resource.js";
 import type { ReadTreeOptions } from "../core/read.js";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../index.js";
@@ -65,15 +66,14 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
 
   program
     .command("init")
-    .description("Scaffold a new GitHub-backed Context Tree.")
-    .requiredOption("--tree-path <path>", "destination directory")
+    .description("Scaffold a new Context Tree.")
     .requiredOption("--repository <owner/repo>", "GitHub repository identity")
-    .requiredOption("--title <title>", "tree title")
-    .action((options: { repository: string; title: string; treePath: string }) => {
+    .option("--tree-path <path>", "destination directory")
+    .action((options: { repository: string; treePath?: string }) => {
+      const repository = parseGitHubRepositoryIdentity(options.repository);
       const result = scaffoldTree({
-        path: resolve(io.cwd(), options.treePath),
+        path: resolve(io.cwd(), options.treePath ?? repository.name),
         repository: options.repository,
-        title: options.title,
       });
       line(io, JSON.stringify(result));
     });

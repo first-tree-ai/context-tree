@@ -80,10 +80,12 @@ the surrounding host Git workflow rather than computed by the core.
 ## Lifecycle
 
 Scaffolding always creates a validation workflow pinned to the package version
-that generated it. New repositories always initialize and publish `main`,
-regardless of the user's Git configuration; the generated workflow filters
-pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
-destination, and a title.
+that generated it. Init takes canonical `OWNER/REPO` and an optional absent or
+empty destination. It requires Git, runs ordinary `git init`, and uses the
+unborn branch selected by Git's effective `init.defaultBranch` configuration or
+compiled fallback. The generated workflow filters pushes to that exact branch.
+The local tree title and default destination name come from `REPO`. The core and
+CLI perform no GitHub or credential operations.
 
 Reads take `agent_slug`, an existing checkout path, and `branch`. Writes take
 `agent_slug`, an existing fetch-only checkout path, and the authoritative

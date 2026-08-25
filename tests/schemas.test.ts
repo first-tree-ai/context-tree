@@ -29,7 +29,7 @@ function tempRoot(): string {
 
 function tree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context", title: "Schema Tree" });
+  scaffoldTree({ path: root, repository: "acme/context" });
   return root;
 }
 
@@ -51,7 +51,6 @@ describe("public JSON schemas", () => {
     const scaffold = scaffoldTree({
       path: scaffoldRoot,
       repository: "acme/other",
-      title: "Other",
     });
     expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
     for (const entry of readTree(root).entries) expect(contextTreeReadEntrySchema.parse(entry)).toEqual(entry);

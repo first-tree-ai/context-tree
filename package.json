@@ -1,6 +1,6 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Portable Context Tree schemas, tooling, and agent skills.",
   "type": "module",
   "license": "Apache-2.0",

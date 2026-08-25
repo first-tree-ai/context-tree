@@ -6,10 +6,17 @@ import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const temporaryRoot = mkdtempSync(join(tmpdir(), "context-tree-package-e2e-"));
-const npmEnvironment = { ...process.env, npm_config_cache: join(temporaryRoot, "npm-cache") };
+const gitConfig = join(temporaryRoot, "gitconfig");
+writeFileSync(gitConfig, "[init]\n\tdefaultBranch = trunk\n");
+const npmEnvironment = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: gitConfig,
+  GIT_CONFIG_NOSYSTEM: "1",
+  npm_config_cache: join(temporaryRoot, "npm-cache"),
+};
 
 function runCli(cliPath, cwd, args) {
-  const result = spawnSync(cliPath, args, { cwd, encoding: "utf8" });
+  const result = spawnSync(cliPath, args, { cwd, encoding: "utf8", env: npmEnvironment });
   assert.equal(result.signal, null, `CLI was terminated by ${result.signal ?? "an unknown signal"}`);
   return result;
 }
@@ -59,17 +66,14 @@ try {
   assert.equal(version.status, 0);
   assert.equal(version.stdout, `${manifest.version}\n`);
 
-  const init = runCli(cliPath, consumerRoot, [
-    "init",
-    "--repository",
-    "acme/context",
-    "--tree-path",
-    "tree",
-    "--title",
-    "Package E2E",
-  ]);
+  const init = runCli(cliPath, consumerRoot, ["init", "--repository", "acme/context", "--tree-path", "tree"]);
   assert.equal(init.status, 0);
   parseWithInstalledSchema(consumerRoot, "scaffoldTreeResultSchema", init.stdout);
+  assert.equal(readFileSync(join(consumerRoot, "tree/.git/HEAD"), "utf8"), "ref: refs/heads/trunk\n");
+  assert.match(
+    readFileSync(join(consumerRoot, "tree/.github/workflows/validate-context-tree.yml"), "utf8"),
+    /branches: \["trunk"\]/u,
+  );
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", "tree"]);
   assert.equal(validVerify.status, 0);

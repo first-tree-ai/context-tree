@@ -41,17 +41,21 @@ JSON object on stdout. Help and version output remain plain text.
 ```bash
 context-tree init \
   --repository acme/context \
-  --tree-path ./context-tree \
-  --title "Acme"
+  --tree-path ./context-tree
 context-tree policy
 context-tree verify --tree-path ./context-tree
 context-tree read --tree-path ./context-tree --content
 ```
 
-Scaffolding is create-only and always includes GitHub Actions validation pinned
-to the package version that created the tree. New repositories always start on
-`main`, independently of the user's Git configuration. The init skill verifies,
-commits, creates a private GitHub repository, and pushes `main`.
+When `--tree-path` is omitted, init writes to `./REPO` and uses the `REPO`
+segment verbatim as the tree title. Scaffolding is create-only and always
+includes GitHub Actions validation pinned to the package version that created
+the tree and filtered to the branch selected by ordinary `git init`. Init
+requires Git and respects Git's effective `init.defaultBranch` configuration or
+its compiled fallback. The CLI and library perform no GitHub or credential
+operations. The init skill uses the CLI-created repository and current branch
+for its local commit and, when GitHub CLI is authenticated, private-repository
+publication and default-branch configuration.
 
 Reads default to normal content. Select member, archive-supporting, or all
 classes only when needed. The read skill fast-forward refreshes an explicitly
@@ -85,7 +89,6 @@ import { contextTreeReadResultSchema, verifyTreeReportSchema } from "@first-tree
 scaffoldTree({
   path: "./context-tree",
   repository: "acme/context",
-  title: "Acme",
 });
 const verification = verifyTree("./context-tree");
 const relevant = readTree("./context-tree", { path: "systems", content: true });

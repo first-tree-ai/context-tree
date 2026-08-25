@@ -1,8 +1,19 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   credentialFreeRepositoryUrlSchema,
   parseContextTreeScope,
@@ -14,6 +25,8 @@ import {
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
 const temporaryRoots = new Set<string>();
+const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
+const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
 
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "context-tree-test-"));
@@ -22,13 +35,24 @@ function tempRoot(): string {
 }
 
 afterEach(() => {
+  if (originalGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal;
+  if (originalGitConfigNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+  else process.env.GIT_CONFIG_NOSYSTEM = originalGitConfigNoSystem;
   for (const root of temporaryRoots) rmSync(root, { force: true, recursive: true });
   temporaryRoots.clear();
 });
 
+beforeEach(() => {
+  const config = join(tempRoot(), "gitconfig");
+  writeFileSync(config, "[init]\n\tdefaultBranch = trunk\n");
+  process.env.GIT_CONFIG_GLOBAL = config;
+  process.env.GIT_CONFIG_NOSYSTEM = "1";
+});
+
 function validTree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context", title: "Acme" });
+  scaffoldTree({ path: root, repository: "acme/context" });
   return root;
 }
 
@@ -157,17 +181,25 @@ describe("scoped reading", () => {
 });
 
 describe("scaffold and policy", () => {
-  it("always includes version-pinned GitHub validation for main", () => {
+  it("derives the root title verbatim from the repository name", () => {
+    const root = join(tempRoot(), "tree");
+    scaffoldTree({ path: root, repository: "acme/my-context" });
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain('title: "my-context"');
+    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("# my-context");
+    expect(readFileSync(join(root, "SCOPE.md"), "utf8")).toContain("maintained by my-context.");
+  });
+
+  it("includes version-pinned GitHub validation for the authoritative default branch", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
-    expect(workflow).toContain('branches: ["main"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.0 verify");
+    expect(workflow).toContain('branches: ["trunk"]');
+    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.1 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
 
   it("rejects malformed GitHub identities", () => {
-    const base = { path: join(tempRoot(), "tree"), title: "Acme" };
+    const base = { path: join(tempRoot(), "tree") };
     for (const repository of [
       "https://github.com/acme/context",
       "acme-/context",
@@ -192,10 +224,72 @@ describe("scaffold and policy", () => {
     symlinkSync(realDirectory, linkedDirectory);
     symlinkSync(join(temporary, "missing"), danglingLink);
     writeFileSync(file, "not a directory\n");
-    const options = { repository: "acme/context", title: "Acme" };
+    const options = { repository: "acme/context" };
     expect(() => scaffoldTree({ ...options, path: linkedDirectory })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: danglingLink })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
+  });
+
+  it("uses Git's effective default branch and initializes the repository", () => {
+    const root = validTree();
+    expect(existsSync(join(root, ".git"))).toBe(true);
+    expect(readFileSync(join(root, ".git/HEAD"), "utf8")).toBe("ref: refs/heads/trunk\n");
+    expect(readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8")).toContain(
+      'branches: ["trunk"]',
+    );
+  });
+
+  it("preserves the case and spelling of Git's selected branch", () => {
+    writeFileSync(process.env.GIT_CONFIG_GLOBAL ?? "", "[init]\n\tdefaultBranch = Trunk_2\n");
+    const root = join(tempRoot(), "case-preserving");
+    scaffoldTree({ path: root, repository: "acme/context" });
+    expect(readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8")).toContain(
+      'branches: ["Trunk_2"]',
+    );
+  });
+
+  it("validates repository and destination safety before initializing Git", () => {
+    const malformed = join(tempRoot(), "malformed");
+    expect(() => scaffoldTree({ path: malformed, repository: "https://github.com/acme/context" })).toThrow();
+    expect(existsSync(malformed)).toBe(false);
+
+    const nonEmpty = join(tempRoot(), "non-empty");
+    mkdirSync(nonEmpty);
+    writeFileSync(join(nonEmpty, "keep.txt"), "keep\n");
+    expect(() => scaffoldTree({ path: nonEmpty, repository: "acme/context" })).toThrow(/non-empty directory/u);
+    expect(readdirSync(nonEmpty)).toEqual(["keep.txt"]);
+  });
+
+  it("fails without Git and writes no scaffold files", () => {
+    const root = join(tempRoot(), "missing-git");
+    const originalPath = process.env.PATH;
+    process.env.PATH = tempRoot();
+    try {
+      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/initialize Git repository/u);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+    expect(existsSync(join(root, "NODE.md"))).toBe(false);
+    expect(existsSync(join(root, "SCOPE.md"))).toBe(false);
+  });
+
+  it("preserves a partial Git repository when branch resolution fails", () => {
+    const root = join(tempRoot(), "unresolved-branch");
+    const bin = tempRoot();
+    const git = join(bin, "git");
+    writeFileSync(git, '#!/bin/sh\nif [ "$1" = "init" ]; then /bin/mkdir -p "$3/.git"; exit 0; fi\nexit 1\n');
+    chmodSync(git, 0o755);
+    const originalPath = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/resolve the initial Git branch/u);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+    }
+    expect(existsSync(join(root, ".git"))).toBe(true);
+    expect(existsSync(join(root, "NODE.md"))).toBe(false);
   });
 
   it("ships the canonical policy", () => {
