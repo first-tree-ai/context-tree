@@ -1,4 +1,5 @@
 ---
+schemaVersion: 1
 title: {{titleJson}}
 description: "Durable decisions, constraints, and cross-domain relationships."
 ---

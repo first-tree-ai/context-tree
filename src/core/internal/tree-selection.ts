@@ -63,7 +63,7 @@ export function deriveTreeEntry(
   return {
     kind: isNode ? "directory" : "file",
     path: normalizedPath,
-    title: metadataTitle ?? (relativePath === "SCOPE.md" ? "Scope" : displayTitle(relativePath)),
+    title: metadataTitle ?? displayTitle(relativePath),
   };
 }
 

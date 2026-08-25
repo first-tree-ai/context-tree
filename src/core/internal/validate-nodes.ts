@@ -62,6 +62,20 @@ function validateRequiredNodeMetadata(
   }
 }
 
+function validateRootOnlyFields(document: ContextDocument, path: string, findings: TreeValidationFinding[]): void {
+  const data = document.data;
+  if (path === "NODE.md" || data === null) return;
+  const fields = ["schemaVersion", "relatedRepositories"].filter((field) => field in data);
+  if (fields.length > 0) {
+    addFinding(
+      findings,
+      VALIDATION_CODES.rootOnlyFields,
+      path,
+      `root-only frontmatter field${fields.length === 1 ? "" : "s"} must appear only in root NODE.md: ${fields.join(", ")}`,
+    );
+  }
+}
+
 function readSoftLinks(document: ContextDocument, path: string, findings: TreeValidationFinding[]): string[] {
   if (document.data === null) {
     return [];
@@ -174,10 +188,6 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
   }
 
   for (const file of content.files) {
-    // Root SCOPE.md has its own strict, domain-neutral routing schema. It is
-    // normal durable content, but not a NODE and therefore does not require
-    // title or participate in ordinary node-link validation.
-    if (file.relativePath === "SCOPE.md") continue;
     scannedByContentClass[file.contentClass] += 1;
 
     if (file.unresolved) {
@@ -226,6 +236,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
     }
 
     const document = readContextDocument(file.absolutePath);
+    validateRootOnlyFields(document, file.relativePath, findings);
     if (file.contentClass === "member") {
       if (document.frontmatter === "missing") {
         continue;
@@ -243,7 +254,9 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
       continue;
     }
 
-    validateRequiredNodeMetadata(document, file.relativePath, findings);
+    if (file.relativePath !== "NODE.md") {
+      validateRequiredNodeMetadata(document, file.relativePath, findings);
+    }
     validateSoftLinks({
       allowArchive: false,
       document,

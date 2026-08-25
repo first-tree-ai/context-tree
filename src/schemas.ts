@@ -3,12 +3,13 @@ import { z } from "zod";
 import { parseMarkdownFrontmatter } from "./internal/frontmatter.js";
 
 export const SCHEMA_VERSION = 1 as const;
-export const CONTEXT_TREE_SCOPE_MAX_BYTES = 16 * 1024;
+export const CONTEXT_TREE_ROOT_NODE_MAX_BYTES = 16 * 1024;
 
 export const VALIDATION_CODES = {
   rootMissing: "TREE_ROOT_MISSING",
+  rootNodeInvalid: "TREE_ROOT_NODE_INVALID",
+  rootOnlyFields: "TREE_ROOT_ONLY_FIELDS",
   directoryNodeMissing: "TREE_DIRECTORY_NODE_MISSING",
-  scopeInvalid: "TREE_SCOPE_INVALID",
   frontmatterMissing: "TREE_FRONTMATTER_MISSING",
   frontmatterParse: "TREE_FRONTMATTER_PARSE",
   titleMissing: "TREE_TITLE_MISSING",
@@ -69,32 +70,35 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   }
 });
 
-export const contextTreeScopeFrontmatterSchema = z
+export const contextTreeRootNodeFrontmatterSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
+    title: z.string().trim().min(1),
+    description: z.string().trim().min(1).optional(),
+    soft_links: z.array(z.string().trim().min(1)).min(1).optional(),
     relatedRepositories: z.array(credentialFreeRepositoryUrlSchema).max(64).optional(),
   })
-  .strict();
+  .loose();
 
-export const contextTreeScopeSchema = z.object({
-  frontmatter: contextTreeScopeFrontmatterSchema,
-  body: z.string().trim().min(1, "SCOPE.md must describe what the Context Tree covers."),
+export const contextTreeRootNodeSchema = z.object({
+  frontmatter: contextTreeRootNodeFrontmatterSchema,
+  body: z.string().trim().min(1, "Root NODE.md must contain repository-wide context."),
 });
 
-export type ContextTreeScope = z.infer<typeof contextTreeScopeSchema>;
+export type ContextTreeRootNode = z.infer<typeof contextTreeRootNodeSchema>;
 
-export function parseContextTreeScope(markdown: string): ContextTreeScope {
-  if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_SCOPE_MAX_BYTES) {
-    throw new Error(`SCOPE.md exceeds the ${CONTEXT_TREE_SCOPE_MAX_BYTES}-byte limit.`);
+export function parseContextTreeRootNode(markdown: string): ContextTreeRootNode {
+  if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_ROOT_NODE_MAX_BYTES) {
+    throw new Error(`Root NODE.md exceeds the ${CONTEXT_TREE_ROOT_NODE_MAX_BYTES}-byte limit.`);
   }
   const document = parseMarkdownFrontmatter(markdown, { strictDelimiters: true });
   if (document.frontmatter === "missing") {
-    throw new Error("SCOPE.md must contain YAML frontmatter.");
+    throw new Error("Root NODE.md must contain YAML frontmatter.");
   }
   if (document.frontmatter === "invalid" || document.data === null) {
-    throw new Error(`SCOPE.md frontmatter is invalid${document.error === undefined ? "." : `: ${document.error}`}`);
+    throw new Error(`Root NODE.md frontmatter is invalid${document.error === undefined ? "." : `: ${document.error}`}`);
   }
-  return contextTreeScopeSchema.parse({ frontmatter: document.data, body: document.body });
+  return contextTreeRootNodeSchema.parse({ frontmatter: document.data, body: document.body });
 }
 
 export const contextContentClassSchema = z.enum(["normal", "archive-supporting", "member", "repo-infra"]);

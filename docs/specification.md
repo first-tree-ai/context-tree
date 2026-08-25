@@ -7,25 +7,30 @@ A shared Context Tree lives in a `github.com` repository identified as
 still operates on local clones and worktrees because validation and editing are
 filesystem operations.
 
-The tree root is a real directory containing `NODE.md`. Optional `SCOPE.md`
-must be a regular UTF-8 file with schema-version-1 frontmatter and non-empty
-prose:
+The tree root is a real directory containing a regular, non-symlink `NODE.md`.
+That root node is both the tree manifest and the repository-wide context node.
+It must contain non-empty prose and schema-version-1 frontmatter:
 
 ```yaml
 ---
 schemaVersion: 1
+title: "Service Context"
+description: "Durable decisions shared across service domains."
 relatedRepositories:
   - https://github.com/acme/service.git
 ---
 ```
 
-`relatedRepositories` remains provider-neutral and accepts at most 64
+Root-only `schemaVersion` is required. Root-only `relatedRepositories` is
+optional, remains provider-neutral, and accepts at most 64
 credential-free HTTP(S), `ssh://`, or scp-style SSH references. It describes
 related source repositories; it does not identify the Context Tree repository.
+Neither root-only field is valid on domain nodes or Markdown leaves. A legacy
+`SCOPE.md` has no special meaning and is validated as an ordinary leaf.
 
 ## Nodes and content classes
 
-The root requires `NODE.md`. A semantic directory represented as a node also
+The root requires the manifest fields above in `NODE.md`. A semantic directory represented as a node also
 contains `NODE.md`; organizational directories containing Markdown leaves need
 not. Normal nodes require only a non-empty `title`. Optional
 `description` is non-empty prose, and optional `soft_links` contains
@@ -79,9 +84,10 @@ the surrounding host Git workflow rather than computed by the core.
 
 ## Lifecycle
 
-Scaffolding always creates a validation workflow pinned to the package version
-that generated it. Init takes canonical `OWNER/REPO` and an optional absent or
-empty destination. It requires Git, runs ordinary `git init`, and uses the
+Scaffolding creates exactly two files: root `NODE.md` and
+`.github/workflows/validate-context-tree.yml`. The workflow is pinned to the
+package version that generated it. Init takes canonical `OWNER/REPO` and an
+optional absent or empty destination. It requires Git, runs ordinary `git init`, and uses the
 unborn branch selected by Git's effective `init.defaultBranch` configuration or
 compiled fallback. The generated workflow filters pushes to that exact branch.
 The local tree title and default destination name come from `REPO`. The core and

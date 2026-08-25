@@ -64,7 +64,7 @@ export function readTree(treePath: string, options: ReadTreeOptions = {}): Conte
   for (const file of allSafeMarkdown(root)) {
     if (classes !== "all" && !classes.includes(file.contentClass)) continue;
 
-    const metadata = file.relativePath === "SCOPE.md" ? null : readNodeMetadata(file.absolutePath);
+    const metadata = readNodeMetadata(file.absolutePath);
     const entry = deriveTreeEntry(file.relativePath, metadata?.title);
     if (!isTreeEntryWithinTarget(entry.path, file.relativePath, target)) continue;
     const depth = relativeTreeDepth(entry.path, target);

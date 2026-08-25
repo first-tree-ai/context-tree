@@ -60,7 +60,7 @@ describe("built CLI", () => {
     const initialized = cli(cwd, ["init", ...INIT_ARGS]);
     expect(initialized.status).toBe(0);
     const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
-    expect(scaffold.files).toEqual(["NODE.md", "SCOPE.md", ".github/workflows/validate-context-tree.yml"]);
+    expect(scaffold.files).toEqual(["NODE.md", ".github/workflows/validate-context-tree.yml"]);
     expect(existsSync(resolve(cwd, "tree/.git"))).toBe(true);
     const workflowPath = resolve(cwd, "tree/.github/workflows/validate-context-tree.yml");
     expect(existsSync(workflowPath)).toBe(true);
@@ -89,7 +89,8 @@ describe("built CLI", () => {
     const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
     expect(scaffold.root).toBe(resolve(realpathSync(cwd), "my-context"));
     expect(readFileSync(resolve(cwd, "my-context/NODE.md"), "utf8")).toContain('title: "my-context"');
-    expect(readFileSync(resolve(cwd, "my-context/SCOPE.md"), "utf8")).toContain("maintained by my-context.");
+    expect(readFileSync(resolve(cwd, "my-context/NODE.md"), "utf8")).toContain("schemaVersion: 1");
+    expect(existsSync(resolve(cwd, "my-context/SCOPE.md"))).toBe(false);
     expect(readFileSync(resolve(cwd, "my-context/.github/workflows/validate-context-tree.yml"), "utf8")).toContain(
       'branches: ["Release_1"]',
     );

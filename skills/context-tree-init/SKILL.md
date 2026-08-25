@@ -32,7 +32,7 @@ the local commit and optional GitHub operations.
 
 1. Run `context-tree init --repository "OWNER/REPO" --tree-path "<tree_path>"` and treat its JSON scaffold result as authoritative. Parse the complete result, require it to match the scaffold result contract, and require `verification.ok === true`. If the result is malformed, does not match the contract, or contains a failed verification, stop before staging or publishing and preserve the generated repository for inspection.
 2. Treat the Git repository created by the CLI as authoritative. Resolve its current unborn branch with `git -C "<tree_path>" symbolic-ref --short HEAD`, preserve the returned spelling exactly as `current_branch`, and do not run `git init` or replace the branch.
-3. In that repository, stage only `NODE.md`, `SCOPE.md`, and `.github/workflows/validate-context-tree.yml`. Inspect `git status --short` and the complete staged diff, confirm no other path is staged, then commit locally on `current_branch`. If any Git operation fails, stop and preserve the local files and repository for inspection.
+3. In that repository, stage only `NODE.md` and `.github/workflows/validate-context-tree.yml`. Inspect `git status --short` and the complete staged diff, confirm no other path is staged, then commit locally on `current_branch`. If any Git operation fails, stop and preserve the local files and repository for inspection.
 
 ## Finish the selected mode
 

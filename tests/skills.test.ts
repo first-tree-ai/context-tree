@@ -165,7 +165,7 @@ describe("Agent Skills contracts", () => {
     expect(init).toContain("Treat the Git repository created by the CLI as authoritative");
     expect(init).toContain('git -C "<tree_path>" symbolic-ref --short HEAD');
     expect(init).toContain("do not run `git init`");
-    expect(init).toContain("stage only `NODE.md`, `SCOPE.md`, and `.github/workflows/validate-context-tree.yml`");
+    expect(init).toContain("stage only `NODE.md` and `.github/workflows/validate-context-tree.yml`");
     expect(init).toContain("complete staged diff");
     expect(init).toContain("no GitHub repository or remote was created");
     expect(init).toContain("publish only `current_branch`");

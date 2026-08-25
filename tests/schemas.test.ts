@@ -9,6 +9,9 @@ import {
   contextTreePolicySchema,
   contextTreeReadEntrySchema,
   contextTreeReadResultSchema,
+  contextTreeRootNodeFrontmatterSchema,
+  contextTreeRootNodeSchema,
+  parseContextTreeRootNode,
   readContextTreePolicy,
   readTree,
   scaffoldTree,
@@ -75,6 +78,12 @@ describe("public JSON schemas", () => {
         schemaVersion: 1,
       }).success,
     ).toBe(false);
+  });
+
+  it("exports the root NODE parser and schemas", () => {
+    const parsed = parseContextTreeRootNode('---\nschemaVersion: 1\ntitle: "Root"\ncustom: true\n---\n\n# Root\n');
+    expect(contextTreeRootNodeFrontmatterSchema.parse(parsed.frontmatter)).toEqual(parsed.frontmatter);
+    expect(contextTreeRootNodeSchema.parse(parsed)).toEqual(parsed);
   });
 
   it("rejects unknown output properties, including former digest fields", () => {

@@ -64,7 +64,6 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
 
   const files: Array<readonly [string, string]> = [
     ["NODE.md", "root-node.md"],
-    ["SCOPE.md", "scope.md"],
     [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
   ];
 
