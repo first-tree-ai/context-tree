@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Write"
   short_description: "Publish durable Context Tree updates"
-  default_prompt: "Use $context-tree-write with agent-slug, tree_path, and branch."
+  default_prompt: "Use $context-tree-write with agent-slug, tree_path, and default_branch."

@@ -85,13 +85,19 @@ regardless of the user's Git configuration; the generated workflow filters
 pushes to `main`. Init takes canonical `OWNER/REPO`, an absent or empty
 destination, and a title.
 
-Reads and writes take `agent-slug`, an existing checkout path, and a branch.
+Reads take `agent-slug`, an existing checkout path, and `branch`. Writes take
+`agent-slug`, an existing fetch-only checkout path, and the authoritative
+`default_branch` publication target.
 The exact clean, non-symlink Git root and its credential-free GitHub `origin`
 form the authorization boundary. Reads refresh fast-forward-only, validate, and
 report the commit SHA; authorized stale reads stay read-only.
 
-Writes fetch a fresh base through that checkout and edit an isolated worktree.
-One source comes from task context, not an invocation argument. The base and
-result must validate; publication uses a reviewed, non-force task-branch push
-and PR. Invalid bases permit only explicitly requested validator-scoped repair,
-and the workflow never merges.
+Writes fetch the supplied default branch through that checkout and edit an
+isolated worktree. One source comes from task context, not an invocation
+argument, and scopes one write and commit. The base and result must validate;
+publication first uses a non-force direct push to the supplied default branch.
+Concurrent updates are rebased, resolved from authorized evidence, and verified
+again with bounded retries. Explicit direct-push denial or exhausted retries
+uses a latest-base, conflict-free task-branch PR fallback that remains open.
+Invalid bases permit only explicitly requested validator-scoped repair, and the
+workflow never merges.
