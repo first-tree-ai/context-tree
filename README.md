@@ -73,8 +73,8 @@ exhausted, the skill rebases against the latest default branch and opens a
 conflict-free fallback PR without merging it or requesting reviewers. An
 invalid base blocks semantic changes; an explicit repair request may produce a
 repair-only write and commit limited to validator findings. Each write and
-commit is scoped to one concrete source. Read and write use `agent-slug` solely
-to select optional private memory at `members/<agent-slug>/memory.md`.
+commit is scoped to one concrete source. Read and write use `agent_slug` solely
+to select optional private memory at `members/<agent_slug>/memory.md`.
 
 ## Library integration
 
