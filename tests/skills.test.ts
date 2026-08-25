@@ -11,6 +11,11 @@ function record(value: unknown): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value));
 }
 
+function nonEmptyString(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") throw new Error("Expected a non-empty string.");
+  return value;
+}
+
 function skillDirectories(): string[] {
   return readdirSync(SKILLS_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -22,6 +27,20 @@ function splitSkill(source: string): { body: string; frontmatter: Record<string,
   const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/u.exec(source);
   if (!match?.[1]) throw new Error("SKILL.md must contain YAML frontmatter.");
   return { body: match[2] ?? "", frontmatter: record(parse(match[1])) };
+}
+
+function skillBody(name: string): string {
+  return splitSkill(readFileSync(join(SKILLS_ROOT, name, "SKILL.md"), "utf8")).body;
+}
+
+function invocationInputs(body: string): string[] {
+  const section = /(?:^|\n)## Invocation inputs\n\n([\s\S]*?)(?=\n## |$)/u.exec(body)?.[1];
+  if (section === undefined) throw new Error("Skill must declare its invocation inputs.");
+  return [...section.matchAll(/^- `([a-z_-]+)`:/gmu)].map((match) => nonEmptyString(match[1]));
+}
+
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/gu, " ");
 }
 
 describe("Agent Skills contracts", () => {
@@ -36,9 +55,10 @@ describe("Agent Skills contracts", () => {
   for (const directory of skillDirectories()) {
     const name = basename(directory);
 
-    it(`${name} has portable metadata and matching OpenAI UI metadata`, () => {
+    it(`${name} has valid portable metadata and a non-empty body`, () => {
       const source = readFileSync(join(directory, "SKILL.md"), "utf8");
       const skill = splitSkill(source);
+
       expect(Object.keys(skill.frontmatter).sort()).toEqual([
         "compatibility",
         "description",
@@ -47,6 +67,7 @@ describe("Agent Skills contracts", () => {
         "name",
       ]);
       expect(skill.frontmatter.name).toBe(name);
+      expect(nonEmptyString(skill.frontmatter.description)).toBe(skill.frontmatter.description);
       expect(skill.frontmatter.license).toBe("Apache-2.0");
       expect(skill.frontmatter.compatibility).toBe(
         "Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.",
@@ -55,64 +76,117 @@ describe("Agent Skills contracts", () => {
         author: "first-tree-ai",
         version: PACKAGE_MANIFEST.version,
       });
-      const openai = record(parse(readFileSync(join(directory, "agents/openai.yaml"), "utf8")));
-      expect(record(openai.interface).default_prompt).toContain(`$${name}`);
+      expect(skill.body.trim()).not.toBe("");
     });
 
-    it(`${name} checks the CLI and policy before use and never auto-installs`, () => {
-      const body = splitSkill(readFileSync(join(directory, "SKILL.md"), "utf8")).body;
-      const versionCheck = body.indexOf("`context-tree --version`");
-      const policyCheck = body.indexOf("`context-tree policy`");
-      expect(versionCheck).toBeGreaterThanOrEqual(0);
-      expect(policyCheck).toBeGreaterThan(versionCheck);
-      expect(body).toContain("`npm install --global @first-tree-ai/context-tree`");
-      expect(body).toMatch(/Never install a\s+package automatically\./u);
-      expect(body).toContain("`schemaVersion: 1`");
-      expect(body).toContain("A Git remote proves identity, not user authority");
-      expect(body).toContain("OWNER/REPO");
-      expect(body).not.toContain("--json");
+    it(`${name} has complete OpenAI UI metadata`, () => {
+      const openai = record(parse(readFileSync(join(directory, "agents/openai.yaml"), "utf8")));
+      const interfaceMetadata = record(openai.interface);
+
+      expect(Object.keys(interfaceMetadata).sort()).toEqual(["default_prompt", "display_name", "short_description"]);
+      for (const value of Object.values(interfaceMetadata)) {
+        expect(nonEmptyString(value)).toBe(value);
+      }
+      expect(interfaceMetadata.default_prompt).toContain(`$${name}`);
     });
   }
 
-  it("init is create-only and always publishes pinned validation", () => {
-    const body = splitSkill(readFileSync(join(SKILLS_ROOT, "context-tree-init/SKILL.md"), "utf8")).body;
-    expect(body).toContain("Create only");
-    expect(body).not.toContain("base branch");
-    expect(body).not.toContain("--base-branch");
-    expect(body).toMatch(/empty\s+local destination/u);
-    expect(body).toContain("`git init --initial-branch=main`");
-    expect(body).toContain("publish `main` only");
-    expect(body).toContain("`refs/remotes/origin/main`");
-    expect(body).toContain("`refs/heads/main`");
-    expect(body).toContain("always contains the packaged GitHub Actions workflow pinned");
-    expect(body).toContain('gh repo create "OWNER/REPO" --private --source');
-    expect(body).toContain("Never\ndelete a GitHub repository");
-    expect(body).toContain("Stop if the target\nrepository already exists");
+  it("does not reference the retired shared memory namespace", () => {
+    for (const directory of skillDirectories()) {
+      const source = readFileSync(join(directory, "SKILL.md"), "utf8");
+      expect(source).not.toContain("memory/");
+    }
   });
 
-  it("read requires clean identity-checked refresh and isolates stale reads", () => {
-    const body = splitSkill(readFileSync(join(SKILLS_ROOT, "context-tree-read/SKILL.md"), "utf8")).body;
-    expect(body).toContain("`git status --porcelain`");
-    expect(body).toContain("normalized `origin` and current branch");
-    expect(body).toContain('`git pull --ff-only origin "<branch>"`');
-    expect(body).toContain("explicitly authorizes a stale read");
-    expect(body).toContain("exact local commit SHA");
-    expect(body).toContain("A stale checkout is\nread-only and must never be reused as the starting point for a write");
+  it("declares the local-checkout invocation contracts", () => {
+    const init = skillBody("context-tree-init");
+    expect(invocationInputs(init)).toEqual(["repository", "tree_path", "title"]);
+
+    for (const name of ["context-tree-read", "context-tree-write"]) {
+      const body = skillBody(name);
+      expect(invocationInputs(body)).toEqual(["agent-slug", "tree_path", "branch"]);
+      expect(body).toContain("Treat `agent-slug` as the agent identity");
+      expect(body).toContain("members/<agent-slug>/memory.md");
+    }
   });
 
-  it("write always starts fresh and publishes a verified non-force PR", () => {
-    const body = splitSkill(readFileSync(join(SKILLS_ROOT, "context-tree-write/SKILL.md"), "utf8")).body;
-    expect(body).toContain("concrete source artifact");
-    expect(body).toContain("exact fetched commit");
-    expect(body).toContain("agent-owned isolated worktree");
-    expect(body).toContain("Never edit the shared checkout");
-    expect(body).toContain("block all semantic edits");
-    expect(body).toContain("repair-only PR");
-    expect(body).toContain("Edit only the necessary regular, non-symlink Markdown files directly");
-    expect(body).toContain("Inspect the complete `git diff`");
-    expect(body).toContain('`git push --set-upstream origin "<task-branch>"`');
-    expect(body).toContain("never force push");
-    expect(body).toContain('`gh pr create --base "<base>" --head "<task-branch>"`');
-    expect(body).toContain("Never merge automatically");
+  it("omits retired inputs and skill-level policy", () => {
+    for (const name of ["context-tree-init", "context-tree-read", "context-tree-write"]) {
+      const body = skillBody(name);
+      expect(body).not.toMatch(/agent[-_]id/u);
+      expect(body).not.toContain("source_artifact");
+      expect(body).not.toContain("schemaVersion: 1");
+      expect(body).not.toContain("gh auth status");
+    }
+
+    const read = skillBody("context-tree-read");
+    expect(read).not.toContain("^[A-Za-z0-9]");
+    expect(read).not.toContain("`STALE`");
+
+    const write = skillBody("context-tree-write");
+    expect(write).not.toContain("^[A-Za-z0-9]");
+
+    for (const body of [read, write]) {
+      expect(body).not.toMatch(/validate (?:the )?`?agent-slug|agent-slug.*ASCII|starting with a letter/iu);
+    }
+
+    const init = skillBody("context-tree-init");
+    expect(init).not.toContain("--public");
+    expect(init).toContain('gh repo create "OWNER/REPO" --private');
+  });
+
+  it("uses only agent-slug in shipped skills and documentation", () => {
+    const paths = [
+      resolve(import.meta.dirname, "../README.md"),
+      resolve(import.meta.dirname, "../docs/specification.md"),
+      resolve(import.meta.dirname, "../policy/context-tree-policy.md"),
+      ...skillDirectories().flatMap((directory) => [
+        join(directory, "SKILL.md"),
+        join(directory, "agents/openai.yaml"),
+      ]),
+    ];
+
+    for (const path of paths) {
+      const source = readFileSync(path, "utf8");
+      expect(source).not.toMatch(/agent_slug|member_slug|member-slug/u);
+    }
+  });
+
+  it("makes the exact existing checkout the read and write authorization boundary", () => {
+    for (const name of ["context-tree-read", "context-tree-write"]) {
+      const body = compactWhitespace(skillBody(name));
+
+      expect(body).toContain("Never infer the path from the current directory or clone a replacement");
+      expect(body).toContain("real path is identical");
+      expect(body).toContain("git rev-parse --show-toplevel");
+      expect(body).toContain("git status --porcelain");
+      expect(body).toContain("git symbolic-ref --short HEAD");
+      expect(body).toContain("Reject a nested root or detached HEAD");
+      expect(body).toContain("Capture `origin` without logging it");
+      expect(body).toContain("credential-free `github.com` HTTPS or SSH");
+      expect(body).toContain("derive `OWNER/REPO`");
+      expect(body).toContain("not another checkout or remote");
+    }
+  });
+
+  it("preserves refresh, isolation, and publication safeguards", () => {
+    const read = skillBody("context-tree-read");
+    const write = skillBody("context-tree-write");
+
+    expect(read).toContain('git pull --ff-only origin "<branch>"');
+    expect(read).toContain("Treat a stale checkout as read-only");
+    expect(read).toContain("disclose the refresh");
+    expect(read).toContain("exact local commit SHA");
+
+    expect(write).toContain('git fetch origin "<branch>"');
+    expect(write).toContain("fetched commit SHA");
+    expect(write).toContain("temporary worktree at that exact commit");
+    expect(write).toContain("Preserve path containment and never replace or traverse symlinks");
+    expect(write).toContain("Run `context-tree verify");
+    expect(write).toContain("Inspect the complete `git diff`");
+    expect(write).toContain('git push --set-upstream origin "<task-branch>"');
+    expect(write).toContain("Use a non-force push");
+    expect(write).toContain('gh pr create --repo "OWNER/REPO"');
+    expect(write).toContain("Never merge automatically");
   });
 });

@@ -1,7 +1,6 @@
 ---
 title: {{titleJson}}
-description: "Durable decisions, constraints, ownership, and cross-domain relationships."
-owners: [{{ownerJson}}]
+description: "Durable decisions, constraints, and cross-domain relationships."
 ---
 
 # {{title}}

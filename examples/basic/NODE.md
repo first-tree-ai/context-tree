@@ -1,7 +1,6 @@
 ---
 title: "Example Context Tree"
 description: "A small valid Context Tree fixture."
-owners: [example-owner]
 ---
 
 # Example Context Tree
@@ -9,3 +8,7 @@ owners: [example-owner]
 ## Decision
 
 Durable system decisions live under `systems/`.
+
+## Constraints
+
+- When host behavior appears inconsistent, confirm checkout identity before diagnosing tree content.

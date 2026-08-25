@@ -14,7 +14,6 @@ function template(name: string, values: Record<string, string>): string {
 }
 
 export type ScaffoldTreeOptions = {
-  owner: string;
   path: string;
   repository: string;
   title: string;
@@ -31,12 +30,8 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
       throw new Error(`Refusing to scaffold into a non-empty directory: ${root}`);
     }
   }
-  const owner = options.owner.trim();
   const repository = options.repository.trim();
   const title = options.title.trim();
-  if (!/^[a-z\d][a-z\d._-]{0,127}$/iu.test(owner)) {
-    throw new Error("Owner must be a portable identifier containing only letters, digits, dot, underscore, or hyphen.");
-  }
   const unsafeTitle = [...title].some((character) => {
     const code = character.codePointAt(0);
     return code !== undefined && (code <= 0x1f || code === 0x7f);
@@ -64,8 +59,6 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
     throw new Error("Package version is missing or invalid.");
   }
   const values = {
-    owner,
-    ownerJson: JSON.stringify(owner),
     packageVersion: manifest.version,
     title,
     titleJson: JSON.stringify(title),
@@ -75,8 +68,6 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
   const files: Array<readonly [string, string]> = [
     ["NODE.md", "root-node.md"],
     ["SCOPE.md", "scope.md"],
-    ["members/NODE.md", "members-index.md"],
-    [`members/${values.owner}/NODE.md`, "member-node.md"],
     [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
   ];
 

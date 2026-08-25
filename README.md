@@ -1,15 +1,16 @@
 # Context Tree
 
 `@first-tree-ai/context-tree` is the portable core for a GitHub-backed Context
-Tree: durable decisions, constraints, ownership, and cross-domain relationships
+Tree: durable decisions, constraints, and cross-domain relationships
 stored as Markdown in a private GitHub repository. It ships deterministic local
 scaffolding, validation, scoped reading, the canonical policy, Zod contracts,
 and framework-neutral agent skills.
 
-The core and CLI never make network requests or manage credentials. The skills
-use the host's existing `git` and `gh` authentication only for an explicitly
-authorized GitHub `OWNER/REPO` and branch. GitHub Enterprise Server and other
-forges are unsupported.
+The core and CLI never make network requests or manage credentials. Init takes
+an explicit GitHub `OWNER/REPO`. Read and write instead take an existing local
+checkout whose exact path authorizes only that checkout and its verified,
+credential-free GitHub `origin`. GitHub Enterprise Server and other forges are
+unsupported.
 
 ## Install
 
@@ -41,8 +42,7 @@ JSON object on stdout. Help and version output remain plain text.
 context-tree init \
   --repository acme/context \
   --tree-path ./context-tree \
-  --title "Acme" \
-  --owner alice
+  --title "Acme"
 context-tree policy
 context-tree verify --tree-path ./context-tree
 context-tree read --tree-path ./context-tree --content
@@ -54,18 +54,22 @@ to the package version that created the tree. New repositories always start on
 commits, creates a private GitHub repository, and pushes `main`.
 
 Reads default to normal content. Select member, archive-supporting, or all
-classes only when needed. The read skill clones or fast-forward refreshes an
-explicit checkout, requires it to be clean, and reports the exact Git commit
-SHA. If GitHub is unavailable, a stale read requires explicit authorization and
-is clearly labeled; stale state can never become the base for a write.
+classes only when needed. The read skill fast-forward refreshes an explicitly
+supplied existing checkout, requires it to be clean and on the expected branch,
+derives `OWNER/REPO` from its safe GitHub origin, and reports the exact Git
+commit SHA. If GitHub is unavailable, a stale read requires explicit
+authorization and is clearly labeled; stale state can never become the base for
+a write.
 
 Writes are normal file edits performed by the write skill, not a CLI command.
-Every write requires a concrete source artifact, freshly fetches the explicit
-base branch, creates an isolated worktree at its exact commit, verifies the base,
-edits only necessary Markdown, verifies again, inspects the complete diff,
-commits, non-force pushes, and opens a GitHub PR. The skill never merges. An
-invalid base blocks semantic changes; an explicit repair request may produce a
-repair-only PR limited to validator findings.
+Every write receives one concrete source through the authorized task context,
+freshly fetches the explicit base branch through a supplied fetch-only checkout,
+creates an isolated worktree at its exact commit, verifies the base, edits only
+necessary Markdown, verifies again, inspects the complete diff, commits,
+non-force pushes, and opens a GitHub PR. The skill never merges. An invalid base
+blocks semantic changes; an explicit repair request may produce a repair-only
+PR limited to validator findings. Read and write use `agent-slug` solely to
+select optional private memory at `members/<agent-slug>/memory.md`.
 
 ## Library integration
 
@@ -74,7 +78,6 @@ import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "@firs
 import { contextTreeReadResultSchema, verifyTreeReportSchema } from "@first-tree-ai/context-tree/schemas";
 
 scaffoldTree({
-  owner: "alice",
   path: "./context-tree",
   repository: "acme/context",
   title: "Acme",

@@ -33,7 +33,7 @@ function cli(cwd: string, args: string[]): CliResult {
   return { status: result.status, stderr: result.stderr, stdout: result.stdout };
 }
 
-const INIT_ARGS = ["--repository", "acme/context", "--tree-path", "tree", "--title", "CLI Tree", "--owner", "alice"];
+const INIT_ARGS = ["--repository", "acme/context", "--tree-path", "tree", "--title", "CLI Tree"];
 
 describe("built CLI", () => {
   it("exposes only init, policy, read, and verify", () => {
@@ -54,7 +54,8 @@ describe("built CLI", () => {
     const cwd = workspace();
     const initialized = cli(cwd, ["init", ...INIT_ARGS]);
     expect(initialized.status).toBe(0);
-    scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
+    const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
+    expect(scaffold.files).toEqual(["NODE.md", "SCOPE.md", ".github/workflows/validate-context-tree.yml"]);
     const workflowPath = resolve(cwd, "tree/.github/workflows/validate-context-tree.yml");
     expect(existsSync(workflowPath)).toBe(true);
     expect(readFileSync(workflowPath, "utf8")).toContain('branches: ["main"]');
@@ -76,7 +77,7 @@ describe("built CLI", () => {
 
   it("requires explicit GitHub identity and returns JSON errors", () => {
     const cwd = workspace();
-    const missingIdentity = cli(cwd, ["init", "--tree-path", "tree", "--title", "Tree", "--owner", "alice"]);
+    const missingIdentity = cli(cwd, ["init", "--tree-path", "tree", "--title", "Tree"]);
     expect(missingIdentity.status).toBe(1);
     contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(missingIdentity.stdout));
     expect(missingIdentity.stderr).toBe("");
@@ -118,5 +119,11 @@ describe("built CLI", () => {
       schemaVersion: 1,
     });
     expect(removedBaseBranch.stderr).toBe("");
+
+    const removedOwner = cli(cwd, ["init", ...INIT_ARGS, "--tree-path", "third", "--owner", "alice"]);
+    expect(removedOwner.status).toBe(1);
+    expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(removedOwner.stdout))).toMatchObject({
+      error: { code: "CONTEXT_TREE_FAILED", message: expect.stringContaining("unknown option '--owner'") },
+    });
   });
 });

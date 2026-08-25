@@ -29,7 +29,7 @@ function tempRoot(): string {
 
 function tree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ owner: "alice", path: root, repository: "acme/context", title: "Schema Tree" });
+  scaffoldTree({ path: root, repository: "acme/context", title: "Schema Tree" });
   return root;
 }
 
@@ -49,7 +49,6 @@ describe("public JSON schemas", () => {
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
     const scaffoldRoot = join(tempRoot(), "tree");
     const scaffold = scaffoldTree({
-      owner: "alice",
       path: scaffoldRoot,
       repository: "acme/other",
       title: "Other",
@@ -65,6 +64,7 @@ describe("public JSON schemas", () => {
     expect(contextTreePolicySchema.safeParse({ ...policy, schemaVersion: 2 }).success).toBe(false);
     expect(contextTreeReadResultSchema.safeParse({ ...read, entries: undefined }).success).toBe(false);
     expect(contextTreeReadEntrySchema.safeParse({ ...read.entries[0], kind: "link" }).success).toBe(false);
+    expect(contextTreeReadEntrySchema.safeParse({ ...read.entries[0], owners: ["alice"] }).success).toBe(false);
     expect(validationCodeSchema.safeParse("TREE_NOT_A_REAL_CODE").success).toBe(false);
     expect(
       treeValidationFindingSchema.safeParse({ code: "TREE_NOT_A_REAL_CODE", message: "bad", path: "NODE.md" }).success,

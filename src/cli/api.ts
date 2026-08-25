@@ -69,10 +69,8 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .requiredOption("--tree-path <path>", "destination directory")
     .requiredOption("--repository <owner/repo>", "GitHub repository identity")
     .requiredOption("--title <title>", "tree title")
-    .requiredOption("--owner <owner>", "initial owner identifier")
-    .action((options: { owner: string; repository: string; title: string; treePath: string }) => {
+    .action((options: { repository: string; title: string; treePath: string }) => {
       const result = scaffoldTree({
-        owner: options.owner,
         path: resolve(io.cwd(), options.treePath),
         repository: options.repository,
         title: options.title,

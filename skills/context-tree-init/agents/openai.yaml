@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Init"
-  short_description: "Create a private GitHub Context Tree"
-  default_prompt: "Use $context-tree-init to create and publish this new GitHub-backed Context Tree."
+  short_description: "Create a new GitHub Context Tree"
+  default_prompt: "Use $context-tree-init with repository, tree_path, and title."

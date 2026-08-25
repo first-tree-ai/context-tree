@@ -9,7 +9,6 @@ import {
   type VerifyTreeReport,
 } from "../schemas.js";
 import { readUtf8File } from "./internal/filesystem.js";
-import { collectMemberValidationFindings } from "./internal/validate-members.js";
 import { collectNodeValidationFindings } from "./internal/validate-nodes.js";
 import { resolveTreeRoot } from "./path.js";
 
@@ -47,12 +46,11 @@ function deduplicate(findings: TreeValidationFinding[]): TreeValidationFinding[]
 export function verifyTree(treePath: string): VerifyTreeReport {
   const root = resolveTreeRoot(treePath);
   const nodeResult = collectNodeValidationFindings(root);
-  const memberFindings = collectMemberValidationFindings(root);
   const rootNode = join(root, "NODE.md");
   const rootFinding: TreeValidationFinding[] = existsSync(rootNode)
     ? []
     : [{ code: VALIDATION_CODES.rootMissing, message: "root NODE.md is missing", path: "NODE.md" }];
-  const findings = deduplicate([...rootFinding, ...scopeFindings(root), ...nodeResult.findings, ...memberFindings]);
+  const findings = deduplicate([...rootFinding, ...scopeFindings(root), ...nodeResult.findings]);
 
   return {
     findings,
