@@ -30,21 +30,20 @@ Neither root-only field is valid on domain nodes or Markdown leaves. A legacy
 
 ## Nodes and content classes
 
-The root requires the manifest fields above in `NODE.md`. A semantic directory represented as a node also
-contains `NODE.md`; organizational directories containing Markdown leaves need
-not. Normal nodes require only a non-empty `title`. Optional
+The root requires the manifest fields above in `NODE.md`. Every semantic
+directory contains `NODE.md`, including `members/` and each member directory.
+Nodes and leaves require a non-empty `title`. Optional
 `description` is non-empty prose, and optional `soft_links` contains
 tree-root-relative Markdown files or node directories.
 
 - `normal`: root and durable domain decisions.
-- `archive-supporting`: evidence beneath `raw-context/`.
-- `member`: optional private agent memory beneath `members/`.
-- `repo-infra`: dot paths, generated output, instructions, build, and CI files.
+- `member`: member-oriented context beneath `members/`.
+- `repo-infra`: dot paths, generated output, root `scripts/`, instructions, build, and CI files.
 
-Normal content must not depend on archive-supporting content. Symlinks fail
-closed: they may not escape the tree, cross content-class boundaries, or stand
-in for domain directories. Reads default to normal content. Glob patterns are
-case-sensitive and segment-local.
+`raw-context/` has no reserved meaning and follows ordinary node rules.
+Symlinks fail closed: they may not escape the tree, cross content-class
+boundaries, or stand in for domain directories. Repository infrastructure is
+excluded from semantic validation and reads.
 
 ## Memory model
 
@@ -56,15 +55,15 @@ policy.
 
 An agent's optional private memory lives at `members/<agent_slug>/memory.md`.
 The `members/` directory, agent directory, and memory file are all optional;
-there is no member index or required profile. Skills use `agent_slug` only to
-select that private path. Scaffolding does not create empty private memory files.
+when present, each directory requires its ordinary `NODE.md` index. Skills use
+`agent_slug` to avoid unrelated member content by default. Scaffolding does not
+create empty private memory files.
 
 Domain scope controls read relevance, not authorization. Shared tree memory is
 commonly readable but writes still require authorization from the user or host
-and follow the GitHub workflow. Private memory provides
-cooperative isolation only: an agent with access to the entire Git checkout can
-access the underlying files, so the format does not claim directory-level
-confidentiality.
+and follow the GitHub workflow. Member boundaries are relevance guidance only:
+the library and CLI apply no member-level access restriction, and the format
+claims no directory-level confidentiality.
 
 ## Public contracts
 
@@ -77,7 +76,8 @@ plain text. An invalid `verify` report is still emitted and the command exits
 with status 1.
 
 `policy` returns `content` and `schemaVersion`. `read` returns the root, target,
-schema version, and selected entries without ownership fields. `verify` returns
+schema version, a selected node with its complete parsed frontmatter and body,
+and sorted immediate child summaries. `verify` returns
 the root, schema version, validity, findings, and content-class counts. None
 includes a tree digest or per-entry digest. The Git commit SHA is recorded by
 the surrounding host Git workflow rather than computed by the core.

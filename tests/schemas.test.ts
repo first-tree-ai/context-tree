@@ -3,24 +3,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
 import {
   contextContentClassCountsSchema,
   contextTreeCliErrorEnvelopeSchema,
   contextTreePolicySchema,
-  contextTreeReadEntrySchema,
+  contextTreeReadChildSchema,
+  contextTreeReadNodeSchema,
   contextTreeReadResultSchema,
   contextTreeRootNodeFrontmatterSchema,
   contextTreeRootNodeSchema,
   parseContextTreeRootNode,
-  readContextTreePolicy,
-  readTree,
-  scaffoldTree,
   scaffoldTreeResultSchema,
   treeValidationFindingSchema,
   validationCodeSchema,
-  verifyTree,
   verifyTreeReportSchema,
-} from "../src/index.js";
+} from "../src/schemas.js";
 
 const temporaryRoots = new Set<string>();
 
@@ -47,7 +45,7 @@ describe("public JSON schemas", () => {
     const results: Array<readonly [unknown, { parse: (value: unknown) => unknown }]> = [
       [readContextTreePolicy(), contextTreePolicySchema],
       [verifyTree(root), verifyTreeReportSchema],
-      [readTree(root, { classes: "all", content: true }), contextTreeReadResultSchema],
+      [readTree(root), contextTreeReadResultSchema],
     ];
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
     const scaffoldRoot = join(tempRoot(), "tree");
@@ -56,7 +54,9 @@ describe("public JSON schemas", () => {
       repository: "acme/other",
     });
     expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
-    for (const entry of readTree(root).entries) expect(contextTreeReadEntrySchema.parse(entry)).toEqual(entry);
+    const read = readTree(root);
+    expect(contextTreeReadNodeSchema.parse(read.node)).toEqual(read.node);
+    for (const child of read.children) expect(contextTreeReadChildSchema.parse(child)).toEqual(child);
   });
 
   it("rejects incompatible versions, malformed structures, and unknown codes", () => {
@@ -64,9 +64,9 @@ describe("public JSON schemas", () => {
     const policy = readContextTreePolicy();
     const read = readTree(root);
     expect(contextTreePolicySchema.safeParse({ ...policy, schemaVersion: 2 }).success).toBe(false);
-    expect(contextTreeReadResultSchema.safeParse({ ...read, entries: undefined }).success).toBe(false);
-    expect(contextTreeReadEntrySchema.safeParse({ ...read.entries[0], kind: "link" }).success).toBe(false);
-    expect(contextTreeReadEntrySchema.safeParse({ ...read.entries[0], owners: ["alice"] }).success).toBe(false);
+    expect(contextTreeReadResultSchema.safeParse({ ...read, node: undefined }).success).toBe(false);
+    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, kind: "link" }).success).toBe(false);
+    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, owners: ["alice"] }).success).toBe(false);
     expect(validationCodeSchema.safeParse("TREE_NOT_A_REAL_CODE").success).toBe(false);
     expect(
       treeValidationFindingSchema.safeParse({ code: "TREE_NOT_A_REAL_CODE", message: "bad", path: "NODE.md" }).success,
@@ -93,7 +93,7 @@ describe("public JSON schemas", () => {
     const report = verifyTree(tree());
     expect(contextTreePolicySchema.safeParse({ ...policy, digest: "a".repeat(64) }).success).toBe(false);
     expect(contextTreeReadResultSchema.safeParse({ ...read, treeDigest: "a".repeat(64) }).success).toBe(false);
-    expect(contextTreeReadEntrySchema.safeParse({ ...read.entries[0], digest: "a".repeat(64) }).success).toBe(false);
+    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, digest: "a".repeat(64) }).success).toBe(false);
     expect(verifyTreeReportSchema.safeParse({ ...report, treeDigest: "a".repeat(64) }).success).toBe(false);
     expect(verifyTreeReportSchema.safeParse({ ...report, future: true }).success).toBe(false);
     expect(contextContentClassCountsSchema.safeParse({ ...report.scannedByContentClass, future: 1 }).success).toBe(

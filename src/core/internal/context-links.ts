@@ -1,19 +1,12 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { posix, relative, resolve } from "node:path";
+import { posix, resolve } from "node:path";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { isRecord } from "../../internal/value.js";
-import type { ContextContentClass } from "../../schemas.js";
 import { isPathInside } from "../path.js";
-import { classifyContextContent } from "./content-class.js";
 
-export type LocalTreeTarget = {
-  contentClass: ContextContentClass;
-  escaped: boolean;
-  exists: boolean;
-  relativePath: string;
-};
+type LocalTreeTargetStatus = "escaped-existing" | "escaped-missing" | "missing" | "valid";
 
 function stripQueryAndFragment(target: string): string {
   const queryIndex = target.indexOf("?");
@@ -62,7 +55,7 @@ export function resolveLocalTreeTarget(options: {
   target: string;
   treeRoot: string;
   softLink: boolean;
-}): LocalTreeTarget | null {
+}): LocalTreeTargetStatus | null {
   if (!isTreeLocalTarget(options.target)) {
     return null;
   }
@@ -74,12 +67,7 @@ export function resolveLocalTreeTarget(options: {
   }
 
   if (isWindowsAbsoluteTarget(decodedTarget)) {
-    return {
-      contentClass: classifyContextContent(withoutSuffix),
-      escaped: true,
-      exists: false,
-      relativePath: withoutSuffix,
-    };
+    return "escaped-missing";
   }
 
   const sourceDirectory = posix.dirname(options.sourcePath);
@@ -91,29 +79,26 @@ export function resolveLocalTreeTarget(options: {
   const absoluteRoot = resolve(options.treeRoot);
   const absoluteTarget = resolve(absoluteRoot, relativePath);
   const lexicalEscape = !isPathInside(absoluteRoot, absoluteTarget);
-  let contentClass = classifyContextContent(relativePath);
-
   if (lexicalEscape) {
-    return { contentClass, escaped: true, exists: false, relativePath };
+    return "escaped-missing";
   }
 
   const exists = targetExists(absoluteTarget, options.softLink);
   if (!exists) {
-    return { contentClass, escaped: false, exists: false, relativePath };
+    return "missing";
   }
 
   try {
     const realRoot = realpathSync(absoluteRoot);
     const realTarget = realpathSync(absoluteTarget);
     if (!isPathInside(realRoot, realTarget)) {
-      return { contentClass, escaped: true, exists: true, relativePath };
+      return "escaped-existing";
     }
-    contentClass = classifyContextContent(relative(realRoot, realTarget).replace(/\\/gu, "/"));
   } catch {
-    return { contentClass, escaped: false, exists: false, relativePath };
+    return "missing";
   }
 
-  return { contentClass, escaped: false, exists: true, relativePath };
+  return "valid";
 }
 
 export function readMarkdownLinkTargets(markdown: string): string[] {

@@ -1,9 +1,4 @@
-export type GitHubRepositoryIdentity = {
-  name: string;
-  owner: string;
-};
-
-export function parseGitHubRepositoryIdentity(repository: string): GitHubRepositoryIdentity {
+export function parseGitHubRepositoryIdentity(repository: string): string {
   const repositoryParts = repository.split("/");
   const [owner, name] = repositoryParts;
   if (
@@ -18,5 +13,5 @@ export function parseGitHubRepositoryIdentity(repository: string): GitHubReposit
   ) {
     throw new Error("Repository must be an explicit GitHub OWNER/REPO identity.");
   }
-  return { name, owner };
+  return name;
 }

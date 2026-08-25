@@ -14,16 +14,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  credentialFreeRepositoryUrlSchema,
-  parseContextTreeRootNode,
-  readContextTreePolicy,
-  readTree,
-  scaffoldTree,
-  verifyTree,
-} from "../src/index.js";
+import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { credentialFreeRepositoryUrlSchema, parseContextTreeRootNode } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
+const EXAMPLES = resolve(import.meta.dirname, "../examples");
 const temporaryRoots = new Set<string>();
 const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
 const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
@@ -106,7 +101,7 @@ describe("schema version 1", () => {
     }
   });
 
-  it("verifies existing organizational directories without NODE.md", () => {
+  it("verifies indexed organizational directories", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true, schemaVersion: 1 });
@@ -114,6 +109,10 @@ describe("schema version 1", () => {
 });
 
 describe("verification", () => {
+  it("ships a valid indexed example tree", () => {
+    expect(verifyTree(join(EXAMPLES, "basic"))).toMatchObject({ findings: [], ok: true });
+  });
+
   it("reports root manifest, Markdown, and soft-link failures", () => {
     const root = validTree();
     writeFileSync(join(root, "bad.md"), "# Missing metadata\n[Outside](../secret.md)\n");
@@ -124,6 +123,52 @@ describe("verification", () => {
     expect(codes.has("TREE_FRONTMATTER_MISSING")).toBe(true);
     expect(codes.has("TREE_MARKDOWN_LINK_PATH_ESCAPE")).toBe(true);
     expect(codes.has("TREE_SOFT_LINK_BROKEN")).toBe(true);
+  });
+
+  it("preserves findings for valid, missing, escaping, symlinked, and non-local links", () => {
+    const root = validTree();
+    writeFileSync(join(root, "target.md"), node("Target"));
+    const outside = join(tempRoot(), "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "NODE.md"), node("Outside"));
+    symlinkSync(outside, join(root, "escaped-directory"));
+    writeFileSync(
+      join(root, "links.md"),
+      [
+        "---",
+        'title: "Links"',
+        "soft_links:",
+        "  - target.md",
+        "  - missing.md",
+        "  - ../outside.md",
+        "  - escaped-directory",
+        "  - https://example.com/context",
+        "---",
+        "",
+        "[Valid](target.md)",
+        "[Missing](missing.md)",
+        "[Lexical escape](../outside.md)",
+        "[Symlink escape](escaped-directory)",
+        "[Non-local](https://example.com/context)",
+      ].join("\n"),
+    );
+
+    const findings = verifyTree(root).findings.filter((finding) => finding.path === "links.md");
+    expect(findings.filter((finding) => finding.target === "target.md")).toEqual([]);
+    expect(findings.filter((finding) => finding.target === "missing.md").map((finding) => finding.code)).toEqual([
+      "TREE_SOFT_LINK_BROKEN",
+    ]);
+    expect(findings.filter((finding) => finding.target === "../outside.md").map((finding) => finding.code)).toEqual([
+      "TREE_SOFT_LINK_BROKEN",
+      "TREE_SOFT_LINK_PATH_ESCAPE",
+      "TREE_MARKDOWN_LINK_PATH_ESCAPE",
+    ]);
+    expect(findings.filter((finding) => finding.target === "escaped-directory").map((finding) => finding.code)).toEqual(
+      ["TREE_SOFT_LINK_PATH_ESCAPE", "TREE_MARKDOWN_LINK_PATH_ESCAPE"],
+    );
+    expect(
+      findings.filter((finding) => finding.target === "https://example.com/context").map((finding) => finding.code),
+    ).toEqual(["TREE_SOFT_LINK_BROKEN"]);
   });
 
   it("rejects invalid root manifest fields and root-only fields on domain nodes", () => {
@@ -160,9 +205,11 @@ describe("verification", () => {
     const outsideDirectory = join(tempRoot(), "outside-directory");
     mkdirSync(outsideDirectory);
     symlinkSync(outsideDirectory, join(root, "escape-directory"));
-    mkdirSync(join(root, "raw-context"));
-    writeFileSync(join(root, "raw-context/evidence.md"), "# Evidence\n");
-    symlinkSync(join(root, "raw-context/evidence.md"), join(root, "cross.md"));
+    mkdirSync(join(root, "members/alice"), { recursive: true });
+    writeFileSync(join(root, "members/NODE.md"), node("Members"));
+    writeFileSync(join(root, "members/alice/NODE.md"), node("Alice"));
+    writeFileSync(join(root, "members/alice/memory.md"), node("Memory"));
+    symlinkSync(join(root, "members/alice/memory.md"), join(root, "cross.md"));
 
     const codes = verifyTree(root).findings.map((finding) => finding.code);
     expect(codes).toContain("TREE_FRONTMATTER_PARSE");
@@ -171,53 +218,105 @@ describe("verification", () => {
     expect(codes).toContain("TREE_DIRECTORY_SYMLINK_PATH_ESCAPE");
   });
 
-  it("requires the root but permits profile-free member directories", () => {
+  it("accepts safe file symlinks and rejects dangling or unsupported symlinks", () => {
+    const root = validTree();
+    writeFileSync(join(root, "target.md"), node("Target"));
+    symlinkSync(join(root, "target.md"), join(root, "regular.md"));
+    symlinkSync(join(root, "missing.md"), join(root, "dangling.md"));
+    mkdirSync(join(root, "directory"));
+    writeFileSync(join(root, "directory/NODE.md"), node("Directory"));
+    symlinkSync(join(root, "directory"), join(root, "linked-directory"));
+
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_MARKDOWN_FILE_SYMLINK_BROKEN", path: "dangling.md" }),
+        expect.objectContaining({ code: "TREE_DIRECTORY_SYMLINK_UNSUPPORTED", path: "linked-directory" }),
+      ]),
+    );
+    expect(findings.some((finding) => finding.path === "regular.md")).toBe(false);
+  });
+
+  it("requires NODE.md in normal and member directories", () => {
     const root = validTree();
     mkdirSync(join(root, "members/bob"), { recursive: true });
-    writeFileSync(join(root, "members/bob/notes.md"), "notes");
-    rmSync(join(root, "NODE.md"));
-    const codes = verifyTree(root).findings.map((finding) => finding.code);
-    expect(codes).toEqual(["TREE_ROOT_MISSING"]);
+    writeFileSync(join(root, "members/bob/notes.md"), node("Notes"));
+    const findings = verifyTree(root).findings;
+    expect(findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "members" }),
+        expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "members/bob" }),
+      ]),
+    );
+  });
+
+  it("ignores repository infrastructure and treats raw-context as ordinary content", () => {
+    const root = validTree();
+    mkdirSync(join(root, ".github/unindexed"), { recursive: true });
+    mkdirSync(join(root, "scripts/unindexed"), { recursive: true });
+    mkdirSync(join(root, "raw-context/notes"), { recursive: true });
+    writeFileSync(join(root, "raw-context/NODE.md"), node("Raw context"));
+    writeFileSync(join(root, "raw-context/notes/evidence.md"), node("Evidence"));
+    const findings = verifyTree(root).findings;
+    expect(findings).toContainEqual(
+      expect.objectContaining({ code: "TREE_DIRECTORY_NODE_MISSING", path: "raw-context/notes" }),
+    );
+    expect(findings.some((finding) => finding.path.includes(".github") || finding.path.includes("scripts"))).toBe(
+      false,
+    );
   });
 });
 
-describe("scoped reading", () => {
-  it("selects normal content by default and supports depth, patterns, classes, and content", () => {
+describe("indexed reading", () => {
+  it("returns a selected body and immediate child summaries", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
 
-    expect(readTree(root).entries.map((entry) => entry.path)).toEqual([".", "decisions/runtime.md", "platform"]);
-    expect(readTree(root, { path: "platform", depth: 0 }).entries.map((entry) => entry.path)).toEqual(["platform"]);
-    expect(readTree(root, { classes: ["member"] }).entries.map((entry) => entry.path)).toEqual([
-      "members/alice/memory.md",
-    ]);
-    expect(readTree(root).entries.map((entry) => entry.path)).not.toContain("members/alice/memory.md");
-    expect(
-      readTree(root, { path: "members/alice/memory.md", classes: ["member"], content: true }).entries[0],
-    ).toMatchObject({
-      content: expect.stringContaining("Agent-specific working context"),
+    const rootRead = readTree(root);
+    expect(rootRead.node).toMatchObject({ body: expect.stringContaining("Canonical durable context"), path: "." });
+    expect(rootRead.node.body).not.toContain("schemaVersion:");
+    expect(rootRead.children.map((child) => child.path)).toEqual(["members", "opentag.md", "product"]);
+    expect(rootRead.children.map((child) => child.path)).not.toContain("product/runtime.md");
+
+    expect(readTree(root, "members").children.map((child) => child.path)).toEqual(["members/alice"]);
+    expect(readTree(root, "members/alice/memory.md").node).toMatchObject({
+      body: expect.stringContaining("Agent-specific working context"),
       contentClass: "member",
       path: "members/alice/memory.md",
     });
-    expect(readTree(root, { pattern: "decisions/*" }).entries.map((entry) => entry.path)).toEqual([
-      "decisions/runtime.md",
-    ]);
-    expect(readTree(root, { pattern: "Decisions/*" }).entries).toEqual([]);
-    expect(readTree(root, { path: "decisions/runtime.md", content: true }).entries[0]).toMatchObject({
-      content: expect.any(String),
-      depth: 0,
-      kind: "file",
-    });
+    expect(readTree(root, "members/alice/memory.md").children).toEqual([]);
+    expect(readTree(root)).toEqual(readTree(root, "NODE.md"));
+    expect(readTree(root, "product")).toEqual(readTree(root, "product/NODE.md"));
   });
 
-  it("excludes unsafe Markdown and rejects escaping or missing targets", () => {
+  it("retains complete metadata without expanding soft links", () => {
+    const root = validTree();
+    mkdirSync(join(root, "domain"));
+    writeFileSync(
+      join(root, "domain/NODE.md"),
+      '---\ntitle: "Domain"\ndescription: "Summary"\nsoft_links: [target.md]\nextension: true\n---\n\n# Domain\n',
+    );
+    writeFileSync(join(root, "domain/target.md"), node("Target"));
+    const result = readTree(root, "domain");
+    expect(result.node.frontmatter).toEqual({
+      description: "Summary",
+      extension: true,
+      soft_links: ["target.md"],
+      title: "Domain",
+    });
+    expect(result.children.map((child) => child.path)).toEqual(["domain/target.md"]);
+  });
+
+  it("rejects infrastructure, unsafe, escaping, or missing targets", () => {
     const root = validTree();
     const outside = join(tempRoot(), "outside.md");
     writeFileSync(outside, node("Outside"));
     symlinkSync(outside, join(root, "escape.md"));
-    expect(readTree(root, { classes: "all" }).entries.map((entry) => entry.path)).not.toContain("escape.md");
-    expect(() => readTree(root, { path: "../outside" })).toThrow(/outside/u);
-    expect(() => readTree(root, { path: "missing" })).toThrow();
+    expect(() => readTree(root, "escape.md")).toThrow(/real file/u);
+    expect(() => readTree(root, "../outside")).toThrow(/outside/u);
+    expect(() => readTree(root, "missing")).toThrow();
+    expect(() => readTree(root, ".github")).toThrow(/infrastructure/u);
+    expect(() => readTree(root, "scripts")).toThrow(/infrastructure/u);
   });
 });
 
@@ -229,7 +328,7 @@ describe("scaffold and policy", () => {
     expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("schemaVersion: 1");
     expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("# my-context");
     expect(existsSync(join(root, "SCOPE.md"))).toBe(false);
-    expect(readTree(root).entries.map((entry) => entry.path)).toEqual(["."]);
+    expect(readTree(root)).toMatchObject({ children: [], node: { path: "." } });
   });
 
   it("includes version-pinned GitHub validation for the authoritative default branch", () => {

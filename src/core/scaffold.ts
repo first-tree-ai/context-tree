@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { SCHEMA_VERSION, type ScaffoldTreeResult } from "../schemas.js";
 import { parseGitHubRepositoryIdentity } from "./internal/github-repository.js";
-import { readPackageManifest, resolvePackagedResource } from "./internal/packaged-resource.js";
+import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 import { verifyTree } from "./verify.js";
 
 function template(name: string, values: Record<string, string>): string {
@@ -38,7 +38,7 @@ function initializeGitRepository(root: string): string {
 }
 
 export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
-  const { name: title } = parseGitHubRepositoryIdentity(options.repository);
+  const title = parseGitHubRepositoryIdentity(options.repository);
   const root = resolve(options.path);
   const destination = lstatSync(root, { throwIfNoEntry: false });
   if (destination !== undefined) {
@@ -49,19 +49,13 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
       throw new Error(`Refusing to scaffold into a non-empty directory: ${root}`);
     }
   }
-  const manifest = readPackageManifest();
-  if (!("version" in manifest) || typeof manifest.version !== "string") {
-    throw new Error("Package version is missing or invalid.");
-  }
   const initialBranch = initializeGitRepository(root);
   const values = {
     branchJson: JSON.stringify(initialBranch),
-    packageVersion: manifest.version,
+    packageVersion: readPackageVersion(),
     title,
     titleJson: JSON.stringify(title),
   };
-  mkdirSync(root, { recursive: true });
-
   const files: Array<readonly [string, string]> = [
     ["NODE.md", "root-node.md"],
     [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],

@@ -75,10 +75,11 @@ describe("built CLI", () => {
     expect(verification.status).toBe(0);
     const verificationResult = verifyTreeReportSchema.parse(JSON.parse(verification.stdout));
     expect(verificationResult).toMatchObject({ ok: true, schemaVersion: 1 });
-    const read = cli(cwd, ["read", "--tree-path", "tree", "--content"]);
+    const read = cli(cwd, ["read", "--tree-path", "tree"]);
     expect(read.status).toBe(0);
     const readResult = contextTreeReadResultSchema.parse(JSON.parse(read.stdout));
     expect(readResult.schemaVersion).toBe(1);
+    expect(readResult.node.body).toContain("# context");
   });
 
   it("defaults init to cwd/REPO and derives its title from REPO", () => {
@@ -146,6 +147,15 @@ describe("built CLI", () => {
     expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(removedOwner.stdout))).toMatchObject({
       error: { code: "CONTEXT_TREE_FAILED", message: expect.stringContaining("unknown option '--owner'") },
     });
+
+    for (const retired of ["--content", "--depth", "--pattern", "--class"]) {
+      const args = retired === "--content" ? [retired] : [retired, "value"];
+      const result = cli(cwd, ["read", "--tree-path", "tree", ...args]);
+      expect(result.status).toBe(1);
+      expect(contextTreeCliErrorEnvelopeSchema.parse(JSON.parse(result.stdout))).toMatchObject({
+        error: { message: expect.stringContaining(`unknown option '${retired}'`) },
+      });
+    }
   });
 
   it("preserves destination safety and rejects retired init options", () => {

@@ -1,6 +1,6 @@
 ---
 title: "Runtime Choice"
-soft_links: [platform]
+soft_links: [opentag.md]
 ---
 
 # Runtime Choice

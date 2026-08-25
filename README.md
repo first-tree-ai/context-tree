@@ -3,7 +3,7 @@
 `@first-tree-ai/context-tree` is the portable core for a GitHub-backed Context
 Tree: durable decisions, constraints, and cross-domain relationships
 stored as Markdown in a private GitHub repository. It ships deterministic local
-scaffolding, validation, scoped reading, the canonical policy, Zod contracts,
+scaffolding, validation, indexed reading, the canonical policy, Zod contracts,
 and framework-neutral agent skills.
 
 The core and CLI never make network requests or manage credentials. Init takes
@@ -44,7 +44,8 @@ context-tree init \
   --tree-path ./context-tree
 context-tree policy
 context-tree verify --tree-path ./context-tree
-context-tree read --tree-path ./context-tree --content
+context-tree read --tree-path ./context-tree
+context-tree read product --tree-path ./context-tree
 ```
 
 When `--tree-path` is omitted, init writes to `./REPO` and uses the `REPO`
@@ -57,8 +58,10 @@ operations. The init skill uses the CLI-created repository and current branch
 for its local commit and, when GitHub CLI is authenticated, private-repository
 publication and default-branch configuration.
 
-Reads default to normal content. Select member, archive-supporting, or all
-classes only when needed. The read skill fast-forward refreshes an explicitly
+Directory reads return that directory's `NODE.md` body and metadata plus
+summaries of its immediate children. Leaf reads return the leaf body and no
+children. Member classification is semantic metadata, not core access control.
+The read skill fast-forward refreshes an explicitly
 supplied existing checkout, requires it to be clean and on the expected branch,
 derives `OWNER/REPO` from its safe GitHub origin, and reports the exact Git
 commit SHA. If GitHub is unavailable, a stale read requires explicit
@@ -91,12 +94,12 @@ scaffoldTree({
   repository: "acme/context",
 });
 const verification = verifyTree("./context-tree");
-const relevant = readTree("./context-tree", { path: "systems", content: true });
+const relevant = readTree("./context-tree", "systems");
 
 verifyTreeReportSchema.parse(verification);
 contextTreeReadResultSchema.parse(relevant);
 ```
 
-Git commit SHAs identify shared snapshots. Read entries, read results,
+Git commit SHAs identify shared snapshots. Read nodes, child summaries, read results,
 verification reports, and policy results intentionally contain no hashes or
 digest fields. See [the format specification](docs/specification.md).

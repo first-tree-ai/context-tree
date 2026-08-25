@@ -27,7 +27,7 @@ function parseWithInstalledSchema(consumerRoot, schemaName, json) {
     [
       "--input-type=module",
       "--eval",
-      `import { ${schemaName} } from "@first-tree-ai/context-tree"; ${schemaName}.parse(JSON.parse(process.argv[1]));`,
+      `import { ${schemaName} } from "@first-tree-ai/context-tree/schemas"; ${schemaName}.parse(JSON.parse(process.argv[1]));`,
       json,
     ],
     { cwd: consumerRoot, stdio: "pipe" },
@@ -57,6 +57,17 @@ try {
 
   const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
   const cliPath = join(consumerRoot, "node_modules/.bin/context-tree");
+
+  const mainExports = execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'import * as api from "@first-tree-ai/context-tree"; process.stdout.write(JSON.stringify(Object.keys(api).sort()));',
+    ],
+    { cwd: consumerRoot, encoding: "utf8" },
+  );
+  assert.deepEqual(JSON.parse(mainExports), ["readContextTreePolicy", "readTree", "scaffoldTree", "verifyTree"]);
 
   const help = runCli(cliPath, consumerRoot, ["--help"]);
   assert.equal(help.status, 0);

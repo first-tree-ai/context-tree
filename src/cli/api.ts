@@ -2,16 +2,9 @@ import { resolve } from "node:path";
 
 import { Command, CommanderError } from "commander";
 import { parseGitHubRepositoryIdentity } from "../core/internal/github-repository.js";
-import { readPackageManifest } from "../core/internal/packaged-resource.js";
-import type { ReadTreeOptions } from "../core/read.js";
+import { readPackageVersion } from "../core/internal/packaged-resource.js";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../index.js";
-import {
-  CLI_ERROR_CODES,
-  type ContextContentClass,
-  type ContextTreeCliErrorEnvelope,
-  contextContentClassSchema,
-  SCHEMA_VERSION,
-} from "../schemas.js";
+import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION } from "../schemas.js";
 
 type ContextTreeCliIo = {
   cwd: () => string;
@@ -27,33 +20,12 @@ function line(io: ContextTreeCliIo, value: string): void {
   io.stdout(`${value}\n`);
 }
 
-function packageVersion(): string {
-  const manifest = readPackageManifest();
-  if (!("version" in manifest) || typeof manifest.version !== "string") {
-    throw new Error("Package version is missing or invalid.");
-  }
-  return manifest.version;
-}
-
-function parseDepth(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) throw new Error("--depth must be a non-negative integer.");
-  return parsed;
-}
-
-function parseClass(value: string | undefined): ContextContentClass[] | "all" | undefined {
-  if (value === undefined) return undefined;
-  if (value === "all") return "all";
-  return [contextContentClassSchema.parse(value)];
-}
-
 function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   const program = new Command()
     .name("context-tree")
     .description("Portable tools for scaffolding, reading, and validating Context Trees.")
     .addHelpCommand(false)
-    .version(packageVersion())
+    .version(readPackageVersion())
     .exitOverride()
     .configureOutput({ writeErr: () => undefined, writeOut: io.stdout });
 
@@ -70,9 +42,9 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .requiredOption("--repository <owner/repo>", "GitHub repository identity")
     .option("--tree-path <path>", "destination directory")
     .action((options: { repository: string; treePath?: string }) => {
-      const repository = parseGitHubRepositoryIdentity(options.repository);
+      const repositoryName = parseGitHubRepositoryIdentity(options.repository);
       const result = scaffoldTree({
-        path: resolve(io.cwd(), options.treePath ?? repository.name),
+        path: resolve(io.cwd(), options.treePath ?? repositoryName),
         repository: options.repository,
       });
       line(io, JSON.stringify(result));
@@ -80,33 +52,15 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
 
   program
     .command("read")
-    .description("Read a Context Tree hierarchy and optional file content.")
+    .description("Read an indexed Context Tree directory or Markdown leaf.")
     .argument("[path]", "tree-relative path", ".")
     .option("--tree-path <path>", "Context Tree root", ".")
-    .option("--pattern <glob>", "glob matched against paths and metadata")
-    .option("--depth <number>", "maximum depth below the selected path")
-    .option("--class <class>", "normal, archive-supporting, member, or all")
-    .option("--content", "include Markdown bodies")
-    .action(
-      (
-        path: string,
-        options: { class?: string; content?: boolean; depth?: string; pattern?: string; treePath: string },
-      ) => {
-        const verification = verifyTree(resolve(io.cwd(), options.treePath));
-        if (!verification.ok) throw new Error("Refusing to read an invalid Context Tree; run context-tree verify.");
-        const readOptions: ReadTreeOptions = {
-          content: options.content === true,
-          path,
-        };
-        const classes = parseClass(options.class);
-        const depth = parseDepth(options.depth);
-        if (classes !== undefined) readOptions.classes = classes;
-        if (depth !== undefined) readOptions.depth = depth;
-        if (options.pattern !== undefined) readOptions.pattern = options.pattern;
-        const result = readTree(resolve(io.cwd(), options.treePath), readOptions);
-        line(io, JSON.stringify(result));
-      },
-    );
+    .action((path: string, options: { treePath: string }) => {
+      const verification = verifyTree(resolve(io.cwd(), options.treePath));
+      if (!verification.ok) throw new Error("Refusing to read an invalid Context Tree; run context-tree verify.");
+      const result = readTree(resolve(io.cwd(), options.treePath), path);
+      line(io, JSON.stringify(result));
+    });
 
   program
     .command("verify")

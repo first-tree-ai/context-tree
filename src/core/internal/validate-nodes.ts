@@ -1,6 +1,9 @@
+import { lstatSync } from "node:fs";
+import { join } from "node:path";
+
 import type { ContextContentClassCounts, TreeValidationFinding, ValidationCode } from "../../schemas.js";
 import { VALIDATION_CODES } from "../../schemas.js";
-import { collectContextMarkdownContent, emptyContentClassCounts } from "./content-class.js";
+import { classifyContextContent, collectContextMarkdownContent, emptyContentClassCounts } from "./content-class.js";
 import {
   type ContextDocument,
   readContextDocument,
@@ -9,7 +12,7 @@ import {
 } from "./context-document.js";
 import { readMarkdownLinkTargets, resolveLocalTreeTarget } from "./context-links.js";
 
-export type NodeValidationResult = {
+type NodeValidationResult = {
   findings: TreeValidationFinding[];
   scannedByContentClass: ContextContentClassCounts;
 };
@@ -34,13 +37,8 @@ function validateRequiredNodeMetadata(
     return;
   }
 
-  if (document.frontmatter === "invalid" || document.data === null) {
-    addFinding(
-      findings,
-      VALIDATION_CODES.frontmatterParse,
-      path,
-      `frontmatter could not be parsed${document.error === undefined ? "" : `: ${document.error}`}`,
-    );
+  if (document.frontmatter === "invalid") {
+    addFinding(findings, VALIDATION_CODES.frontmatterParse, path, `frontmatter could not be parsed: ${document.error}`);
     return;
   }
 
@@ -63,9 +61,8 @@ function validateRequiredNodeMetadata(
 }
 
 function validateRootOnlyFields(document: ContextDocument, path: string, findings: TreeValidationFinding[]): void {
-  const data = document.data;
-  if (path === "NODE.md" || data === null) return;
-  const fields = ["schemaVersion", "relatedRepositories"].filter((field) => field in data);
+  if (path === "NODE.md" || document.frontmatter !== "valid") return;
+  const fields = ["schemaVersion", "relatedRepositories"].filter((field) => field in document.data);
   if (fields.length > 0) {
     addFinding(
       findings,
@@ -77,7 +74,7 @@ function validateRootOnlyFields(document: ContextDocument, path: string, finding
 }
 
 function readSoftLinks(document: ContextDocument, path: string, findings: TreeValidationFinding[]): string[] {
-  if (document.data === null) {
+  if (document.frontmatter !== "valid") {
     return [];
   }
 
@@ -98,7 +95,6 @@ function readSoftLinks(document: ContextDocument, path: string, findings: TreeVa
 }
 
 function validateSoftLinks(options: {
-  allowArchive: boolean;
   document: ContextDocument;
   findings: TreeValidationFinding[];
   path: string;
@@ -112,22 +108,13 @@ function validateSoftLinks(options: {
       softLink: true,
     });
 
-    if (resolved === null || !resolved.exists) {
+    if (resolved === null || resolved === "missing" || resolved === "escaped-missing") {
       addFinding(options.findings, VALIDATION_CODES.softLinkBroken, options.path, "broken soft_links target", target);
     }
     if (resolved === null) {
       continue;
     }
-    if (!options.allowArchive && resolved.contentClass === "archive-supporting") {
-      addFinding(
-        options.findings,
-        VALIDATION_CODES.softLinkArchiveDependency,
-        options.path,
-        "normal content must not link to archive/supporting content",
-        target,
-      );
-    }
-    if (resolved.escaped) {
+    if (resolved === "escaped-existing" || resolved === "escaped-missing") {
       addFinding(
         options.findings,
         VALIDATION_CODES.softLinkPathEscape,
@@ -150,16 +137,7 @@ function validateMarkdownLinks(
     if (resolved === null) {
       continue;
     }
-    if (resolved.contentClass === "archive-supporting") {
-      addFinding(
-        findings,
-        VALIDATION_CODES.markdownArchiveDependency,
-        path,
-        "normal content must not link to archive/supporting content",
-        target,
-      );
-    }
-    if (resolved.escaped) {
+    if (resolved === "escaped-existing" || resolved === "escaped-missing") {
       addFinding(
         findings,
         VALIDATION_CODES.markdownPathEscape,
@@ -176,6 +154,25 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
   const scannedByContentClass = emptyContentClassCounts();
   const content = collectContextMarkdownContent(treeRoot);
 
+  for (const directory of content.directories) {
+    const nodePath = `${directory}/NODE.md`;
+    let hasRegularNode = false;
+    try {
+      const entry = lstatSync(join(treeRoot, nodePath));
+      hasRegularNode = entry.isFile() && !entry.isSymbolicLink();
+    } catch {
+      // Report the required index below.
+    }
+    if (!hasRegularNode) {
+      addFinding(
+        findings,
+        VALIDATION_CODES.directoryNodeMissing,
+        directory,
+        "Context Tree directory is missing NODE.md",
+      );
+    }
+  }
+
   for (const directory of content.directorySymlinks) {
     addFinding(
       findings,
@@ -190,7 +187,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
   for (const file of content.files) {
     scannedByContentClass[file.contentClass] += 1;
 
-    if (file.unresolved) {
+    if (file.inspection.kind === "unresolved") {
       addFinding(
         findings,
         VALIDATION_CODES.markdownFileSymlinkBroken,
@@ -200,7 +197,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
       continue;
     }
 
-    if (file.escaped) {
+    if (file.inspection.kind === "escaped") {
       addFinding(
         findings,
         VALIDATION_CODES.markdownFilePathEscape,
@@ -210,7 +207,7 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
       continue;
     }
 
-    if (file.unsupported) {
+    if (file.inspection.kind === "unsupported") {
       addFinding(
         findings,
         VALIDATION_CODES.markdownFileSymlinkUnsupported,
@@ -220,54 +217,35 @@ export function collectNodeValidationFindings(treeRoot: string): NodeValidationR
       continue;
     }
 
-    if (file.canonicalContentClass !== file.contentClass) {
+    if (file.inspection.kind === "content-class-mismatch") {
+      const canonicalContentClass = classifyContextContent(file.inspection.canonicalRelativePath);
       addFinding(
         findings,
         VALIDATION_CODES.markdownFileContentClassMismatch,
         file.relativePath,
-        `Markdown file symlink crosses content-class boundary from ${file.contentClass} to ${file.canonicalContentClass}`,
-        file.canonicalRelativePath,
+        `Markdown file symlink crosses content-class boundary from ${file.contentClass} to ${canonicalContentClass}`,
+        file.inspection.canonicalRelativePath,
       );
       continue;
     }
 
-    if (file.contentClass === "repo-infra" || file.contentClass === "archive-supporting") {
+    if (file.contentClass === "repo-infra") {
       continue;
     }
 
     const document = readContextDocument(file.absolutePath);
     validateRootOnlyFields(document, file.relativePath, findings);
-    if (file.contentClass === "member") {
-      if (document.frontmatter === "missing") {
-        continue;
-      }
-      if (document.frontmatter === "invalid") {
-        continue;
-      }
-      validateSoftLinks({
-        allowArchive: true,
-        document,
-        findings,
-        path: file.relativePath,
-        treeRoot,
-      });
-      continue;
-    }
-
-    if (file.relativePath !== "NODE.md") {
+    if (file.relativePath !== "NODE.md" || document.frontmatter === "valid") {
       validateRequiredNodeMetadata(document, file.relativePath, findings);
     }
     validateSoftLinks({
-      allowArchive: false,
       document,
       findings,
       path: file.relativePath,
       treeRoot,
     });
 
-    if (file.contentClass === "normal") {
-      validateMarkdownLinks(document, file.relativePath, treeRoot, findings);
-    }
+    validateMarkdownLinks(document, file.relativePath, treeRoot, findings);
   }
 
   return { findings, scannedByContentClass };
