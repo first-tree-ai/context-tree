@@ -1,0 +1,19 @@
+{
+  "name": "context-tree",
+  "interface": { "displayName": "Context Tree" },
+  "plugins": [
+    {
+      "name": "context-tree",
+      "source": {
+        "source": "npm",
+        "package": "@first-tree-ai/context-tree",
+        "version": "latest"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

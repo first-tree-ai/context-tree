@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -12,12 +22,24 @@ const npmEnvironment = {
   ...process.env,
   GIT_CONFIG_GLOBAL: gitConfig,
   GIT_CONFIG_NOSYSTEM: "1",
+  HOME: temporaryRoot,
   npm_config_cache: join(temporaryRoot, "npm-cache"),
 };
 
 function runCli(cliPath, cwd, args) {
   const result = spawnSync(cliPath, args, { cwd, encoding: "utf8", env: npmEnvironment });
   assert.equal(result.signal, null, `CLI was terminated by ${result.signal ?? "an unknown signal"}`);
+  return result;
+}
+
+function runNode(scriptPath, cwd, args, options = {}) {
+  const result = spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: options.env ?? npmEnvironment,
+    input: options.input,
+  });
+  assert.equal(result.signal, null, `Node process was terminated by ${result.signal ?? "an unknown signal"}`);
   return result;
 }
 
@@ -42,6 +64,68 @@ try {
   });
   const tarballs = readdirSync(temporaryRoot).filter((name) => name.endsWith(".tgz"));
   assert.equal(tarballs.length, 1, "npm pack must create exactly one tarball");
+  const tarball = join(temporaryRoot, tarballs[0]);
+
+  const extractedRoot = join(temporaryRoot, "extracted");
+  mkdirSync(extractedRoot);
+  execFileSync("tar", ["-xzf", tarball, "-C", extractedRoot], { stdio: "pipe" });
+  const extractedPackage = join(extractedRoot, "package");
+  assert.equal(existsSync(join(extractedPackage, "node_modules")), false);
+  assert.equal(existsSync(join(extractedRoot, "node_modules")), false);
+  assert.equal(existsSync(join(temporaryRoot, "node_modules")), false);
+
+  const extractedCli = join(extractedPackage, "dist/cli/index.mjs");
+  const extractedVersion = runNode(extractedCli, extractedPackage, ["--version"]);
+  assert.equal(extractedVersion.status, 0);
+  const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
+  assert.equal(extractedVersion.stdout, `${manifest.version}\n`);
+
+  const hook = runNode(join(extractedPackage, "hooks/session-start.mjs"), extractedPackage, [], {
+    env: { ...npmEnvironment, CLAUDE_PLUGIN_ROOT: extractedPackage },
+    input: JSON.stringify({ cwd: extractedPackage, hook_event_name: "SessionStart" }),
+  });
+  assert.equal(hook.status, 0);
+  assert.equal(hook.stdout, "", "the packaged hook must remain silent for an unlinked project");
+
+  for (const skill of ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"]) {
+    const launcher = join(extractedPackage, "skills", skill, "scripts/context-tree.mjs");
+    const directHelp = runNode(extractedCli, extractedPackage, ["--help"]);
+    const launchedHelp = runNode(launcher, extractedPackage, ["--help"]);
+    assert.deepEqual(
+      { status: launchedHelp.status, stderr: launchedHelp.stderr, stdout: launchedHelp.stdout },
+      { status: directHelp.status, stderr: directHelp.stderr, stdout: directHelp.stdout },
+    );
+
+    const directFailure = runNode(extractedCli, extractedPackage, ["not-a-command"]);
+    const launchedFailure = runNode(launcher, extractedPackage, ["not-a-command"]);
+    assert.deepEqual(
+      { status: launchedFailure.status, stderr: launchedFailure.stderr, stdout: launchedFailure.stdout },
+      { status: directFailure.status, stderr: directFailure.stderr, stdout: directFailure.stdout },
+    );
+  }
+
+  const missingCli = join(extractedPackage, "dist/cli/index.missing.mjs");
+  renameSync(extractedCli, missingCli);
+  const fakeBin = join(temporaryRoot, "fake-bin");
+  mkdirSync(fakeBin, { recursive: true });
+  const invocationMarker = join(temporaryRoot, "global-cli-was-invoked");
+  const fakeGlobal = join(fakeBin, "context-tree");
+  writeFileSync(fakeGlobal, `#!/bin/sh\n: >"${invocationMarker}"\nexit 23\n`);
+  chmodSync(fakeGlobal, 0o755);
+  for (const skill of ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"]) {
+    const launcher = join(extractedPackage, "skills", skill, "scripts/context-tree.mjs");
+    const missing = runNode(launcher, extractedPackage, ["--version"], {
+      env: { ...npmEnvironment, PATH: fakeBin },
+    });
+    assert.equal(missing.status, 1);
+    assert.equal(missing.stdout, "");
+    assert.equal(
+      missing.stderr,
+      "Context Tree packaged CLI is unavailable. Reinstall or update the Context Tree plugin.\n",
+    );
+  }
+  assert.equal(existsSync(invocationMarker), false, "a launcher must never invoke a CLI found on PATH");
+  renameSync(missingCli, extractedCli);
 
   const consumerRoot = join(temporaryRoot, "consumer");
   mkdirSync(consumerRoot);
@@ -49,13 +133,12 @@ try {
     join(consumerRoot, "package.json"),
     '{"name":"context-tree-package-e2e","private":true,"type":"module"}\n',
   );
-  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", join(temporaryRoot, tarballs[0])], {
+  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
     cwd: consumerRoot,
     env: npmEnvironment,
     stdio: "pipe",
   });
 
-  const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
   const cliPath = join(consumerRoot, "node_modules/.bin/context-tree");
 
   const mainExports = execFileSync(
@@ -67,7 +150,31 @@ try {
     ],
     { cwd: consumerRoot, encoding: "utf8" },
   );
-  assert.deepEqual(JSON.parse(mainExports), ["readContextTreePolicy", "readTree", "scaffoldTree", "verifyTree"]);
+  assert.deepEqual(JSON.parse(mainExports), [
+    "inspectContextTreeDiff",
+    "linkProject",
+    "readContextTreePolicy",
+    "readTree",
+    "refreshProject",
+    "resolveLink",
+    "scaffoldTree",
+    "stageContextWrite",
+    "verifyTree",
+  ]);
+
+  const schemaExports = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        'import * as schemas from "@first-tree-ai/context-tree/schemas"; process.stdout.write(JSON.stringify(Object.keys(schemas).sort()));',
+      ],
+      { cwd: consumerRoot, encoding: "utf8" },
+    ),
+  );
+  assert.equal(schemaExports.includes("contextTreeLinkResultSchema"), true);
+  assert.equal(schemaExports.includes("contextTreeLinksFileSchema"), false);
 
   const help = runCli(cliPath, consumerRoot, ["--help"]);
   assert.equal(help.status, 0);
@@ -84,6 +191,51 @@ try {
   assert.match(
     readFileSync(join(consumerRoot, "tree/.github/workflows/validate-context-tree.yml"), "utf8"),
     /branches: \["trunk"\]/u,
+  );
+  execFileSync("git", ["-C", join(consumerRoot, "tree"), "add", "."], { env: npmEnvironment, stdio: "pipe" });
+  execFileSync(
+    "git",
+    [
+      "-C",
+      join(consumerRoot, "tree"),
+      "-c",
+      "user.name=Package Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-m",
+      "Initialize",
+    ],
+    { env: npmEnvironment, stdio: "pipe" },
+  );
+  const resolved = runCli(cliPath, consumerRoot, ["resolve"]);
+  assert.equal(resolved.status, 0);
+  parseWithInstalledSchema(consumerRoot, "contextTreeLinkResultSchema", resolved.stdout);
+  assert.equal(
+    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.codex-plugin/plugin.json"), "utf8")
+      .length > 0,
+    true,
+  );
+  assert.equal(
+    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.claude-plugin/plugin.json"), "utf8")
+      .length > 0,
+    true,
+  );
+  assert.equal(
+    readFileSync(
+      join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.agents/plugins/marketplace.json"),
+      "utf8",
+    ).length > 0,
+    true,
+  );
+  assert.equal(
+    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.claude-plugin/marketplace.json"), "utf8")
+      .length > 0,
+    true,
+  );
+  assert.equal(
+    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/hooks/hooks.json"), "utf8").length > 0,
+    true,
   );
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", "tree"]);

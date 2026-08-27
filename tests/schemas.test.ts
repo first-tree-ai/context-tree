@@ -5,15 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
 import {
-  contextContentClassCountsSchema,
   contextTreeCliErrorEnvelopeSchema,
+  contextTreeLinkResultSchema,
   contextTreePolicySchema,
   contextTreeReadChildSchema,
   contextTreeReadNodeSchema,
   contextTreeReadResultSchema,
-  contextTreeRootNodeFrontmatterSchema,
-  contextTreeRootNodeSchema,
-  parseContextTreeRootNode,
   scaffoldTreeResultSchema,
   treeValidationFindingSchema,
   validationCodeSchema,
@@ -80,24 +77,37 @@ describe("public JSON schemas", () => {
     ).toBe(false);
   });
 
-  it("exports the root NODE parser and schemas", () => {
-    const parsed = parseContextTreeRootNode('---\nschemaVersion: 1\ntitle: "Root"\ncustom: true\n---\n\n# Root\n');
-    expect(contextTreeRootNodeFrontmatterSchema.parse(parsed.frontmatter)).toEqual(parsed.frontmatter);
-    expect(contextTreeRootNodeSchema.parse(parsed)).toEqual(parsed);
-  });
-
-  it("rejects unknown output properties, including former digest fields", () => {
-    const root = tree();
-    const policy = readContextTreePolicy();
-    const read = readTree(root);
-    const report = verifyTree(tree());
-    expect(contextTreePolicySchema.safeParse({ ...policy, digest: "a".repeat(64) }).success).toBe(false);
-    expect(contextTreeReadResultSchema.safeParse({ ...read, treeDigest: "a".repeat(64) }).success).toBe(false);
-    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, digest: "a".repeat(64) }).success).toBe(false);
-    expect(verifyTreeReportSchema.safeParse({ ...report, treeDigest: "a".repeat(64) }).success).toBe(false);
-    expect(verifyTreeReportSchema.safeParse({ ...report, future: true }).success).toBe(false);
-    expect(contextContentClassCountsSchema.safeParse({ ...report.scannedByContentClass, future: 1 }).success).toBe(
-      false,
-    );
+  it("defines strict link results and specific link errors", () => {
+    const link = {
+      link: {
+        project: { kind: "git", origin: "https://github.com/acme/service.git" },
+        tree: { path: "/work/context", repository: "acme/context" },
+      },
+      schemaVersion: 1,
+    };
+    expect(contextTreeLinkResultSchema.parse(link)).toEqual(link);
+    for (const path of ["relative/context", "/work/control\ncontext", "/work/control\tcontext"]) {
+      expect(
+        contextTreeLinkResultSchema.safeParse({
+          ...link,
+          link: { ...link.link, tree: { ...link.link.tree, path } },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      contextTreeLinkResultSchema.safeParse({
+        ...link,
+        link: { ...link.link, future: true },
+      }).success,
+    ).toBe(false);
+    for (const code of ["NO_LINK", "AMBIGUOUS_LINK", "CORRUPT_LINK", "STALE_LINK"]) {
+      expect(
+        contextTreeCliErrorEnvelopeSchema.safeParse({
+          error: { code, message: "link error" },
+          ok: false,
+          schemaVersion: 1,
+        }).success,
+      ).toBe(true);
+    }
   });
 });

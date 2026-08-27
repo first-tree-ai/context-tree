@@ -1,8 +1,10 @@
 # Release
 
 `@first-tree-ai/context-tree` publishes from `.github/workflows/ci.yml` using
-npm trusted publishing. Authentication is short-lived OIDC exchanged at publish
-time; the repository holds no npm token and no publish secret.
+npm trusted publishing. npm is both the plugin artifact channel used by the
+Codex and Claude Code marketplaces and the optional global CLI distribution
+channel. Authentication is short-lived OIDC exchanged at publish time; the
+repository holds no npm token and no publish secret.
 
 Two channels exist:
 
@@ -16,8 +18,28 @@ npm install @first-tree-ai/context-tree            # production
 npm install @first-tree-ai/context-tree@staging    # newest build of main
 ```
 
-Both channels run behind the `test` and `skill-discovery` jobs. A red CI run
-publishes nothing.
+Both channels run behind the `test` job. A red CI run publishes nothing.
+
+## Local plugin testing
+
+Marketplace installation from the repository requires repository access. For
+local development, test the actual packed working tree in an isolated Codex
+configuration instead of the npm `latest` package:
+
+```bash
+pnpm test:codex-plugin
+```
+
+This opens Codex in a temporary unlinked project. Use
+`pnpm test:codex-plugin --check` for a non-interactive installation smoke
+test. Both modes remove their temporary marketplace, plugin cache, Codex home,
+and project when they finish.
+
+Before advertising or releasing the remote marketplace flow, verify that npm
+`latest` contains `.codex-plugin`, `.claude-plugin`, `hooks`, all four `skills`
+and their launchers, and `dist/cli/index.mjs`. The package end-to-end test and
+`npm pack --dry-run` cover the candidate tarball; checking `latest` is a release
+verification step after production publication.
 
 ## Staging releases
 
@@ -89,14 +111,14 @@ Only a clean `X.Y.Z` tag moves the stable channel.
 
 ## Version bookkeeping
 
-The package version is declared in two places: `package.json` and the
-`metadata.version` frontmatter of every `skills/*/SKILL.md`. `tests/skills.test.ts`
-asserts they match, and `prepack` runs that test on every publish, so a drifted
-skill version fails the release.
+The package version is declared in `package.json`, the `metadata.version`
+frontmatter of every `skills/*/SKILL.md`, and both host plugin manifests.
+`tests/skills.test.ts` asserts they match, and `prepack` runs that test on every
+publish, so version drift fails the release.
 
 `scripts/sync-skill-versions.mjs` copies `package.json`'s version into each
-skill. It edits only the version line, is idempotent, and takes `--check` to
-report drift without writing:
+skill and plugin manifest. It is idempotent and takes `--check` to report drift
+without writing:
 
 ```bash
 node scripts/sync-skill-versions.mjs           # fix

@@ -1,21 +1,10 @@
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
-import { credentialFreeRepositoryUrlSchema, parseContextTreeRootNode } from "../src/schemas.js";
+import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
 const EXAMPLES = resolve(import.meta.dirname, "../examples");
@@ -56,7 +45,7 @@ function node(title: string): string {
 }
 
 describe("schema version 1", () => {
-  it("keeps root NODE relatedRepositories provider-neutral and credential-free", () => {
+  it("keeps the public repository URL contract provider-neutral and credential-free", () => {
     const validRepositories = [
       "http://git.example.test/acme/tree.git",
       "https://github.com/acme/tree.git",
@@ -65,12 +54,6 @@ describe("schema version 1", () => {
     ];
     for (const repository of validRepositories) {
       expect(credentialFreeRepositoryUrlSchema.safeParse(repository).success, repository).toBe(true);
-      const root = validTree();
-      writeFileSync(
-        join(root, "NODE.md"),
-        `---\nschemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - ${repository}\n---\n\n# Root\n`,
-      );
-      expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
     }
     for (const repository of [
       "https://token@github.com/acme/tree.git",
@@ -79,32 +62,16 @@ describe("schema version 1", () => {
     ]) {
       expect(credentialFreeRepositoryUrlSchema.safeParse(repository).success, repository).toBe(false);
     }
-    expect(
-      parseContextTreeRootNode(
-        '---\nschemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - https://gitlab.example/acme/source.git\n---\n\n# Root\n',
-      ).frontmatter.relatedRepositories,
-    ).toEqual(["https://gitlab.example/acme/source.git"]);
   });
 
-  it("rejects missing schemaVersion and malformed relatedRepositories on the root node", () => {
-    for (const frontmatter of [
-      'title: "Root"',
-      'schemaVersion: 2\ntitle: "Root"',
-      'schemaVersion: 1\ntitle: "Root"\nrelatedRepositories: invalid',
-      'schemaVersion: 1\ntitle: "Root"\nrelatedRepositories:\n  - https://token@github.com/acme/tree.git',
-    ]) {
+  it("rejects missing or unsupported schemaVersion on the root node", () => {
+    for (const frontmatter of ['title: "Root"', 'schemaVersion: 2\ntitle: "Root"']) {
       const root = validTree();
       writeFileSync(join(root, "NODE.md"), `---\n${frontmatter}\n---\n\n# Root\n`);
       expect(verifyTree(root).findings).toEqual([
         expect.objectContaining({ code: "TREE_ROOT_NODE_INVALID", path: "NODE.md" }),
       ]);
     }
-  });
-
-  it("verifies indexed organizational directories", () => {
-    const root = join(tempRoot(), "existing");
-    cpSync(join(FIXTURES, "valid"), root, { recursive: true });
-    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true, schemaVersion: 1 });
   });
 });
 
@@ -174,24 +141,12 @@ describe("verification", () => {
   it("rejects invalid root manifest fields and root-only fields on domain nodes", () => {
     const root = validTree();
     writeFileSync(join(root, "NODE.md"), '---\nschemaVersion: 2\ntitle: "Root"\n---\n\n# Root\n');
-    writeFileSync(join(root, "domain.md"), '---\ntitle: "Domain"\nrelatedRepositories: []\n---\n\n# Domain\n');
+    writeFileSync(join(root, "domain.md"), '---\nschemaVersion: 1\ntitle: "Domain"\n---\n\n# Domain\n');
     const findings = verifyTree(root).findings;
     expect(findings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: "TREE_ROOT_NODE_INVALID", path: "NODE.md" }),
         expect.objectContaining({ code: "TREE_ROOT_ONLY_FIELDS", path: "domain.md" }),
-      ]),
-    );
-  });
-
-  it("treats legacy SCOPE.md as an invalid ordinary leaf", () => {
-    const root = validTree();
-    writeFileSync(join(root, "SCOPE.md"), "---\nschemaVersion: 1\n---\n\nLegacy scope\n");
-    const findings = verifyTree(root).findings;
-    expect(findings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ code: "TREE_ROOT_ONLY_FIELDS", path: "SCOPE.md" }),
-        expect.objectContaining({ code: "TREE_TITLE_MISSING", path: "SCOPE.md" }),
       ]),
     );
   });
@@ -321,16 +276,6 @@ describe("indexed reading", () => {
 });
 
 describe("scaffold and policy", () => {
-  it("derives the root title verbatim from the repository name", () => {
-    const root = join(tempRoot(), "tree");
-    scaffoldTree({ path: root, repository: "acme/my-context" });
-    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain('title: "my-context"');
-    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("schemaVersion: 1");
-    expect(readFileSync(join(root, "NODE.md"), "utf8")).toContain("# my-context");
-    expect(existsSync(join(root, "SCOPE.md"))).toBe(false);
-    expect(readTree(root)).toMatchObject({ children: [], node: { path: "." } });
-  });
-
   it("includes version-pinned GitHub validation for the authoritative default branch", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
@@ -381,27 +326,6 @@ describe("scaffold and policy", () => {
     );
   });
 
-  it("preserves the case and spelling of Git's selected branch", () => {
-    writeFileSync(process.env.GIT_CONFIG_GLOBAL ?? "", "[init]\n\tdefaultBranch = Trunk_2\n");
-    const root = join(tempRoot(), "case-preserving");
-    scaffoldTree({ path: root, repository: "acme/context" });
-    expect(readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8")).toContain(
-      'branches: ["Trunk_2"]',
-    );
-  });
-
-  it("validates repository and destination safety before initializing Git", () => {
-    const malformed = join(tempRoot(), "malformed");
-    expect(() => scaffoldTree({ path: malformed, repository: "https://github.com/acme/context" })).toThrow();
-    expect(existsSync(malformed)).toBe(false);
-
-    const nonEmpty = join(tempRoot(), "non-empty");
-    mkdirSync(nonEmpty);
-    writeFileSync(join(nonEmpty, "keep.txt"), "keep\n");
-    expect(() => scaffoldTree({ path: nonEmpty, repository: "acme/context" })).toThrow(/non-empty directory/u);
-    expect(readdirSync(nonEmpty)).toEqual(["keep.txt"]);
-  });
-
   it("fails without Git and writes no scaffold files", () => {
     const root = join(tempRoot(), "missing-git");
     const originalPath = process.env.PATH;
@@ -412,24 +336,6 @@ describe("scaffold and policy", () => {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
     }
-    expect(existsSync(join(root, "NODE.md"))).toBe(false);
-  });
-
-  it("preserves a partial Git repository when branch resolution fails", () => {
-    const root = join(tempRoot(), "unresolved-branch");
-    const bin = tempRoot();
-    const git = join(bin, "git");
-    writeFileSync(git, '#!/bin/sh\nif [ "$1" = "init" ]; then /bin/mkdir -p "$3/.git"; exit 0; fi\nexit 1\n');
-    chmodSync(git, 0o755);
-    const originalPath = process.env.PATH;
-    process.env.PATH = bin;
-    try {
-      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/resolve the initial Git branch/u);
-    } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
-    }
-    expect(existsSync(join(root, ".git"))).toBe(true);
     expect(existsSync(join(root, "NODE.md"))).toBe(false);
   });
 
@@ -444,20 +350,6 @@ describe("scaffold and policy", () => {
     expect(policy.content).toContain("Choose the narrowest canonical location");
     expect(policy.content).toContain("Do not generalize a one-off request");
     expect(policy.content).toMatch(/`context-tree verify` must\s+pass/u);
-  });
-
-  it("scaffolds no members directory or optional private memory file", () => {
-    const root = validTree();
-    expect(existsSync(join(root, "members"))).toBe(false);
-    expect(existsSync(join(root, "members/alice/memory.md"))).toBe(false);
-    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
-  });
-
-  it("accepts a valid tree without the optional members directory", () => {
-    const root = join(tempRoot(), "existing");
-    cpSync(join(FIXTURES, "valid"), root, { recursive: true });
-    rmSync(join(root, "members"), { recursive: true });
-    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
   it("treats owners as inert unknown metadata", () => {

@@ -1,17 +1,48 @@
+import { credentialFreeRepositoryUrlSchema, githubRepositoryIdentitySchema } from "../../schemas.js";
+
 export function parseGitHubRepositoryIdentity(repository: string): string {
-  const repositoryParts = repository.split("/");
-  const [owner, name] = repositoryParts;
-  if (
-    repositoryParts.length !== 2 ||
-    owner === undefined ||
-    name === undefined ||
-    !/^[A-Za-z\d](?:[A-Za-z\d-]{0,37}[A-Za-z\d])?$/u.test(owner) ||
-    !/^[A-Za-z\d._-]{1,100}$/u.test(name) ||
-    name === "." ||
-    name === ".." ||
-    /\.git$/iu.test(name)
-  ) {
-    throw new Error("Repository must be an explicit GitHub OWNER/REPO identity.");
+  githubRepositoryIdentitySchema.parse(repository);
+  return repository.split("/")[1] ?? "";
+}
+
+export function repositoryIdentityFromGitHubUrl(repositoryUrl: string): string {
+  try {
+    credentialFreeRepositoryUrlSchema.parse(repositoryUrl);
+  } catch {
+    throw new Error("Context Tree origin must be a safe credential-free github.com repository URL.");
   }
-  return name;
+  let host: string;
+  let path: string;
+  const scp = /^(?:git@)?([^:]+):(.+)$/u.exec(repositoryUrl);
+  if (scp !== null && !repositoryUrl.includes("://")) {
+    host = scp[1] ?? "";
+    path = scp[2] ?? "";
+  } else {
+    let parsed: URL;
+    try {
+      parsed = new URL(repositoryUrl);
+    } catch {
+      throw new Error("Context Tree origin must be a safe credential-free github.com repository URL.");
+    }
+    if (parsed.password || ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username)) {
+      throw new Error("Context Tree origin must be a safe credential-free github.com repository URL.");
+    }
+    host = parsed.hostname;
+    path = parsed.pathname;
+  }
+  if (host.toLowerCase() !== "github.com") {
+    throw new Error("Context Tree origin must use github.com.");
+  }
+  const identity = path.replace(/^\/+|\/+$/gu, "").replace(/\.git$/iu, "");
+  try {
+    parseGitHubRepositoryIdentity(identity);
+  } catch {
+    throw new Error("Context Tree origin must identify a safe GitHub OWNER/REPO repository.");
+  }
+  return identity;
+}
+
+export function canonicalGitHubRepositoryUrl(repository: string): string {
+  parseGitHubRepositoryIdentity(repository);
+  return `https://github.com/${repository}.git`;
 }

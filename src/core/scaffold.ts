@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "
 import { dirname, join, resolve } from "node:path";
 
 import { SCHEMA_VERSION, type ScaffoldTreeResult } from "../schemas.js";
-import { parseGitHubRepositoryIdentity } from "./internal/github-repository.js";
+import { canonicalGitHubRepositoryUrl, parseGitHubRepositoryIdentity } from "./internal/github-repository.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 import { verifyTree } from "./verify.js";
 
@@ -20,7 +20,7 @@ export type ScaffoldTreeOptions = {
   repository: string;
 };
 
-function initializeGitRepository(root: string): string {
+function initializeGitRepository(root: string, repository: string): string {
   const initialized = spawnSync("git", ["init", "--quiet", root], { stdio: "ignore" });
   if (initialized.error !== undefined || initialized.status !== 0) {
     throw new Error("Failed to initialize Git repository.");
@@ -33,6 +33,12 @@ function initializeGitRepository(root: string): string {
   const name = branch.stdout.replace(/\r?\n$/u, "");
   if (branch.error !== undefined || branch.status !== 0 || name.length === 0) {
     throw new Error("Failed to resolve the initial Git branch during repository initialization.");
+  }
+  const remote = spawnSync("git", ["-C", root, "remote", "add", "origin", canonicalGitHubRepositoryUrl(repository)], {
+    stdio: "ignore",
+  });
+  if (remote.error !== undefined || remote.status !== 0) {
+    throw new Error("Failed to configure the credential-free Context Tree origin.");
   }
   return name;
 }
@@ -49,7 +55,7 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
       throw new Error(`Refusing to scaffold into a non-empty directory: ${root}`);
     }
   }
-  const initialBranch = initializeGitRepository(root);
+  const initialBranch = initializeGitRepository(root, options.repository);
   const values = {
     branchJson: JSON.stringify(initialBranch),
     packageVersion: readPackageVersion(),

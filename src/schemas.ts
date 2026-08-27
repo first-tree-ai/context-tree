@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import { z } from "zod";
 
 import { parseMarkdownFrontmatter } from "./internal/frontmatter.js";
@@ -28,7 +30,11 @@ export const VALIDATION_CODES = {
 } as const;
 
 export const CLI_ERROR_CODES = {
+  ambiguousLink: "AMBIGUOUS_LINK",
+  corruptLink: "CORRUPT_LINK",
   failed: "CONTEXT_TREE_FAILED",
+  noLink: "NO_LINK",
+  staleLink: "STALE_LINK",
 } as const;
 
 function hasUnsafeCharacter(value: string): boolean {
@@ -37,6 +43,12 @@ function hasUnsafeCharacter(value: string): boolean {
     return code !== undefined && (code <= 0x1f || code === 0x7f || code === 0x2028 || code === 0x2029);
   });
 }
+
+const absoluteSingleLinePathSchema = z.string().superRefine((value, context) => {
+  if (!isAbsolute(value) || value.trim() !== value || hasUnsafeCharacter(value)) {
+    context.addIssue({ code: "custom", message: "Paths must be absolute single-line values." });
+  }
+});
 
 export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, context) => {
   if (value.trim() !== value || hasUnsafeCharacter(value) || value.includes("\\")) {
@@ -68,13 +80,29 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   }
 });
 
+export const githubRepositoryIdentitySchema = z.string().superRefine((value, context) => {
+  const parts = value.split("/");
+  const [owner, name] = parts;
+  if (
+    parts.length !== 2 ||
+    owner === undefined ||
+    name === undefined ||
+    !/^[A-Za-z\d](?:[A-Za-z\d-]{0,37}[A-Za-z\d])?$/u.test(owner) ||
+    !/^[A-Za-z\d._-]{1,100}$/u.test(name) ||
+    name === "." ||
+    name === ".." ||
+    /\.git$/iu.test(name)
+  ) {
+    context.addIssue({ code: "custom", message: "Repository must be an explicit GitHub OWNER/REPO identity." });
+  }
+});
+
 export const contextTreeRootNodeFrontmatterSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
     title: z.string().trim().min(1),
     description: z.string().trim().min(1).optional(),
     soft_links: z.array(z.string().trim().min(1)).min(1).optional(),
-    relatedRepositories: z.array(credentialFreeRepositoryUrlSchema).max(64).optional(),
   })
   .loose();
 
@@ -188,6 +216,65 @@ export const scaffoldTreeResultSchema = z
   })
   .strict();
 export type ScaffoldTreeResult = z.infer<typeof scaffoldTreeResultSchema>;
+
+export const contextTreeProjectIdentitySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("git"), origin: credentialFreeRepositoryUrlSchema }).strict(),
+  z.object({ kind: z.literal("directory"), path: absoluteSingleLinePathSchema }).strict(),
+]);
+export type ContextTreeProjectIdentity = z.infer<typeof contextTreeProjectIdentitySchema>;
+
+export const contextTreeLinkSchema = z
+  .object({
+    project: contextTreeProjectIdentitySchema,
+    tree: z.object({ path: absoluteSingleLinePathSchema, repository: githubRepositoryIdentitySchema }).strict(),
+  })
+  .strict();
+export type ContextTreeLink = z.infer<typeof contextTreeLinkSchema>;
+
+export const contextTreeLinkResultSchema = z
+  .object({ link: contextTreeLinkSchema, schemaVersion: z.literal(SCHEMA_VERSION) })
+  .strict();
+export type ContextTreeLinkResult = z.infer<typeof contextTreeLinkResultSchema>;
+
+export const contextTreeRefreshResultSchema = z
+  .object({
+    link: contextTreeLinkSchema,
+    defaultBranch: z.string().trim().min(1),
+    refreshed: z.boolean(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    sha: z.string(),
+  })
+  .strict();
+export type ContextTreeRefreshResult = z.infer<typeof contextTreeRefreshResultSchema>;
+
+export const contextTreeStageResultSchema = z
+  .object({
+    link: contextTreeLinkSchema,
+    defaultBranch: z.string().trim().min(1),
+    baseSha: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    taskBranch: z.string().trim().min(1),
+    worktreePath: z.string(),
+  })
+  .strict();
+export type ContextTreeStageResult = z.infer<typeof contextTreeStageResultSchema>;
+
+export const contextTreeDiffResultSchema = z
+  .object({
+    base: z.string(),
+    files: z
+      .array(
+        z
+          .object({ path: z.string(), status: z.enum(["added", "deleted", "modified", "renamed", "untracked"]) })
+          .strict(),
+      )
+      .max(4096),
+    patch: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    treePath: z.string(),
+  })
+  .strict();
+export type ContextTreeDiffResult = z.infer<typeof contextTreeDiffResultSchema>;
 
 export const contextTreeCliErrorCodeSchema = z.enum(CLI_ERROR_CODES);
 export type ContextTreeCliErrorCode = z.infer<typeof contextTreeCliErrorCodeSchema>;

@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const IGNORED = new Set([".git", "dist", "node_modules"]);
-const ALLOWED_IDENTIFIERS = ["@first-tree-ai/context-tree", "first-tree-ai/context-tree", "first-tree-ai"];
+const ALLOWED_IDENTIFIERS = [
+  "@first-tree-ai/context-tree",
+  "first-tree-ai/context-tree",
+  "first-tree-ai",
+  "First Tree AI",
+];
 
 function files(directory: string): string[] {
   const result: string[] = [];

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -43,13 +43,66 @@ function compactWhitespace(value: string): string {
   return value.replace(/\s+/gu, " ");
 }
 
-describe("Agent Skills contracts", () => {
-  it("ships only init, read, and write skills", () => {
+describe("Agent Skills instruction contracts (Markdown assertions do not execute Git or publication workflows)", () => {
+  it("ships link, init, read, and write skills", () => {
     expect(skillDirectories().map((path) => basename(path))).toEqual([
       "context-tree-init",
+      "context-tree-link",
       "context-tree-read",
       "context-tree-write",
     ]);
+  });
+
+  it("ships matching Codex and Claude plugin manifests", () => {
+    for (const host of ["codex", "claude"]) {
+      const manifest = record(
+        JSON.parse(readFileSync(resolve(import.meta.dirname, `../.${host}-plugin/plugin.json`), "utf8")),
+      );
+      expect(manifest.name).toBe("context-tree");
+      expect(manifest.version).toBe(PACKAGE_MANIFEST.version);
+      expect(nonEmptyString(manifest.description)).toBe(manifest.description);
+    }
+  });
+
+  it("ships npm-backed Codex and Claude marketplaces without release-version drift", () => {
+    const npmSource = {
+      package: "@first-tree-ai/context-tree",
+      source: "npm",
+      version: "latest",
+    };
+    const codex = record(
+      JSON.parse(readFileSync(resolve(import.meta.dirname, "../.agents/plugins/marketplace.json"), "utf8")),
+    );
+    expect(codex.name).toBe("context-tree");
+    expect(record(codex.interface)).toEqual({ displayName: "Context Tree" });
+    expect(codex.plugins).toEqual([
+      {
+        category: "Developer Tools",
+        name: "context-tree",
+        policy: { authentication: "ON_INSTALL", installation: "AVAILABLE" },
+        source: npmSource,
+      },
+    ]);
+
+    const claude = record(
+      JSON.parse(readFileSync(resolve(import.meta.dirname, "../.claude-plugin/marketplace.json"), "utf8")),
+    );
+    expect(claude.name).toBe("context-tree");
+    expect(claude.owner).toEqual({ name: "First Tree AI", url: "https://github.com/first-tree-ai" });
+    expect(record(claude.metadata).description).toBe(
+      "Install the complete Context Tree plugin for linked, durable project context.",
+    );
+    expect(claude.plugins).toEqual([
+      {
+        description: "Complete Context Tree plugin for linking, reading, and publishing durable project context.",
+        name: "context-tree",
+        source: npmSource,
+      },
+    ]);
+
+    const packageVersion = nonEmptyString(PACKAGE_MANIFEST.version);
+    expect(JSON.stringify(codex)).not.toContain(packageVersion);
+    expect(JSON.stringify(claude)).not.toContain(packageVersion);
   });
 
   for (const directory of skillDirectories()) {
@@ -89,55 +142,84 @@ describe("Agent Skills contracts", () => {
       }
       expect(interfaceMetadata.default_prompt).toContain(`$${name}`);
     });
+
+    it(`${name} ships the executable local CLI launcher and uses it for every CLI command`, () => {
+      const launcher = join(directory, "scripts/context-tree.mjs");
+      expect(statSync(launcher).isFile()).toBe(true);
+      expect(statSync(launcher).mode & 0o111).not.toBe(0);
+      expect(readFileSync(launcher, "utf8")).toBe(
+        readFileSync(join(SKILLS_ROOT, "context-tree-link/scripts/context-tree.mjs"), "utf8"),
+      );
+      const body = skillBody(name);
+      const compactBody = compactWhitespace(body);
+      expect(body).toContain('node "<skill-directory>/scripts/context-tree.mjs" --version');
+      expect(body).toContain("package-relative `scripts/context-tree.mjs` launcher");
+      expect(compactBody).toContain("private CLI bundled in the same plugin package");
+      expect(compactBody).toContain("reinstall or update the Context Tree plugin");
+      expect(body).not.toMatch(/standalone|global[- ]install|global CLI/iu);
+      expect(body).not.toMatch(/`context-tree (?:--version|init|link|policy|read|resolve|verify)\b/u);
+
+      const launcherSource = readFileSync(launcher, "utf8");
+      expect(launcherSource).not.toContain('spawnSync("context-tree"');
+      expect(launcherSource).not.toContain("npm install --global");
+    });
   }
 
-  it("does not reference the retired shared memory namespace", () => {
-    for (const directory of skillDirectories()) {
-      const source = readFileSync(join(directory, "SKILL.md"), "utf8");
-      expect(source).not.toContain("memory/");
-    }
-  });
+  it("declares automatic-resolution invocation contracts", () => {
+    const link = skillBody("context-tree-link");
+    expect(invocationInputs(link)).toEqual(["project_path", "tree_path", "repository"]);
 
-  it("declares the local-checkout invocation contracts", () => {
     const init = skillBody("context-tree-init");
     expect(invocationInputs(init)).toEqual(["repository", "tree_path"]);
 
     const read = skillBody("context-tree-read");
-    expect(invocationInputs(read)).toEqual(["agent_slug", "tree_path", "branch"]);
+    expect(invocationInputs(read)).toEqual(["agent_slug"]);
 
     const write = skillBody("context-tree-write");
-    expect(invocationInputs(write)).toEqual(["agent_slug", "tree_path", "default_branch"]);
+    expect(invocationInputs(write)).toEqual(["agent_slug"]);
     expect(invocationInputs(write)).not.toContain("branch");
 
     for (const body of [read, write]) {
       expect(body).toContain("Treat `agent_slug` as the agent identity");
       expect(body).toContain("members/<agent_slug>/memory.md");
+      expect(body).toContain('node "<skill-directory>/scripts/context-tree.mjs" --version');
+      expect(body).not.toMatch(/default branch (?:is|named) [`'"]?(?:main|master|trunk)/iu);
+      expect(body).toContain("`engineer` or `designer`");
+      expect(body).toContain("Never infer it from a global setting or persist it");
+    }
+
+    for (const [name, command] of [
+      ["context-tree-read", "refresh"],
+      ["context-tree-write", "stage"],
+    ] as const) {
+      const body = compactWhitespace(skillBody(name));
+      expect(body).toContain(`node "<skill-directory>/scripts/context-tree.mjs" ${command} --project-path "$PWD"`);
+      expect(body).toContain("Do not scan, clone, repair, or run Git");
+      expect(body).toContain("clean non-symlink root");
+      expect(body).toContain("safe `github.com` origin matches");
     }
   });
 
-  it("omits retired inputs and skill-level policy", () => {
-    for (const name of ["context-tree-init", "context-tree-read", "context-tree-write"]) {
-      const body = skillBody(name);
-      expect(body).not.toMatch(/agent[-_]id/u);
-      expect(body).not.toContain("source_artifact");
-      expect(body).not.toContain("schemaVersion: 1");
-    }
-
-    const read = skillBody("context-tree-read");
-    expect(read).not.toContain("^[A-Za-z0-9]");
-    expect(read).not.toContain("`STALE`");
-
-    const write = skillBody("context-tree-write");
-    expect(write).not.toContain("^[A-Za-z0-9]");
-
-    for (const body of [read, write]) {
-      expect(body).not.toMatch(/validate (?:the )?`?agent_slug|agent_slug.*ASCII|starting with a letter/iu);
-      expect(body).not.toContain("gh auth status");
-    }
-
-    const init = skillBody("context-tree-init");
-    expect(init).not.toContain("--public");
-    expect(init).toContain('gh repo create "OWNER/REPO" --private');
+  it("supports explicit attach and managed clone link workflows", () => {
+    const link = skillBody("context-tree-link");
+    expect(link).toContain("Never scan the filesystem for a tree");
+    expect(link).toContain("Attach:");
+    expect(link).toContain("Managed clone:");
+    expect(link).toContain("~/.context-tree/checkouts/OWNER/REPO");
+    expect(link).toContain("git clone --origin origin");
+    expect(link).toContain(
+      'node "<skill-directory>/scripts/context-tree.mjs" link --project-path "<project_path>" --tree-path "<tree_path>"',
+    );
+    expect(link).toContain("same tree repository");
+    expect(link).toContain("do not invoke the normal context-tree-write skill");
+    expect(link).toContain("do not require `agent_slug`");
+    expect(link).toContain("existing clean, non-symlink Git root");
+    expect(link).toContain("writes only the local mapping");
+    expect(link).toContain("must not edit, commit, push, or open a pull request");
+    expect(link).not.toContain("git ls-remote --symref origin HEAD");
+    expect(link).not.toContain("isolated temporary worktree");
+    expect(link).not.toContain("gh pr create");
+    expect(link).toContain("dirty old checkout");
   });
 
   it("supports safe local-only and private GitHub initialization", () => {
@@ -145,6 +227,8 @@ describe("Agent Skills contracts", () => {
     const compactInit = compactWhitespace(init);
 
     expect(init).toContain("default to `./REPO`");
+    expect(init).toContain("machine-local links file");
+    expect(init).toContain("never embeds the source-project association");
     expect(init).toContain("unambiguous authoritative task context");
     expect(init).toContain("ask the user; never invent, combine, or replace it");
     expect(init).toContain("ordinary `git init`");
@@ -155,19 +239,22 @@ describe("Agent Skills contracts", () => {
     expect(compactInit).toContain("before writing local files, query the exact `OWNER/REPO`");
     expect(init).toContain("Proceed only when GitHub gives a definite not-found response");
     expect(init).toContain("rather than falling back to local-only creation");
-    expect(init).toContain('context-tree init --repository "OWNER/REPO" --tree-path "<tree_path>"');
+    expect(init).toContain(
+      'node "<skill-directory>/scripts/context-tree.mjs" init --repository "OWNER/REPO" --tree-path "<tree_path>"',
+    );
     expect(init).toContain("treat its JSON scaffold result as authoritative");
     expect(init).toContain("require it to match the scaffold result contract");
     expect(init).toContain("require `verification.ok === true`");
     expect(compactInit).toContain("stop before staging or publishing and preserve the generated repository");
-    expect(init).not.toContain("context-tree policy");
-    expect(init).not.toContain("context-tree verify");
-    expect(init).toContain("Treat the Git repository created by the CLI as authoritative");
+    expect(init).not.toContain('node "<skill-directory>/scripts/context-tree.mjs" policy');
+    expect(init).not.toContain('node "<skill-directory>/scripts/context-tree.mjs" verify');
+    expect(init).toContain("Treat the Git repository and credential-free `origin` created by the CLI as authoritative");
     expect(init).toContain('git -C "<tree_path>" symbolic-ref --short HEAD');
     expect(init).toContain("do not run `git init`");
     expect(init).toContain("stage only `NODE.md` and `.github/workflows/validate-context-tree.yml`");
     expect(init).toContain("complete staged diff");
-    expect(init).toContain("no GitHub repository or remote was created");
+    expect(init).toContain("no GitHub repository was created");
+    expect(init).toContain("credential-free origin is configured");
     expect(init).toContain("publish only `current_branch`");
     expect(init).toContain("refs/remotes/origin/<current_branch>");
     expect(init).toContain("refs/heads/<current_branch>");
@@ -179,93 +266,39 @@ describe("Agent Skills contracts", () => {
     expect(init).not.toContain("<default_branch>");
   });
 
-  it("uses only agent_slug in shipped skills and documentation", () => {
-    const paths = [
-      resolve(import.meta.dirname, "../README.md"),
-      resolve(import.meta.dirname, "../docs/specification.md"),
-      resolve(import.meta.dirname, "../policy/context-tree-policy.md"),
-      ...skillDirectories().flatMap((directory) => [
-        join(directory, "SKILL.md"),
-        join(directory, "agents/openai.yaml"),
-      ]),
-    ];
-
-    for (const path of paths) {
-      const source = readFileSync(path, "utf8");
-      expect(source).not.toMatch(/agent[-]slug|member_slug|member-slug/u);
-    }
-  });
-
-  it("makes the exact existing checkout the read and write authorization boundary", () => {
-    for (const name of ["context-tree-read", "context-tree-write"]) {
-      const body = compactWhitespace(skillBody(name));
-
-      expect(body).toContain("Never infer the path from the current directory or clone a replacement");
-      expect(body).toContain("real path is identical");
-      expect(body).toContain("git rev-parse --show-toplevel");
-      expect(body).toContain("git status --porcelain");
-      expect(body).toContain("git symbolic-ref --short HEAD");
-      expect(body).toContain("Reject a nested root or detached HEAD");
-      expect(body).toContain("Capture `origin` without logging it");
-      expect(body).toContain("credential-free `github.com` HTTPS or SSH");
-      expect(body).toContain("derive `OWNER/REPO`");
-      expect(body).toContain("not another checkout or remote");
-    }
-  });
-
   it("preserves refresh and isolated direct-publication safeguards", () => {
-    const read = skillBody("context-tree-read");
+    const read = compactWhitespace(skillBody("context-tree-read"));
     const write = skillBody("context-tree-write");
     const compactWrite = compactWhitespace(write);
 
-    expect(read).toContain('git pull --ff-only origin "<branch>"');
+    expect(read).toContain('node "<skill-directory>/scripts/context-tree.mjs" refresh --project-path "$PWD"');
     expect(read).toContain("Treat a stale checkout as read-only");
-    expect(read).toContain("disclose the refresh");
-    expect(read).toContain("exact local commit SHA");
+    expect(read).toContain("disclose the refresh failure");
+    expect(read).toContain("exact commit `sha`");
 
     expect(write).toContain('git fetch origin "<default_branch>"');
-    expect(write).toContain("git symbolic-ref --short HEAD` to equal `default_branch`");
-    expect(write).toContain("Treat the supplied `default_branch` as authoritative");
-    expect(write).toContain("never query GitHub to discover or replace it");
-    expect(write).toContain("fetched commit SHA");
-    expect(write).toContain("temporary worktree at that exact commit");
+    expect(compactWrite).toContain("creates an isolated worktree at exactly `baseSha`");
     expect(write).toContain("Preserve path containment and never replace or traverse symlinks");
-    expect(write).toContain("Run `context-tree verify");
-    expect(write).toContain("Inspect the complete `git diff`");
-    expect(write).toContain('git push origin HEAD:"<default_branch>"');
+    expect(write).toContain('Run `node "<skill-directory>/scripts/context-tree.mjs" verify');
+    expect(write).toContain('node "<skill-directory>/scripts/context-tree.mjs" diff --tree-path "<task-worktree>"');
+    expect(write).toContain('git push origin HEAD:"<defaultBranch>"');
     expect(write).toContain("Use a non-force push");
     expect(write).toContain("initial direct push plus at most two conflict or race retries");
     expect(write).toContain("git rebase origin/<default_branch>");
     expect(write).toContain("resolve ordinary conflicts locally");
     expect(write).toContain("repository-prescribed checks");
-    expect(write).toContain("git diff origin/<default_branch>...HEAD");
+    expect(write).toContain('diff --tree-path "<task-worktree>" --base "origin/<default_branch>"');
     expect(compactWrite).toContain("inspect the authorized remote refs and existing PRs");
     expect(write).toContain("permissions, a ruleset, or branch protection");
     expect(write).toContain('git push --set-upstream origin "<task-branch>"');
     expect(write).toContain('gh pr create --repo "OWNER/REPO" --base "<default_branch>" --head "<task-branch>"');
     expect(compactWrite).toContain("Do not publish a conflicting fallback branch");
-    expect(write).toContain("never merge it or request reviewers automatically");
+    expect(compactWrite).toContain("never merge it or request reviewers");
     expect(write).not.toContain("never force push or push directly to the base branch");
     expect(write).not.toContain("do not rebase or force-push");
     expect(write).not.toContain("leave the PR open for humans");
     expect(write).not.toContain('git fetch origin "<branch>"');
     expect(write).not.toContain('gh pr create --repo "OWNER/REPO" --base "<branch>"');
     expect(write).not.toContain("Open a GitHub PR targeting the explicit base");
-  });
-
-  it("does not ship the retired PR-first write contract", () => {
-    const paths = [
-      resolve(import.meta.dirname, "../README.md"),
-      resolve(import.meta.dirname, "../docs/specification.md"),
-      resolve(import.meta.dirname, "../policy/context-tree-policy.md"),
-      join(SKILLS_ROOT, "context-tree-write/SKILL.md"),
-      join(SKILLS_ROOT, "context-tree-write/agents/openai.yaml"),
-    ];
-
-    for (const path of paths) {
-      const source = readFileSync(path, "utf8");
-      expect(source).not.toMatch(/one source per (?:tree )?PR|repair-only PR|PR-first/iu);
-      expect(source).not.toContain("Publish only with a non-force task-branch push and GitHub PR");
-    }
   });
 });

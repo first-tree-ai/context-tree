@@ -62,7 +62,7 @@ function validateRequiredNodeMetadata(
 
 function validateRootOnlyFields(document: ContextDocument, path: string, findings: TreeValidationFinding[]): void {
   if (path === "NODE.md" || document.frontmatter !== "valid") return;
-  const fields = ["schemaVersion", "relatedRepositories"].filter((field) => field in document.data);
+  const fields = ["schemaVersion"].filter((field) => field in document.data);
   if (fields.length > 0) {
     addFinding(
       findings,
