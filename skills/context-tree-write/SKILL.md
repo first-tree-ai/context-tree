@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
   author: first-tree-ai
-  version: "0.1.1"
+  version: "0.1.2"
 ---
 
 # Context Tree Write
@@ -30,6 +30,14 @@ Use only `tree_path`. Its explicit path authorizes that exact worktree and
 verified `origin`, not another checkout or remote. Never infer the path from the
 current directory or clone a replacement. Use it only to validate and fetch;
 read and edit in an isolated task worktree.
+
+First span a dedicated subagent to complete the following steps. 
+Only interrupt the main thread when:
+- You have successfully pushed an update to the git tree
+- You need additional information from the user
+- You failed to push an update to the git tree
+
+Do not interrupt the user if there are no legitimate updates to the Context Tree.
 
 First run `context-tree --version`. If the command is missing, stop and tell the
 user to run `npm install --global @first-tree-ai/context-tree`. Never install a

@@ -335,7 +335,7 @@ describe("scaffold and policy", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
     expect(workflow).toContain('branches: ["trunk"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.1 verify");
+    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.2 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });

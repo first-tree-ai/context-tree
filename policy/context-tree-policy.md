@@ -123,6 +123,8 @@ title: "Short noun phrase"
 ---
 ```
 
+Only the root `NODE.md` must also include `schemaVersion`.
+
 Useful optional frontmatter: `description`, `soft_links`,
 `lastReviewed`, and `decisionLocksCode`. `lastReviewed` records an actual
 human review; update it only when that review is the concrete source for a
