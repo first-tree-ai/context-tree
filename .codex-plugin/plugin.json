@@ -1,6 +1,6 @@
 {
   "name": "context-tree",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Complete Context Tree plugin with linking, reading, durable writes, and a packaged CLI.",
   "author": {
     "name": "First Tree AI",

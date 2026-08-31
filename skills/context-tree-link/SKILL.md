@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
   author: first-tree-ai
-  version: "0.1.2"
+  version: "0.1.4"
 ---
 
 # Context Tree Link
