@@ -95,7 +95,13 @@ try {
     requirePackagedFile(extractedPackage, relativePath);
   }
 
-  const packagedSkills = ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"];
+  const packagedSkills = [
+    "context-tree-link",
+    "context-tree-init",
+    "context-tree-push",
+    "context-tree-read",
+    "context-tree-write",
+  ];
   for (const skill of packagedSkills) {
     requirePackagedFile(extractedPackage, `skills/${skill}/SKILL.md`);
     requirePackagedFile(extractedPackage, `skills/${skill}/agents/openai.yaml`);
@@ -181,6 +187,7 @@ try {
   assert.deepEqual(JSON.parse(mainExports), [
     "inspectContextTreeDiff",
     "linkProject",
+    "pushTree",
     "readContextTreePolicy",
     "readTree",
     "refreshProject",
@@ -212,7 +219,7 @@ try {
   assert.equal(version.status, 0);
   assert.equal(version.stdout, `${manifest.version}\n`);
 
-  const init = runCli(cliPath, consumerRoot, ["init", "--repository", "acme/context", "--tree-path", "tree"]);
+  const init = runCli(cliPath, consumerRoot, ["init", "context", "--tree-path", "tree"]);
   assert.equal(init.status, 0);
   parseWithInstalledSchema(consumerRoot, "scaffoldTreeResultSchema", init.stdout);
   assert.deepEqual(JSON.parse(init.stdout).files, [
@@ -231,22 +238,7 @@ try {
     readFileSync(join(consumerRoot, "tree/.github/workflows/validate-context-tree.yml"), "utf8"),
     /branches: \["trunk"\]/u,
   );
-  execFileSync("git", ["-C", join(consumerRoot, "tree"), "add", "."], { env: npmEnvironment, stdio: "pipe" });
-  execFileSync(
-    "git",
-    [
-      "-C",
-      join(consumerRoot, "tree"),
-      "-c",
-      "user.name=Package Test",
-      "-c",
-      "user.email=test@example.com",
-      "commit",
-      "-m",
-      "Initialize",
-    ],
-    { env: npmEnvironment, stdio: "pipe" },
-  );
+  assert.match(JSON.parse(init.stdout).commit, /^[0-9a-f]{40}$/u, "init must report the scaffold commit");
   const resolved = runCli(cliPath, consumerRoot, ["resolve"]);
   assert.equal(resolved.status, 0);
   parseWithInstalledSchema(consumerRoot, "contextTreeLinkResultSchema", resolved.stdout);

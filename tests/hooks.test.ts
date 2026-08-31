@@ -45,16 +45,7 @@ function run(home: string, cwd: string, command: string, args: string[], input?:
 function initialize(root: string): string {
   const project = resolve(root, "project");
   mkdirSync(project);
-  expect(
-    run(root, project, process.execPath, [CLI, "init", "--repository", "acme/context", "--tree-path", "../tree"])
-      .status,
-  ).toBe(0);
-  const tree = resolve(root, "tree");
-  expect(run(root, tree, "git", ["add", "."]).status).toBe(0);
-  expect(
-    run(root, tree, "git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"])
-      .status,
-  ).toBe(0);
+  expect(run(root, project, process.execPath, [CLI, "init", "context", "--tree-path", "../tree"]).status).toBe(0);
   return project;
 }
 
@@ -81,7 +72,7 @@ describe("lifecycle context injection", () => {
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
         hookSpecificOutput: {
-          additionalContext: expect.stringContaining("Context Tree acme/context is linked"),
+          additionalContext: expect.stringContaining("Context Tree checkout is linked"),
           hookEventName: event,
         },
       });

@@ -60,11 +60,12 @@ moves a fact to shared context and removes the private duplicate.
 
 Run `node "<skill-directory>/scripts/context-tree.mjs" stage --project-path "$PWD"`.
 Parse and require the stage result contract, including `worktreePath`,
-`taskBranch`, `baseSha`, and `defaultBranch`. The CLI resolves the linked checkout, verifies
-it is a clean non-symlink root whose safe `github.com` origin matches, resolves
-the live default branch, fetches it, and creates an isolated worktree at exactly
-`baseSha`. It reports `baseSha` as the exact fetched commit and `taskBranch` as
-the worktree branch. Do not scan, clone,
+`taskBranch`, `baseSha`, and `defaultBranch`. The CLI resolves the linked checkout,
+verifies it is a clean non-symlink root whose safe `github.com` origin matches the
+link record when one is configured, then stages the base: a published tree is
+staged at its fetched live default branch; a local-only tree without an origin is
+staged at its own `HEAD`. In both cases it creates an isolated worktree at exactly
+`baseSha` and reports it as `taskBranch`. Do not scan, clone,
 repair, or run Git to discover the branch yourself. Stop if staging fails; a
 failed base never becomes the source for edits.
 
@@ -92,11 +93,17 @@ only validator findings.
 
 1. Run repository-prescribed checks relevant to the changed tree.
 2. Commit the verified diff on the task branch.
-3. Publish directly with `git push origin HEAD:"<defaultBranch>"` using `<defaultBranch>` from the stage result. Use a non-force push and do not push the task branch or invoke `gh` on this normal path.
-4. If that push succeeds, report the commit published on `defaultBranch`.
+3. Publish from the stage result mode. For a published tree, push directly with
+   `git push origin HEAD:"<defaultBranch>"` using `<defaultBranch>` from the stage
+   result. Use a non-force push and do not push the task branch or invoke `gh` on
+   this normal path. For a local-only tree without an origin, fast-forward the
+   main checkout with `git -C "<tree_path>" merge --ff-only "<taskBranch>"`, rerun
+   `node "<skill-directory>/scripts/context-tree.mjs" verify --tree-path "<tree_path>"`,
+   and report the merged commit; there is no pull-request fallback without a
+   remote, so stop and report when the fast-forward is refused.
+4. If a direct push succeeds, report the commit published on `defaultBranch`.
 
-Allow the initial direct push plus at most two conflict or race retries. On a
-non-fast-forward rejection, run `git fetch origin "<default_branch>"`, rebase
+For published trees, allow the initial direct push plus at most two conflict or race retries. On a non-fast-forward rejection, run `git fetch origin "<default_branch>"`, rebase
 the unpublished task commit with `git rebase origin/<default_branch>`, and
 resolve ordinary conflicts locally from the authorized source evidence and the
 current canonical tree. Never merge or force-push. If the correct semantic
@@ -111,7 +118,7 @@ and existing PRs before retrying only an operation that is still missing.
 
 ## Conflict-free pull request fallback
 
-Fall back automatically when direct publication is explicitly denied by
+For published trees only, fall back automatically when direct publication is explicitly denied by
 permissions, a ruleset, or branch protection, or when both direct-push retries
 are exhausted. Fetch the latest base with
 `git fetch origin "<default_branch>"`, rebase with

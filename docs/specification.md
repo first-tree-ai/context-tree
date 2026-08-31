@@ -2,9 +2,11 @@
 
 ## Repository and root
 
-A shared Context Tree lives in a `github.com` repository identified as
-`OWNER/REPO`. GitHub commit SHAs identify exact shared snapshots. The package
-still operates on local clones and worktrees because validation and editing are
+A Context Tree is a Git repository of Markdown context. It can live entirely
+locally, or it can be published to a `github.com` repository identified as
+`OWNER/REPO`; publication is a later, explicit `push` step, and GitHub commit
+SHAs identify exact shared snapshots of published trees. The package still
+operates on local clones and worktrees because validation and editing are
 filesystem operations.
 
 The tree root is a real directory containing a regular, non-symlink `NODE.md`.
@@ -78,10 +80,11 @@ includes a tree digest or per-entry digest. The Git commit SHA is recorded by
 the surrounding host Git workflow rather than computed by the core.
 
 `link` and `resolve` return a strict link result containing the
-project identity and tree `OWNER/REPO` plus a canonical absolute, single-line
-checkout path. Link
-failures distinguish `NO_LINK`, `AMBIGUOUS_LINK`,
-`CORRUPT_LINK`, and `STALE_LINK` from other CLI failures.
+project identity, an optional tree `OWNER/REPO`, and a canonical absolute,
+single-line checkout path. Link and lifecycle failures distinguish `NO_LINK`,
+`AMBIGUOUS_LINK`, `CORRUPT_LINK`, `STALE_LINK`, `NO_REMOTE`, and `NO_COMMITS`
+from other CLI failures. `push` returns the branch, commit SHA, remote default
+branch, remote identity and URL, and uncommitted-file count.
 
 ## Lifecycle
 
@@ -90,27 +93,41 @@ Scaffolding creates exactly four files: root `NODE.md`, root `AGENTS.md`, root
 explains the tree's purpose, structure, authority, and write discipline to
 agents entering the repository. `CLAUDE.md` is a relative symlink to `AGENTS.md`
 so both instruction filenames expose the same packaged guidance. The workflow
-is pinned to the package version that generated it. Init takes canonical `OWNER/REPO` and an
-optional absent or empty destination. It requires Git, runs ordinary `git init`, and uses the
-unborn branch selected by Git's effective `init.defaultBranch` configuration or
-compiled fallback. The generated workflow filters pushes to that exact branch.
-The local tree title and default destination name come from `REPO`. Init
-configures a credential-free `https://github.com/OWNER/REPO.git` origin. Init
-records an unambiguous current project link only in the machine-local links
-file and never embeds the source-project association in the tree.
-The core and CLI perform no authenticated GitHub operations.
+is pinned to the package version that generated it. Init takes a local tree
+`name` and an optional absent or empty destination. It requires Git, runs
+ordinary `git init`, and uses the unborn branch selected by Git's effective
+`init.defaultBranch` configuration or compiled fallback. The generated workflow
+filters pushes to that exact branch. The local tree title and default
+destination name come from `name`. Init never configures a Git remote and never
+contacts GitHub. Init commits exactly the four scaffold files, records an
+unambiguous current project link only in the machine-local links file, and
+never embeds the source-project association in the tree. The tree is usable
+locally with plain Git before any GitHub repository exists.
+
+`push [OWNER/REPO]` publishes committed state. With `OWNER/REPO`, the CLI
+requires a verified tree and at least one commit, creates a new **private**
+GitHub repository through the GitHub CLI, configures the credential-free
+`https://github.com/OWNER/REPO.git` origin, pushes the current branch with its
+upstream, and sets and reports the remote default branch. Without the argument,
+it pushes through an existing origin. `push` never stages or commits uncommitted
+work, which it reports as `uncommittedFiles`. The GitHub CLI owns
+authentication; a repository that already exists is a hard error.
 
 Internal links live at `~/.context-tree/connections.json`. A link
-maps a normalized Git project origin or a real non-Git directory to canonical
-tree `OWNER/REPO` and checkout path. Git lookup also confirms that the project
-origin matches the local record; non-Git lookup includes descendants.
-Zero or multiple matches fail, and a project cannot link to different tree
-repositories. Explicit linking requires a clean exact Git root, safe GitHub
-origin, and complete tree verification. Init may
-automatically link only its exact new uncommitted scaffold. Resolve rejects symlinked,
-dirty, moved, mismatched-origin, and invalid-root candidates, but parses only
-root `NODE.md` rather than scanning all semantic content. Full verification is
-the responsibility of read and write after refresh.
+maps a normalized Git project origin or a real non-Git directory to an optional
+canonical tree `OWNER/REPO` plus a canonical absolute, single-line checkout
+path; the repository identity is absent until the tree is published. Git lookup
+also confirms that the project origin matches the local record; non-Git lookup
+includes descendants. Zero or multiple matches fail, and a project cannot link
+to a different tree repository. Explicit linking requires a clean exact Git
+root, a safe GitHub origin when one is configured, and complete tree
+verification. Init automatically links its new committed scaffold. Resolve
+rejects symlinked, dirty, moved, repository-mismatched, and invalid-root
+candidates, but parses only root `NODE.md` rather than scanning all semantic
+content. Full verification is the responsibility of read and write after
+refresh. When a stored link has no repository identity and the checkout has
+gained a GitHub origin, resolve backfills the stored identity atomically; after
+a later `push`, relinking is unnecessary.
 
 A moved checkout produces `STALE_LINK`; explicit linking may replace its
 path only after verifying the same stored tree repository and proving the prior
@@ -124,23 +141,27 @@ record. It never mutates or publishes the Context Tree repository.
 Reads and writes take only `agent_slug`, sourced from authoritative task role
 instructions. They resolve the current project, then discover the live default
 branch using `git ls-remote --symref origin HEAD`; branches are never configured
-or cached. The exact clean, non-symlink Git root and its credential-free GitHub
-`origin` remain the authorization boundary. Resolution selects a candidate and
-does not replace full semantic verification. Reads refresh fast-forward-only,
-validate, and report the commit SHA; authorized stale reads stay read-only.
+or cached. For local-only trees without an origin, `refresh` fails with
+`NO_REMOTE` and `stage` bases the worktree on local `HEAD`. The exact clean,
+non-symlink Git root remains the authorization boundary, with the
+credential-free GitHub `origin` matching the link record when one is configured.
+Resolution selects a candidate and does not replace full semantic verification.
+Reads refresh fast-forward-only, validate, and report the commit SHA; authorized
+stale reads stay read-only.
 
-The package root exports `linkProject`, `resolveLink`,
+The package root exports `linkProject`, `resolveLink`, `pushTree`,
 `readContextTreePolicy`, `readTree`, `scaffoldTree`, and `verifyTree`.
 Project identification, URL normalization, and the links-file storage
 schema are internal. Public strict CLI result schemas remain available from
 the schemas entrypoint.
 
-Writes fetch the discovered default branch through that checkout and edit an
-isolated worktree. One source comes from task context, not an invocation
-argument, and scopes one write and commit. The base and result must validate;
-publication first uses a non-force direct push to the discovered default branch.
-Concurrent updates are rebased, resolved from authorized evidence, and verified
-again with bounded retries. Explicit direct-push denial or exhausted retries
-uses a latest-base, conflict-free task-branch PR fallback that remains open.
-Invalid bases permit only explicitly requested validator-scoped repair, and the
-workflow never merges.
+Writes fetch the discovered default branch through that checkout (or use local
+`HEAD` for local-only trees) and edit an isolated worktree. One source comes
+from task context, not an invocation argument, and scopes one write and commit.
+The base and result must validate. Published trees publish with a non-force
+direct push to the discovered default branch, rebase concurrent updates with
+bounded retries, and fall back to a latest-base, conflict-free task-branch PR
+that remains open on explicit denial or exhausted retries. Local-only trees
+publish by fast-forwarding the main checkout to the verified task commit and
+have no PR fallback. Invalid bases permit only explicitly requested
+validator-scoped repair, and the workflow never merges.

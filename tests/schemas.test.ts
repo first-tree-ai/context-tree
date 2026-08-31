@@ -27,7 +27,7 @@ function tempRoot(): string {
 
 function tree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context" });
+  scaffoldTree({ path: root, name: "context" });
   return root;
 }
 
@@ -47,8 +47,8 @@ describe("public JSON schemas", () => {
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
     const scaffoldRoot = join(tempRoot(), "tree");
     const scaffold = scaffoldTree({
+      name: "other",
       path: scaffoldRoot,
-      repository: "acme/other",
     });
     expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
     const read = readTree(root);
@@ -86,6 +86,17 @@ describe("public JSON schemas", () => {
       schemaVersion: 1,
     };
     expect(contextTreeLinkResultSchema.parse(link)).toEqual(link);
+    const localLink = {
+      ...link,
+      link: { ...link.link, tree: { path: "/work/local" } },
+    };
+    expect(contextTreeLinkResultSchema.parse(localLink)).toEqual(localLink);
+    expect(
+      contextTreeLinkResultSchema.safeParse({
+        ...localLink,
+        link: { ...localLink.link, tree: { path: "/work/local", repository: 42 } },
+      }).success,
+    ).toBe(false);
     for (const path of ["relative/context", "/work/control\ncontext", "/work/control\tcontext"]) {
       expect(
         contextTreeLinkResultSchema.safeParse({
@@ -100,7 +111,7 @@ describe("public JSON schemas", () => {
         link: { ...link.link, future: true },
       }).success,
     ).toBe(false);
-    for (const code of ["NO_LINK", "AMBIGUOUS_LINK", "CORRUPT_LINK", "STALE_LINK"]) {
+    for (const code of ["NO_LINK", "AMBIGUOUS_LINK", "CORRUPT_LINK", "STALE_LINK", "NO_REMOTE", "NO_COMMITS"]) {
       expect(
         contextTreeCliErrorEnvelopeSchema.safeParse({
           error: { code, message: "link error" },

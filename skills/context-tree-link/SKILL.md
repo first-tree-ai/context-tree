@@ -31,14 +31,14 @@ the Context Tree plugin; never install a package automatically.
 
 ## Select the checkout
 
-- Attach: resolve `tree_path` to an absolute path and require an existing clean, non-symlink Git root with a credential-free `github.com` origin.
+- Attach: resolve `tree_path` to an absolute path and require an existing clean, non-symlink Git root. It may be a local-only tree without an origin or a published tree with a credential-free `github.com` origin.
 - Managed clone: parse `repository` as `OWNER/REPO` and clone it into `~/.context-tree/checkouts/OWNER/REPO`. Create parent directories without symlinks. Refuse a non-empty destination and run only `git clone --origin origin -- "https://github.com/OWNER/REPO.git" "<destination>"`. Missing managed checkouts are recreated only through this explicit invocation.
 
 Run `node "<skill-directory>/scripts/context-tree.mjs" verify --tree-path "<tree_path>"` and stop unless it succeeds.
 
 ## Record the link
 
-Run `node "<skill-directory>/scripts/context-tree.mjs" link --project-path "<project_path>" --tree-path "<tree_path>"`. Parse and require the link result contract. This writes only the local mapping in `~/.context-tree/connections.json`; it must not edit, commit, push, or open a pull request in the Context Tree repository. Report the linked `OWNER/REPO` and canonical absolute checkout path.
+Run `node "<skill-directory>/scripts/context-tree.mjs" link --project-path "<project_path>" --tree-path "<tree_path>"`. Parse and require the link result contract. The tree `repository` identity is present only for published trees; a local-only tree records no repository until publication, and the next resolve backfills it automatically once an origin exists. This writes only the local mapping in `~/.context-tree/connections.json`; it must not edit, commit, push, or open a pull request in the Context Tree repository. Report the linked `OWNER/REPO` when present, otherwise report the local-only checkout, and the canonical absolute checkout path.
 
 A relink may replace a stored checkout path only when the new checkout verifies as the same tree repository and the old checkout is stale. A second live checkout, including a dirty old checkout, must not replace it.
 

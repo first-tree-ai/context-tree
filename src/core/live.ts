@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import {
+  CLI_ERROR_CODES,
   type ContextTreeDiffResult,
   type ContextTreeLink,
   type ContextTreeRefreshResult,
   type ContextTreeStageResult,
   SCHEMA_VERSION,
 } from "../schemas.js";
-import { resolveLink } from "./links.js";
+import { LinkError, resolveLink } from "./links.js";
 
 function git(root: string, args: string[]): string {
   const result = spawnSync("git", ["-C", root, ...args], {
@@ -41,9 +42,24 @@ function discoverDefaultBranch(root: string): string {
   return refs[0] ?? "";
 }
 
+function remoteUrl(root: string): string | undefined {
+  const result = spawnSync("git", ["-C", root, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) return undefined;
+  return (result.stdout ?? "").replace(/\r?\n$/u, "");
+}
+
 export function refreshProject(projectPath: string): ContextTreeRefreshResult {
   const result = resolveLink(projectPath);
   const root = result.link.tree.path;
+  if (remoteUrl(root) === undefined) {
+    throw new LinkError(
+      CLI_ERROR_CODES.noRemote,
+      "The linked Context Tree has no origin remote; publish it with context-tree push first.",
+    );
+  }
   const defaultBranch = discoverDefaultBranch(root);
   const local = requireGit(root, ["symbolic-ref", "--short", "HEAD"]);
   if (local !== defaultBranch) {
@@ -75,18 +91,25 @@ function createIsolatedWorktree(treePath: string, baseSha: string): { taskBranch
 export function stageContextWrite(projectPath: string): ContextTreeStageResult {
   const result = resolveLink(projectPath);
   const treePath = result.link.tree.path;
-  const ownerRepository = result.link.tree.repository;
-  const defaultBranch = discoverDefaultBranch(treePath);
-  const local = requireGit(treePath, ["symbolic-ref", "--short", "HEAD"]);
-  if (local !== defaultBranch) {
-    throw new Error(`The Context Tree checkout must be on the live default branch "${defaultBranch}".`);
+  let defaultBranch: string;
+  let baseSha: string;
+  if (remoteUrl(treePath) === undefined) {
+    // A local-only tree stages from its own checked-out state.
+    defaultBranch = requireGit(treePath, ["symbolic-ref", "--short", "HEAD"]);
+    baseSha = requireGit(treePath, ["rev-parse", "HEAD"]);
+  } else {
+    defaultBranch = discoverDefaultBranch(treePath);
+    const local = requireGit(treePath, ["symbolic-ref", "--short", "HEAD"]);
+    if (local !== defaultBranch) {
+      throw new Error(`The Context Tree checkout must be on the live default branch "${defaultBranch}".`);
+    }
+    requireGit(treePath, ["fetch", "origin", defaultBranch], true);
+    baseSha = requireGit(treePath, ["rev-parse", `origin/${defaultBranch}`]);
   }
-  requireGit(treePath, ["fetch", "origin", defaultBranch], true);
-  const baseSha = requireGit(treePath, ["rev-parse", `origin/${defaultBranch}`]);
   const { taskBranch, worktreePath } = createIsolatedWorktree(treePath, baseSha);
   const link: ContextTreeLink = {
     project: result.link.project,
-    tree: { path: treePath, repository: ownerRepository },
+    tree: { ...result.link.tree, path: treePath },
   };
   return {
     baseSha,

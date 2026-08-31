@@ -53,12 +53,13 @@ if (resolved.status !== 0) {
 }
 
 const tree = payload?.link?.tree;
-if (typeof tree?.path !== "string" || typeof tree?.repository !== "string") process.exit(0);
+if (typeof tree?.path !== "string") process.exit(0);
+const label = typeof tree.repository === "string" ? `Context Tree ${tree.repository}` : "A Context Tree checkout";
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {
+      additionalContext: `${label} is linked at ${tree.path}. Use the Context Tree skills for task-relevant durable context.`,
       hookEventName: input.hook_event_name,
-      additionalContext: `Context Tree ${tree.repository} is linked at ${tree.path}. Use the Context Tree skills for task-relevant durable context.`,
     },
   }),
 );

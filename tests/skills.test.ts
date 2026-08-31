@@ -48,6 +48,7 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     expect(skillDirectories().map((path) => basename(path))).toEqual([
       "context-tree-init",
       "context-tree-link",
+      "context-tree-push",
       "context-tree-read",
       "context-tree-write",
     ]);
@@ -170,7 +171,7 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     expect(invocationInputs(link)).toEqual(["project_path", "tree_path", "repository"]);
 
     const init = skillBody("context-tree-init");
-    expect(invocationInputs(init)).toEqual(["repository", "tree_path"]);
+    expect(invocationInputs(init)).toEqual(["name", "tree_path"]);
 
     const read = skillBody("context-tree-read");
     expect(invocationInputs(read)).toEqual(["agent_slug"]);
@@ -222,50 +223,54 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     expect(link).toContain("dirty old checkout");
   });
 
-  it("supports safe local-only and private GitHub initialization", () => {
+  it("supports local-only initialization without any GitHub operations", () => {
     const init = skillBody("context-tree-init");
     const compactInit = compactWhitespace(init);
 
-    expect(init).toContain("default to `./REPO`");
+    expect(init).toContain("default to `./name`");
     expect(init).toContain("machine-local links file");
     expect(init).toContain("never embeds the source-project association");
     expect(init).toContain("unambiguous authoritative task context");
     expect(init).toContain("ask the user; never invent, combine, or replace it");
     expect(init).toContain("ordinary `git init`");
     expect(init).toContain("Git's effective default-branch configuration");
-    expect(init).toContain("command -v gh");
-    expect(init).toContain("gh auth status --hostname github.com");
-    expect(init).toContain('gh api "repos/OWNER/REPO"');
-    expect(compactInit).toContain("before writing local files, query the exact `OWNER/REPO`");
-    expect(init).toContain("Proceed only when GitHub gives a definite not-found response");
-    expect(init).toContain("rather than falling back to local-only creation");
-    expect(init).toContain(
-      'node "<skill-directory>/scripts/context-tree.mjs" init --repository "OWNER/REPO" --tree-path "<tree_path>"',
-    );
+    expect(init).toContain('node "<skill-directory>/scripts/context-tree.mjs" init "<name>" --tree-path "<tree_path>"');
     expect(init).toContain("treat its JSON scaffold result as authoritative");
     expect(init).toContain("require it to match the scaffold result contract");
     expect(init).toContain("require `verification.ok === true`");
-    expect(compactInit).toContain("stop before staging or publishing and preserve the generated repository");
-    expect(init).not.toContain('node "<skill-directory>/scripts/context-tree.mjs" policy');
-    expect(init).not.toContain('node "<skill-directory>/scripts/context-tree.mjs" verify');
-    expect(init).toContain("Treat the Git repository and credential-free `origin` created by the CLI as authoritative");
-    expect(init).toContain('git -C "<tree_path>" symbolic-ref --short HEAD');
-    expect(init).toContain("do not run `git init`");
-    expect(init).toContain(
-      "stage only `NODE.md`, `AGENTS.md`, `CLAUDE.md`, and `.github/workflows/validate-context-tree.yml`",
-    );
-    expect(init).toContain("complete staged diff");
+    expect(init).toContain("including the `branch` and `commit` fields");
+    expect(compactInit).toContain("stop and preserve the generated repository");
+    expect(init).toContain("commits exactly `NODE.md`, `AGENTS.md`, `CLAUDE.md`, and");
+    expect(init).toContain("do not configure a remote");
     expect(init).toContain("no GitHub repository was created");
-    expect(init).toContain("credential-free origin is configured");
-    expect(init).toContain("publish only `current_branch`");
-    expect(init).toContain("refs/remotes/origin/<current_branch>");
-    expect(init).toContain("refs/heads/<current_branch>");
-    expect(init).toContain('gh repo edit "OWNER/REPO" --default-branch "<current_branch>"');
-    expect(init).toContain("gh repo view \"OWNER/REPO\" --json defaultBranchRef --jq '.defaultBranchRef.name'");
-    expect(init).toContain("creation and publication succeeded but default-branch configuration failed");
-    expect(compactInit).toContain("report the collision and preserve the local commit");
-    expect(init).not.toContain("--title");
-    expect(init).not.toContain("<default_branch>");
+    expect(init).toContain("context-tree-push skill publishes the tree later");
+    expect(init).not.toMatch(/\bgh\b/u);
+    expect(init).not.toContain("command -v gh");
+    expect(init).not.toContain("credential-free origin");
+  });
+
+  it("keeps publication mechanics in the CLI behind a thin push skill", () => {
+    const push = skillBody("context-tree-push");
+    const compactPush = compactWhitespace(push);
+
+    expect(push).toContain("unambiguous authoritative task context");
+    expect(push).toContain("never invent, combine, or replace it");
+    expect(push).toContain("Reject repository URLs");
+    expect(push).toContain("Support only `github.com`");
+    expect(push).toContain(
+      'node "<skill-directory>/scripts/context-tree.mjs" push "OWNER/REPO" --tree-path "<tree_path>"',
+    );
+    expect(push).toContain("omit the argument only to push through an existing origin");
+    expect(push).toContain("require the push result contract");
+    expect(push).toContain("`uncommittedFiles`");
+    expect(compactPush).toContain("pushing ignores them and never stages or commits");
+    expect(compactPush).toContain("the CLI creates a new private `OWNER/REPO` repository");
+    expect(push).toContain("If GitHub reports that `OWNER/REPO` already exists, stop");
+    expect(push).toContain("Never delete a GitHub repository or overwrite remote history");
+    expect(push).toContain("inspect `gh repo view`, the local remote, and `git ls-remote`");
+    expect(push).not.toContain("gh auth status");
+    expect(push).not.toContain("gh repo edit");
+    expect(push).not.toContain("git remote add");
   });
 
   it("preserves refresh and isolated direct-publication safeguards", () => {
@@ -285,6 +290,9 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     expect(write).toContain('node "<skill-directory>/scripts/context-tree.mjs" diff --tree-path "<task-worktree>"');
     expect(write).toContain('git push origin HEAD:"<defaultBranch>"');
     expect(write).toContain("Use a non-force push");
+    expect(write).toContain('git -C "<tree_path>" merge --ff-only "<taskBranch>"');
+    expect(compactWrite).toContain("no pull-request fallback without a remote");
+    expect(compactWrite).toContain("a local-only tree without an origin is staged at its own `HEAD`");
     expect(write).toContain("initial direct push plus at most two conflict or race retries");
     expect(write).toContain("git rebase origin/<default_branch>");
     expect(write).toContain("resolve ordinary conflicts locally");

@@ -33,7 +33,9 @@ export const CLI_ERROR_CODES = {
   ambiguousLink: "AMBIGUOUS_LINK",
   corruptLink: "CORRUPT_LINK",
   failed: "CONTEXT_TREE_FAILED",
+  noCommits: "NO_COMMITS",
   noLink: "NO_LINK",
+  noRemote: "NO_REMOTE",
   staleLink: "STALE_LINK",
 } as const;
 
@@ -80,6 +82,12 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   }
 });
 
+export const treeNameSchema = z.string().superRefine((value, context) => {
+  if (!/^[A-Za-z\d][A-Za-z\d._-]{0,99}$/u.test(value) || /\.git$/iu.test(value)) {
+    context.addIssue({ code: "custom", message: "Tree name must be a safe single path segment." });
+  }
+});
+
 export const githubRepositoryIdentitySchema = z.string().superRefine((value, context) => {
   const parts = value.split("/");
   const [owner, name] = parts;
@@ -88,10 +96,7 @@ export const githubRepositoryIdentitySchema = z.string().superRefine((value, con
     owner === undefined ||
     name === undefined ||
     !/^[A-Za-z\d](?:[A-Za-z\d-]{0,37}[A-Za-z\d])?$/u.test(owner) ||
-    !/^[A-Za-z\d._-]{1,100}$/u.test(name) ||
-    name === "." ||
-    name === ".." ||
-    /\.git$/iu.test(name)
+    !treeNameSchema.safeParse(name).success
   ) {
     context.addIssue({ code: "custom", message: "Repository must be an explicit GitHub OWNER/REPO identity." });
   }
@@ -209,6 +214,8 @@ export type VerifyTreeReport = z.infer<typeof verifyTreeReportSchema>;
 
 export const scaffoldTreeResultSchema = z
   .object({
+    branch: z.string().trim().min(1),
+    commit: z.string(),
     files: z.array(z.string()),
     root: z.string(),
     schemaVersion: z.literal(SCHEMA_VERSION),
@@ -226,7 +233,9 @@ export type ContextTreeProjectIdentity = z.infer<typeof contextTreeProjectIdenti
 export const contextTreeLinkSchema = z
   .object({
     project: contextTreeProjectIdentitySchema,
-    tree: z.object({ path: absoluteSingleLinePathSchema, repository: githubRepositoryIdentitySchema }).strict(),
+    tree: z
+      .object({ path: absoluteSingleLinePathSchema, repository: githubRepositoryIdentitySchema.optional() })
+      .strict(),
   })
   .strict();
 export type ContextTreeLink = z.infer<typeof contextTreeLinkSchema>;
@@ -275,6 +284,25 @@ export const contextTreeDiffResultSchema = z
   })
   .strict();
 export type ContextTreeDiffResult = z.infer<typeof contextTreeDiffResultSchema>;
+
+export const contextTreePushResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    defaultBranch: z.string().trim().min(1),
+    remote: z
+      .object({
+        name: z.literal("origin"),
+        repository: githubRepositoryIdentitySchema,
+        url: credentialFreeRepositoryUrlSchema,
+      })
+      .strict(),
+    root: absoluteSingleLinePathSchema,
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    sha: z.string(),
+    uncommittedFiles: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ContextTreePushResult = z.infer<typeof contextTreePushResultSchema>;
 
 export const contextTreeCliErrorCodeSchema = z.enum(CLI_ERROR_CODES);
 export type ContextTreeCliErrorCode = z.infer<typeof contextTreeCliErrorCodeSchema>;

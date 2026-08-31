@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -7,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { type CommandRunner, pushTree } from "../src/core/push.js";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
 import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
@@ -48,7 +51,7 @@ beforeEach(() => {
 
 function validTree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context" });
+  scaffoldTree({ path: root, name: "context" });
   return root;
 }
 
@@ -315,19 +318,10 @@ describe("scaffold and policy", () => {
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
-  it("rejects malformed GitHub identities", () => {
+  it("rejects malformed tree names", () => {
     const base = { path: join(tempRoot(), "tree") };
-    for (const repository of [
-      "https://github.com/acme/context",
-      "acme-/context",
-      `${"a".repeat(40)}/context`,
-      "acme/.",
-      "acme/..",
-      "acme/context.git",
-      "acme/context/extra",
-      " acme/context",
-    ]) {
-      expect(() => scaffoldTree({ ...base, repository }), repository).toThrow();
+    for (const name of ["acme/context", "context.git", ".", "..", ".hidden", " context", "a/b/c"]) {
+      expect(() => scaffoldTree({ ...base, name }), name).toThrow();
     }
   });
 
@@ -341,10 +335,27 @@ describe("scaffold and policy", () => {
     symlinkSync(realDirectory, linkedDirectory);
     symlinkSync(join(temporary, "missing"), danglingLink);
     writeFileSync(file, "not a directory\n");
-    const options = { repository: "acme/context" };
+    const options = { name: "context" };
     expect(() => scaffoldTree({ ...options, path: linkedDirectory })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: danglingLink })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
+  });
+
+  it("commits the verified scaffold without configuring an origin", () => {
+    const root = join(tempRoot(), "committed");
+    const result = scaffoldTree({ path: root, name: "context" });
+    expect(result.branch).toBe("trunk");
+    expect(result.commit).toMatch(/^[0-9a-f]{40}$/u);
+    const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"], {
+      encoding: "utf8",
+    });
+    expect(status.stdout).toBe("");
+    const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
+    expect(head.stdout.trim()).toBe(result.commit);
+    const remotes = spawnSync("git", ["-C", root, "remote"], { encoding: "utf8" });
+    expect(remotes.stdout).toBe("");
+    const message = spawnSync("git", ["-C", root, "log", "-1", "--format=%s"], { encoding: "utf8" });
+    expect(message.stdout).toBe("Initialize Context Tree\n");
   });
 
   it("uses Git's effective default branch and initializes the repository", () => {
@@ -361,7 +372,7 @@ describe("scaffold and policy", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = tempRoot();
     try {
-      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/initialize Git repository/u);
+      expect(() => scaffoldTree({ path: root, name: "context" })).toThrow(/initialize Git repository/u);
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
@@ -386,5 +397,128 @@ describe("scaffold and policy", () => {
     const root = validTree();
     writeFileSync(join(root, "legacy.md"), '---\ntitle: "Legacy metadata"\nowners: false\n---\n');
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+  });
+});
+
+describe("push", () => {
+  type Script = (command: string, args: string[]) => { status?: number; stderr?: string; stdout?: string } | undefined;
+
+  function scriptedRunner(script: Script, log: string[][] = []): CommandRunner {
+    return (command, args) => {
+      log.push([command, ...args]);
+      const response = script(command, args);
+      return { status: response?.status ?? 0, stderr: response?.stderr ?? "", stdout: response?.stdout ?? "" };
+    };
+  }
+
+  function pushError(run: () => unknown): { code: string | undefined; message: string } {
+    try {
+      run();
+    } catch (error) {
+      return { code: (error as { code?: string }).code, message: (error as Error).message };
+    }
+    throw new Error("Expected push to fail.");
+  }
+
+  function scaffold(): string {
+    const root = join(tempRoot(), "push-tree");
+    return scaffoldTree({ path: root, name: "context" }).root;
+  }
+
+  function originRunner(origin: string | undefined, log: string[][]): CommandRunner {
+    return scriptedRunner((command, args) => {
+      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
+      if (command === "git" && args[2] === "rev-parse") return { stdout: "a".repeat(40) };
+      if (command === "git" && args[2] === "status") return { stdout: "?? notes.md\n" };
+      if (command === "git" && args[2] === "remote" && args[3] === "get-url") {
+        return origin === undefined ? { status: 1 } : { stdout: origin };
+      }
+      if (command === "git" && args[2] === "ls-remote") return { stdout: "ref: refs/heads/main\tHEAD\n" };
+      return undefined;
+    }, log);
+  }
+
+  it("refuses to push commits before they exist", () => {
+    const root = scaffold();
+    const log: string[][] = [];
+    const runner = scriptedRunner((command, args) => {
+      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
+      if (command === "git" && args[2] === "rev-parse") return { status: 1 };
+      return undefined;
+    }, log);
+    const failure = pushError(() => pushTree({ path: root }, runner));
+    expect(failure.code).toBe("NO_COMMITS");
+  });
+
+  it("creates a private repository, configures origin, pushes, and sets the default branch", () => {
+    const root = scaffold();
+    const log: string[][] = [];
+    const result = pushTree({ path: root, repository: "acme/context" }, originRunner(undefined, log));
+    expect(result).toEqual({
+      branch: "trunk",
+      defaultBranch: "trunk",
+      remote: {
+        name: "origin",
+        repository: "acme/context",
+        url: "https://github.com/acme/context.git",
+      },
+      root: realpathSync(root),
+      schemaVersion: 1,
+      sha: "a".repeat(40),
+      uncommittedFiles: 1,
+    });
+    expect(log).toContainEqual(["gh", "repo", "create", "acme/context", "--private"]);
+    expect(log).toContainEqual([
+      "git",
+      "-C",
+      realpathSync(root),
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/acme/context.git",
+    ]);
+    expect(log).toContainEqual(["git", "-C", realpathSync(root), "push", "--set-upstream", "origin", "trunk"]);
+    expect(log).toContainEqual(["gh", "repo", "edit", "acme/context", "--default-branch", "trunk"]);
+  });
+
+  it("pushes to an existing origin and discovers its default branch", () => {
+    const root = scaffold();
+    const log: string[][] = [];
+    const result = pushTree({ path: root }, originRunner("https://github.com/acme/context.git", log));
+    expect(result.remote).toEqual({
+      name: "origin",
+      repository: "acme/context",
+      url: "https://github.com/acme/context.git",
+    });
+    expect(result.defaultBranch).toBe("main");
+    expect(log.some(([command, ...args]) => command === "gh" && args.join(" ").includes("repo create"))).toBe(false);
+  });
+
+  it("rejects pushing without an origin and without an owner/repository", () => {
+    const root = scaffold();
+    const failure = pushError(() => pushTree({ path: root }, originRunner(undefined, [])));
+    expect(failure.code).toBe("NO_REMOTE");
+  });
+
+  it("rejects an owner/repository that differs from the existing origin", () => {
+    const root = scaffold();
+    const failure = pushError(() =>
+      pushTree({ path: root, repository: "acme/other" }, originRunner("https://github.com/acme/context.git", [])),
+    );
+    expect(failure.message).toContain("different repository");
+  });
+
+  it("surfaces GitHub creation failures with their stderr", () => {
+    const root = scaffold();
+    const runner = scriptedRunner((command, args) => {
+      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
+      if (command === "git" && args[2] === "rev-parse") return { stdout: "a".repeat(40) };
+      if (command === "git" && args[2] === "status") return { stdout: "" };
+      if (command === "git" && args[2] === "remote" && args[3] === "get-url") return { status: 1 };
+      if (command === "gh") return { status: 1, stderr: "name already exists on this account" };
+      return undefined;
+    });
+    const failure = pushError(() => pushTree({ path: root, repository: "acme/context" }, runner));
+    expect(failure.message).toContain("name already exists on this account");
   });
 });

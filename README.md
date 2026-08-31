@@ -37,7 +37,7 @@ claude plugin install context-tree@context-tree
 
 Marketplace installation requires repository access to
 `first-tree-ai/context-tree`. These selectors resolve the npm `latest` package,
-which must contain the plugin manifests, hook, four skills and launchers, and
+which must contain the plugin manifests, hook, five skills and launchers, and
 `dist/cli/index.mjs`. Review and trust the session-start hook if your host asks.
 
 The plugin uses its own packaged CLI, so plugin users do not need a global CLI
@@ -61,10 +61,10 @@ context-tree --help
 
 ### Initialize or link a tree
 
-Create a new tree and record a local link for the current project:
+Create a new local tree and record a local link for the current project:
 
 ```bash
-context-tree init --repository acme/context --tree-path ./context-tree
+context-tree init context --tree-path ./context-tree
 ```
 
 Or link a project to an existing, verified checkout:
@@ -73,11 +73,28 @@ Or link a project to an existing, verified checkout:
 context-tree link --project-path ./service --tree-path ./context-tree
 ```
 
-If `init` omits `--tree-path`, it creates `./REPO`, using the repository name
-verbatim as the directory and tree title. Scaffolding is create-only. It runs
-ordinary `git init`, configures a credential-free GitHub origin, and creates a
-validation workflow pinned to the package version and selected initial branch.
-The init skill, rather than the CLI, owns the initial commit and any publication.
+If `init` omits `--tree-path`, it creates `./name`, using the tree name verbatim
+as the directory and title. Scaffolding is local-only and create-only: it runs
+ordinary `git init`, commits the four scaffold files on Git's effective default
+branch, creates a validation workflow pinned to the package version, and never
+configures a Git remote or contacts GitHub.
+
+### Publish a local tree
+
+Link a local tree to GitHub when you are ready; until then every link, read,
+write, and verify command works with plain Git alone:
+
+```bash
+context-tree push acme/context --tree-path ./context-tree
+```
+
+`push` with an `owner/repo` creates a new **private** GitHub repository through
+the GitHub CLI, configures the credential-free origin, pushes the current
+branch, and sets it as the default branch. `push` without an argument pushes
+committed state through an existing origin. It only ever publishes commits:
+uncommitted changes are ignored and reported as `uncommittedFiles` in the
+result. A recorded link picks up the repository identity automatically on the
+next `resolve`; relinking is unnecessary.
 
 ### Resolve, refresh, read, and verify
 
@@ -107,11 +124,13 @@ context-tree stage --project-path ./service
 context-tree diff ./prepared-worktree --base HEAD
 ```
 
-`stage` fetches the live default branch and creates an isolated worktree at its
-exact commit. After edits, `diff` reports all pending changes against the given
-base (`HEAD` by default). These are preparation and inspection commands: there
-is no CLI publish command. The write skill edits, verifies, reviews, commits,
-rebases when necessary, and publishes the result.
+For a published tree, `stage` fetches the live default branch and creates an
+isolated worktree at its exact commit; a local-only tree stages from its own
+`HEAD`. After edits, `diff` reports all pending changes against the given base
+(`HEAD` by default). These are preparation and inspection commands. The write
+skill edits, verifies, reviews, commits, and publishes: directly to the default
+branch for published trees, or by fast-forwarding the local checkout for
+local-only trees.
 
 ### Retrieve the policy
 
@@ -127,12 +146,13 @@ This returns the canonical policy packaged with the installed version.
 | --- | --- | --- |
 | `link` | Link a project to a verified checkout | `--project-path <path>`, `--tree-path <path>` |
 | `resolve` | Resolve a project's recorded link | `--project-path <path>` (default `.`) |
-| `refresh` | Fast-forward a linked tree to its live default branch | `--project-path <path>` (default `.`) |
+| `refresh` | Fast-forward a linked tree to its live default branch | `--project-path <path>` (default `.`); errors `NO_REMOTE` for local-only trees |
 | `stage` | Prepare an isolated worktree for a write | `--project-path <path>` (default `.`) |
 | `diff` | Inspect changes in a prepared worktree | `[tree-path]` (default `.`), `--base <ref>` (default `HEAD`) |
-| `init` | Scaffold a new tree | `--repository <owner/repo>`, optional `--tree-path <path>` |
+| `init` | Scaffold a new local tree with an initial commit | `<name>`, optional `--tree-path <path>` (default `./name`) |
 | `policy` | Print the packaged Context Tree policy | None |
 | `read` | Read a node or Markdown leaf | `[path]` (default `.`), `--tree-path <path>` (default `.`) |
+| `push` | Create a private GitHub repository when needed and push committed state | `[owner/repo]`, `--tree-path <path>` (default `.`) |
 | `verify` | Validate tree structure and safety | `--tree-path <path>` (default `.`) |
 
 Successful commands and runtime or argument failures emit one
@@ -150,20 +170,22 @@ search for moved checkouts, so use the link skill again to repair a stale link.
 - **Credentials:** The core and CLI neither manage credentials nor perform
   authenticated GitHub operations. Repository URLs containing credentials are
   rejected and never logged; host Git and GitHub CLI own authentication.
-- **Checkout validation:** Linking requires a clean, exact Git root with a safe
-  GitHub origin and a fully valid tree. Resolution fails closed for symlinks,
-  moved paths, dirty trees, origin mismatches, and invalid roots. `init` has a
-  narrow exception for its four new uncommitted scaffold files.
+- **Checkout validation:** Linking requires a clean, exact Git root and a fully
+  valid tree; a tree may be local-only or published with a safe GitHub origin.
+  Resolution fails closed for symlinks, moved paths, dirty trees, repository
+  mismatches, and invalid roots.
 - **Git operations:** Reads fast-forward only. Writes start from a freshly
-  fetched default-branch commit in an isolated worktree and never force-push.
-  Commit SHAs identify shared snapshots.
+  fetched default-branch commit (or local `HEAD` for unpublished trees) in an
+  isolated worktree and never force-push. Commit SHAs identify shared snapshots.
+  `push` publishes committed state only, always creates private repositories,
+  and never commits uncommitted work.
 - **Hooks:** Session and subagent hooks inject only a resolved tree identity and
   path. They are silent when no link matches and never fetch, clone, or mutate.
   They use only the plugin's packaged CLI and warn if it is unavailable.
-- **Write fallback:** The write skill retries bounded concurrent updates. If a
-  direct push is denied or retries are exhausted, it opens a conflict-free PR
-  from the latest default branch without merging it or requesting reviewers.
-  Each write and commit is scoped to one concrete source.
+- **Write fallback:** For published trees, the write skill retries bounded
+  concurrent updates. If a direct push is denied or retries are exhausted, it
+  opens a conflict-free PR from the latest default branch without merging it or
+  requesting reviewers. Each write and commit is scoped to one concrete source.
 
 For tree structure, link replacement rules, validation boundaries, memory
 selection, read/write lifecycle details, and exact public contracts, see the

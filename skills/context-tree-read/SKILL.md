@@ -40,10 +40,16 @@ it to the discovered live default branch, and reports the resulting commit. Do
 not scan, clone, repair, or run Git yourself. Stop immediately if the command
 fails; a failed or stale refresh never becomes the base for a read.
 
-If refresh fails, stop by default. Continue only when the user explicitly
-authorizes a stale read, require the reported local commit `sha` to remain the
-link base, and disclose the refresh failure and exact `sha`. Treat a stale
-checkout as read-only; never base a write on it.
+A `NO_REMOTE` failure means the linked tree is local-only and has never been
+published. Continue only by verifying and reading that local checkout as-is,
+disclose that the read came from an unpublished local tree without a refresh
+commit `sha`, and treat the tree exactly like a stale checkout for write
+authorization purposes.
+
+If refresh fails for any other reason, stop by default. Continue only when the
+user explicitly authorizes a stale read, require the reported local commit `sha`
+to remain the link base, and disclose the refresh failure and exact `sha`. Treat
+a stale checkout as read-only; never base a write on it.
 
 ## Read
 

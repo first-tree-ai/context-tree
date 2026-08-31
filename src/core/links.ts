@@ -33,8 +33,7 @@ const contextTreeLinksFileSchema = z
   .strict();
 type ContextTreeLinksFile = z.infer<typeof contextTreeLinksFileSchema>;
 
-type Checkout = { path: string; repository: string };
-type CheckoutMode = "link" | "scaffold";
+type Checkout = { path: string; repository?: string };
 
 export class LinkError extends Error {
   public readonly code: (typeof CLI_ERROR_CODES)[keyof typeof CLI_ERROR_CODES];
@@ -157,30 +156,20 @@ function exactCheckoutRoot(treePath: string): string {
   return root;
 }
 
-function checkoutRepository(root: string): string {
-  const origin = requireGit(root, ["remote", "get-url", "origin"], "Context Tree checkout must have an origin remote.");
+function checkoutRepository(root: string): string | undefined {
+  const origin = git(root, ["remote", "get-url", "origin"]);
+  if (origin === undefined || origin.length === 0) return undefined;
   return repositoryIdentityFromGitHubUrl(origin);
 }
 
-function requireCheckoutClean(root: string, mode: CheckoutMode): void {
+function requireCheckoutClean(root: string): void {
   const status = requireGit(
     root,
     ["status", "--porcelain", "--untracked-files=all"],
     "Failed to inspect Context Tree cleanliness.",
     true,
   );
-  if (status.length === 0) return;
-  if (mode === "scaffold") {
-    const lines = status.split("\n").sort();
-    const expected = ["?? .github/workflows/validate-context-tree.yml", "?? AGENTS.md", "?? CLAUDE.md", "?? NODE.md"];
-    if (
-      git(root, ["rev-parse", "--verify", "HEAD"]) === undefined &&
-      JSON.stringify(lines) === JSON.stringify(expected)
-    ) {
-      return;
-    }
-  }
-  throw new Error("Context Tree checkout must be clean.");
+  if (status.length !== 0) throw new Error("Context Tree checkout must be clean.");
 }
 
 function parseRootNode(root: string): ReturnType<typeof parseContextTreeRootNode> {
@@ -190,13 +179,13 @@ function parseRootNode(root: string): ReturnType<typeof parseContextTreeRootNode
   return parseContextTreeRootNode(readUtf8File(path));
 }
 
-function verifyCheckout(treePath: string, mode: CheckoutMode): Checkout {
+function verifyCheckout(treePath: string): Checkout {
   const root = exactCheckoutRoot(treePath);
-  requireCheckoutClean(root, mode);
+  requireCheckoutClean(root);
   const repository = checkoutRepository(root);
   const verification = verifyTree(root);
   if (!verification.ok) throw new Error("Context Tree checkout is invalid; run context-tree verify.");
-  return { path: root, repository };
+  return repository === undefined ? { path: root } : { path: root, repository };
 }
 
 function sameProject(left: ContextTreeProjectIdentity, right: ContextTreeProjectIdentity): boolean {
@@ -214,15 +203,20 @@ function projectMatches(candidate: ContextTreeProjectIdentity, current: ContextT
 function liveStoredCheckout(link: ContextTreeLink): Checkout | undefined {
   try {
     const path = exactCheckoutRoot(link.tree.path);
-    return { path, repository: checkoutRepository(path) };
+    const repository = checkoutRepository(path);
+    return repository === undefined ? { path } : { path, repository };
   } catch {
     return undefined;
   }
 }
 
-function linkWithMode(projectPath: string, treePath: string, mode: CheckoutMode): ContextTreeLinkResult {
+function repositoryIdentity(repository: string | undefined): string | undefined {
+  return repository?.toLowerCase();
+}
+
+export function linkProject(projectPath: string, treePath: string): ContextTreeLinkResult {
   const project = identifyProject(projectPath);
-  const tree = verifyCheckout(treePath, mode);
+  const tree = verifyCheckout(treePath);
   const stored = loadLinks(false);
   const existing = stored.links.filter((link) => sameProject(link.project, project));
   if (existing.length > 1) {
@@ -230,12 +224,14 @@ function linkWithMode(projectPath: string, treePath: string, mode: CheckoutMode)
   }
   const previous = existing[0];
   if (previous !== undefined) {
-    if (previous.tree.repository.toLowerCase() !== tree.repository.toLowerCase()) {
+    const previousIdentity = repositoryIdentity(previous.tree.repository);
+    const treeIdentity = repositoryIdentity(tree.repository);
+    if (previousIdentity !== undefined && treeIdentity !== undefined && previousIdentity !== treeIdentity) {
       throw new Error("A project cannot link to a different Context Tree repository.");
     }
     if (previous.tree.path !== tree.path) {
       const live = liveStoredCheckout(previous);
-      if (live !== undefined && live.repository.toLowerCase() === previous.tree.repository.toLowerCase()) {
+      if (live !== undefined && repositoryIdentity(live.repository) === previousIdentity) {
         throw new Error(
           "The existing Context Tree checkout is still live; replacement is allowed only when it is stale.",
         );
@@ -248,14 +244,6 @@ function linkWithMode(projectPath: string, treePath: string, mode: CheckoutMode)
     schemaVersion: SCHEMA_VERSION,
   });
   return { link, schemaVersion: SCHEMA_VERSION };
-}
-
-export function linkProject(projectPath: string, treePath: string): ContextTreeLinkResult {
-  return linkWithMode(projectPath, treePath, "link");
-}
-
-export function linkScaffoldedProject(projectPath: string, treePath: string): ContextTreeLinkResult {
-  return linkWithMode(projectPath, treePath, "scaffold");
 }
 
 export function resolveLink(projectPath: string): ContextTreeLinkResult {
@@ -272,13 +260,24 @@ export function resolveLink(projectPath: string): ContextTreeLinkResult {
   if (link === undefined) throw new Error("Link lookup failed.");
   try {
     const root = exactCheckoutRoot(link.tree.path);
-    requireCheckoutClean(root, "link");
+    requireCheckoutClean(root);
     const repository = checkoutRepository(root);
-    if (repository.toLowerCase() !== link.tree.repository.toLowerCase()) {
+    const storedIdentity = repositoryIdentity(link.tree.repository);
+    const liveIdentity = repositoryIdentity(repository);
+    if (storedIdentity !== undefined && storedIdentity !== liveIdentity) {
       throw new Error("The linked path now contains a different Context Tree repository.");
     }
     parseRootNode(root);
-    const live: ContextTreeLink = { project: link.project, tree: { path: root, repository } };
+    const live: ContextTreeLink = {
+      project: link.project,
+      tree: repository === undefined ? { path: root } : { path: root, repository },
+    };
+    if (storedIdentity === undefined && liveIdentity !== undefined) {
+      saveLinks({
+        links: stored.links.map((candidate) => (candidate === link ? live : candidate)),
+        schemaVersion: SCHEMA_VERSION,
+      });
+    }
     return { link: live, schemaVersion: SCHEMA_VERSION };
   } catch (error) {
     const message =

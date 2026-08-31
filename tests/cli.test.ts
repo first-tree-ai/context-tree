@@ -20,6 +20,7 @@ import {
   contextTreeCliErrorEnvelopeSchema,
   contextTreeLinkResultSchema,
   contextTreePolicySchema,
+  contextTreePushResultSchema,
   contextTreeReadResultSchema,
   contextTreeStageResultSchema,
   scaffoldTreeResultSchema,
@@ -83,16 +84,7 @@ function git(cwd: string, args: string[], linkHome: string): void {
   if (result.status !== 0) throw new Error(result.stderr);
 }
 
-function commitTree(treePath: string, linkHome: string): void {
-  git(treePath, ["add", "NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"], linkHome);
-  git(
-    treePath,
-    ["-c", "user.name=Context Tree Test", "-c", "user.email=test@example.com", "commit", "-m", "Initialize tree"],
-    linkHome,
-  );
-}
-
-const INIT_ARGS = ["--repository", "acme/context", "--tree-path", "tree"];
+const INIT_ARGS = ["context", "--tree-path", "tree"];
 
 describe("built CLI", () => {
   it("exposes the portable link and tree commands", () => {
@@ -104,6 +96,7 @@ describe("built CLI", () => {
       "init",
       "link",
       "policy",
+      "push",
       "read",
       "refresh",
       "resolve",
@@ -132,9 +125,7 @@ describe("built CLI", () => {
     expect(lstatSync(resolve(cwd, "tree/CLAUDE.md")).isSymbolicLink()).toBe(true);
     expect(readlinkSync(resolve(cwd, "tree/CLAUDE.md"))).toBe("AGENTS.md");
     expect(existsSync(resolve(cwd, "tree/.git"))).toBe(true);
-    expect(readFileSync(resolve(cwd, "tree/.git/config"), "utf8")).toContain(
-      "url = https://github.com/acme/context.git",
-    );
+    expect(readFileSync(resolve(cwd, "tree/.git/config"), "utf8")).not.toContain("remote");
     expect(existsSync(resolve(cwd, ".context-tree/connections.json"))).toBe(true);
     const workflowPath = resolve(cwd, "tree/.github/workflows/validate-context-tree.yml");
     expect(existsSync(workflowPath)).toBe(true);
@@ -159,7 +150,7 @@ describe("built CLI", () => {
   it("defaults init to cwd/REPO and derives its title from REPO", () => {
     const cwd = workspace();
     writeFileSync(resolve(cwd, "gitconfig"), "[init]\n\tdefaultBranch = Release_1\n");
-    const initialized = cli(cwd, ["init", "--repository", "acme/my-context"]);
+    const initialized = cli(cwd, ["init", "my-context"]);
     expect(initialized.status).toBe(0);
     const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
     expect(scaffold.root).toBe(resolve(realpathSync(cwd), "my-context"));
@@ -171,10 +162,10 @@ describe("built CLI", () => {
     );
   });
 
-  it("requires an explicit GitHub identity and reports invalid trees", () => {
+  it("requires a safe tree name and reports invalid trees", () => {
     const cwd = workspace();
-    const missingIdentity = cli(cwd, ["init", "--tree-path", "tree"]);
-    expectCliError(missingIdentity, "CONTEXT_TREE_FAILED");
+    const invalidName = cli(cwd, ["init", "acme/context", "--tree-path", "tree"]);
+    expectCliError(invalidName, "CONTEXT_TREE_FAILED");
 
     expect(cli(cwd, ["init", ...INIT_ARGS]).status).toBe(0);
     rmSync(resolve(cwd, "tree/NODE.md"));
@@ -183,12 +174,7 @@ describe("built CLI", () => {
     const invalidResult = verifyTreeReportSchema.parse(JSON.parse(invalid.stdout));
     expect(invalidResult).toMatchObject({ ok: false, schemaVersion: 1 });
 
-    const generic = cli(cwd, [
-      "init",
-      ...INIT_ARGS.map((value) => (value === "acme/context" ? "https://github.com/acme/context" : value)),
-      "--tree-path",
-      "other",
-    ]);
+    const generic = cli(cwd, ["init", "context.git", "--tree-path", "other"]);
     expectCliError(generic, "CONTEXT_TREE_FAILED");
   });
 
@@ -198,7 +184,7 @@ describe("built CLI", () => {
     mkdirSync(destination);
     writeFileSync(resolve(destination, "keep.txt"), "keep\n");
 
-    const unsafe = cli(cwd, ["init", "--repository", "acme/context", "--tree-path", "existing"]);
+    const unsafe = cli(cwd, ["init", "context", "--tree-path", "existing"]);
     expect(expectCliError(unsafe, "CONTEXT_TREE_FAILED").error.message).toContain("non-empty directory");
     expect(readFileSync(resolve(destination, "keep.txt"), "utf8")).toBe("keep\n");
   });
@@ -211,29 +197,17 @@ describe("built CLI", () => {
     git(project, ["remote", "add", "origin", "git@github.com:acme/service.git"], home);
     mkdirSync(resolve(project, "packages/app"), { recursive: true });
 
-    const initialized = cli(
-      project,
-      ["init", "--repository", "acme/context", "--tree-path", "../tree"],
-      process.env,
-      home,
-    );
+    const initialized = cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home);
     expect(initialized.status).toBe(0);
-    commitTree(resolve(home, "tree"), home);
     const resolvedGit = cli(resolve(project, "packages/app"), ["resolve"], process.env, home);
     expect(resolvedGit.status).toBe(0);
     expect(contextTreeLinkResultSchema.parse(JSON.parse(resolvedGit.stdout)).link.tree).toMatchObject({
-      repository: "acme/context",
+      path: realpathSync(resolve(home, "tree")),
     });
     const plain = resolve(home, "plain");
     mkdirSync(resolve(plain, "nested"), { recursive: true });
-    const second = cli(
-      plain,
-      ["init", "--repository", "acme/plain-tree", "--tree-path", "../plain-tree"],
-      process.env,
-      home,
-    );
+    const second = cli(plain, ["init", "plain-tree", "--tree-path", "../plain-tree"], process.env, home);
     expect(second.status).toBe(0);
-    commitTree(resolve(home, "plain-tree"), home);
     const resolvedPlain = cli(resolve(plain, "nested"), ["resolve"], process.env, home);
     expect(contextTreeLinkResultSchema.parse(JSON.parse(resolvedPlain.stdout)).link.project).toMatchObject({
       kind: "directory",
@@ -247,11 +221,8 @@ describe("built CLI", () => {
     const project = resolve(home, "project");
     mkdirSync(initializer);
     mkdirSync(project);
-    expect(
-      cli(initializer, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(initializer, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
     git(project, ["init", "--quiet"], home);
     git(project, ["remote", "add", "origin", "https://gitlab.example/acme/service.git"], home);
     const beforeNode = readFileSync(resolve(tree, "NODE.md"), "utf8");
@@ -276,11 +247,8 @@ describe("built CLI", () => {
     const home = workspace();
     const project = resolve(home, "project");
     mkdirSync(project);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
     const otherProject = resolve(home, "other-project");
     mkdirSync(otherProject);
 
@@ -291,6 +259,7 @@ describe("built CLI", () => {
       "https://github.com/acme/context.git#fragment-value",
       "https://gitlab.com/acme/context.git",
     ];
+    git(tree, ["remote", "add", "origin", "https://github.com/acme/context.git"], home);
     for (const origin of rejectedOrigins) {
       git(tree, ["remote", "set-url", "origin", origin], home);
       const result = cli(
@@ -313,10 +282,7 @@ describe("built CLI", () => {
     mkdirSync(project);
     expectCliError(cli(project, ["resolve"], process.env, home), "NO_LINK");
 
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
-    commitTree(resolve(home, "tree"), home);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const linkFile = resolve(home, ".context-tree/connections.json");
     const original = JSON.parse(readFileSync(linkFile, "utf8"));
 
@@ -344,12 +310,11 @@ describe("built CLI", () => {
     const home = workspace();
     const project = resolve(home, "project");
     mkdirSync(project);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
     const rootNode = readFileSync(resolve(tree, "NODE.md"), "utf8");
-    commitTree(tree, home);
+    git(tree, ["remote", "add", "origin", "https://github.com/acme/context.git"], home);
+    expect(cli(project, ["resolve"], process.env, home).status).toBe(0);
 
     writeFileSync(resolve(tree, "NODE.md"), '---\ntitle: "Invalid"\n---\n\n# Invalid\n');
     git(tree, ["add", "NODE.md"], home);
@@ -380,11 +345,10 @@ describe("built CLI", () => {
     const home = workspace();
     const project = resolve(home, "project");
     mkdirSync(project);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
+    git(tree, ["remote", "add", "origin", "https://github.com/acme/context.git"], home);
+    expect(cli(project, ["resolve"], process.env, home).status).toBe(0);
 
     const samePath = cli(
       project,
@@ -459,11 +423,8 @@ describe("built CLI", () => {
     const home = workspace();
     const project = resolve(home, "project");
     mkdirSync(project);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
     mkdirSync(resolve(tree, "broken"));
     writeFileSync(resolve(tree, "broken/NODE.md"), "---\ntitle: []\n---\n\n# Broken\n");
     git(tree, ["add", "broken/NODE.md"], home);
@@ -485,11 +446,8 @@ describe("built CLI", () => {
     const home = workspace();
     const project = resolve(home, "project");
     mkdirSync(project);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
     writeFileSync(resolve(tree, "systems.md"), "---\ntitle: systems\n---\n\n# Systems\n");
     git(tree, ["add", "NODE.md", "systems.md"], home);
     git(
@@ -521,11 +479,8 @@ describe("built CLI", () => {
     const remote = resolve(home, "context.git");
     mkdirSync(project);
     git(home, ["init", "--bare", remote], home);
-    expect(
-      cli(project, ["init", "--repository", "acme/context", "--tree-path", "../tree"], process.env, home).status,
-    ).toBe(0);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
     const tree = resolve(home, "tree");
-    commitTree(tree, home);
     git(tree, ["push", remote, "trunk"], home);
     const gitExecutable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
     const fakeBin = resolve(home, "bin");
@@ -547,5 +502,108 @@ describe("built CLI", () => {
     });
     expect(result.link.tree.path).toBe(realpathSync(tree));
     expect(existsSync(result.worktreePath)).toBe(true);
+  });
+
+  it("supports local-only trees with staging from HEAD and NO_REMOTE refresh", () => {
+    const home = workspace();
+    const project = resolve(home, "project");
+    mkdirSync(project);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
+    const tree = resolve(home, "tree");
+
+    const stored = JSON.parse(readFileSync(resolve(home, ".context-tree/connections.json"), "utf8"));
+    expect(stored.links[0].tree).toEqual({ path: realpathSync(tree) });
+
+    expectCliError(cli(project, ["refresh"], process.env, home), "NO_REMOTE");
+
+    const staged = cli(project, ["stage"], process.env, home);
+    expect(staged.status, staged.stdout).toBe(0);
+    const stageResult = contextTreeStageResultSchema.parse(JSON.parse(staged.stdout));
+    workspaces.add(stageResult.worktreePath);
+    expect(stageResult).toMatchObject({
+      baseSha: expect.stringMatching(/^[0-9a-f]{40}$/u),
+      defaultBranch: "trunk",
+    });
+    expect(stageResult.link.tree).toEqual({ path: realpathSync(tree) });
+  });
+
+  it("backfills the stored repository identity after an origin appears", () => {
+    const home = workspace();
+    const project = resolve(home, "project");
+    mkdirSync(project);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
+    const tree = resolve(home, "tree");
+
+    git(tree, ["remote", "add", "origin", "https://github.com/acme/context.git"], home);
+    const resolved = cli(project, ["resolve"], process.env, home);
+    expect(resolved.status).toBe(0);
+    expect(contextTreeLinkResultSchema.parse(JSON.parse(resolved.stdout)).link.tree).toEqual({
+      path: realpathSync(tree),
+      repository: "acme/context",
+    });
+    const stored = JSON.parse(readFileSync(resolve(home, ".context-tree/connections.json"), "utf8"));
+    expect(stored.links[0].tree.repository).toBe("acme/context");
+  });
+
+  it("pushes a committed local tree to a new private repository created through gh", () => {
+    const home = workspace();
+    const project = resolve(home, "project");
+    mkdirSync(project);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
+    const bare = resolve(home, "context.git");
+    const gitExecutable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    const fakeBin = resolve(home, "bin");
+    mkdirSync(fakeBin);
+    const fakeGh = resolve(fakeBin, "gh");
+    writeFileSync(
+      fakeGh,
+      `#!/bin/sh\nif [ "$1" = "repo" ] && [ "$2" = "create" ]; then git init --quiet --bare "${bare}"; exit 0; fi\nexit 0\n`,
+    );
+    chmodSync(fakeGh, 0o755);
+    const fakeGit = resolve(fakeBin, "git");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh\ncase "$*" in\n  *" remote get-url "*)\n    args=""\n    for a in "$@"; do args="$args '$a'"; done\n    if eval "'${gitExecutable}' $args" >/dev/null 2>&1; then\n      echo "https://github.com/acme/context.git"\n      exit 0\n    fi\n    exit 1\n    ;;\nesac\nargs=""\nfor a in "$@"; do\n  case "$a" in\n    https://github.com/acme/context.git) a="${bare}" ;;\n  esac\n  args="$args '$a'"\ndone\neval "exec '${gitExecutable}' $args"\n`,
+    );
+    chmodSync(fakeGit, 0o755);
+    const pushPath = { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` };
+
+    const pushed = cli(project, ["push", "acme/context", "--tree-path", "../tree"], pushPath, home);
+    expect(pushed.status, pushed.stdout).toBe(0);
+    const result = contextTreePushResultSchema.parse(JSON.parse(pushed.stdout));
+    expect(result).toMatchObject({
+      branch: "trunk",
+      defaultBranch: "trunk",
+      remote: { name: "origin", repository: "acme/context", url: "https://github.com/acme/context.git" },
+      schemaVersion: 1,
+      uncommittedFiles: 0,
+    });
+    expect(spawnSync("git", ["-C", bare, "rev-parse", "refs/heads/trunk"], { encoding: "utf8" }).status).toBe(0);
+
+    const resolved = cli(project, ["resolve"], pushPath, home);
+    expect(resolved.status).toBe(0);
+    expect(contextTreeLinkResultSchema.parse(JSON.parse(resolved.stdout)).link.tree).toMatchObject({
+      repository: "acme/context",
+    });
+  });
+
+  it("fails cleanly when GitHub repository creation fails", () => {
+    const home = workspace();
+    const project = resolve(home, "project");
+    mkdirSync(project);
+    expect(cli(project, ["init", "context", "--tree-path", "../tree"], process.env, home).status).toBe(0);
+    const fakeBin = resolve(home, "bin");
+    mkdirSync(fakeBin);
+    const fakeGh = resolve(fakeBin, "gh");
+    writeFileSync(fakeGh, '#!/bin/sh\necho "name already exists on this account" >&2\nexit 1\n');
+    chmodSync(fakeGh, 0o755);
+
+    const pushed = cli(
+      project,
+      ["push", "acme/context", "--tree-path", "../tree"],
+      { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` },
+      home,
+    );
+    expect(expectCliError(pushed, "CONTEXT_TREE_FAILED").error.message).toContain("already exists");
   });
 });

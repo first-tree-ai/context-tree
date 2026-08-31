@@ -1,10 +1,11 @@
 import { resolve } from "node:path";
 
 import { Command, CommanderError } from "commander";
-import { parseGitHubRepositoryIdentity } from "../core/internal/github-repository.js";
 import { readPackageVersion } from "../core/internal/packaged-resource.js";
-import { identifyProject, LinkError, linkProject, linkScaffoldedProject, resolveLink } from "../core/links.js";
+import { identifyProject, LinkError, linkProject, resolveLink } from "../core/links.js";
 import { inspectContextTreeDiff, refreshProject, stageContextWrite } from "../core/live.js";
+import type { PushTreeOptions } from "../core/push.js";
+import { pushTree } from "../core/push.js";
 import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../index.js";
 import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION } from "../schemas.js";
 
@@ -85,11 +86,10 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
 
   program
     .command("init")
-    .description("Scaffold a new Context Tree.")
-    .requiredOption("--repository <owner/repo>", "GitHub repository identity")
-    .option("--tree-path <path>", "destination directory")
-    .action((options: { repository: string; treePath?: string }) => {
-      const repositoryName = parseGitHubRepositoryIdentity(options.repository);
+    .description("Scaffold a new local Context Tree with an initial commit.")
+    .argument("<name>", "Local tree name")
+    .option("--tree-path <path>", "destination directory (default ./<name>)")
+    .action((name: string, options: { treePath?: string }) => {
       const projectPath = resolve(io.cwd());
       let project: ReturnType<typeof identifyProject> | undefined;
       try {
@@ -97,12 +97,20 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       } catch {
         // A Git repository without an unambiguous safe origin is not automatically linked.
       }
-      const result = scaffoldTree({
-        path: resolve(io.cwd(), options.treePath ?? repositoryName),
-        repository: options.repository,
-      });
-      if (project !== undefined) linkScaffoldedProject(projectPath, result.root);
+      const result = scaffoldTree({ name, path: resolve(io.cwd(), options.treePath ?? name) });
+      if (project !== undefined) linkProject(projectPath, result.root);
       line(io, JSON.stringify(result));
+    });
+
+  program
+    .command("push")
+    .description("Create a private GitHub repository when needed and push committed local state.")
+    .argument("[repository]", "GitHub OWNER/REPO to create and push to")
+    .option("--tree-path <path>", "Context Tree root", ".")
+    .action((repository: string | undefined, options: { treePath: string }) => {
+      const pushOptions: PushTreeOptions = { path: resolve(io.cwd(), options.treePath) };
+      if (repository !== undefined) pushOptions.repository = repository;
+      line(io, JSON.stringify(pushTree(pushOptions)));
     });
 
   program
