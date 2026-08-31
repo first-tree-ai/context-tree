@@ -144,15 +144,13 @@ decision, not normal tree content. Keep tree prose current-state: no timeline,
 provenance, PR references, or implementation detail. `context-tree verify` must
 pass before any tree commit.
 
-Authorization comes from the user or host and is enforced through the GitHub
-workflow. Every write uses a freshly fetched exact supplied default branch in
-an isolated clean worktree and changes only necessary non-symlink Markdown.
-After verification and repository checks, publish the commit directly to that
-branch with a non-force push. Resolve concurrent updates by rebasing unpublished
-work onto the latest default branch, resolving evidence-determined conflicts,
-and verifying the complete result again. If direct publication is denied or
-bounded race retries are exhausted, open a conflict-free, non-force fallback PR
-against the supplied default branch and leave it open. Keep each source-backed
-write and commit scoped to one source artifact. An invalid base blocks semantic
-changes; only an explicit repair request may produce a repair-only write and
-commit limited to validator findings.
+Authorization comes from the user or host. Every write synchronizes the connected
+tree's checked-out branch and uses an isolated clean worktree at that exact
+commit. Invocation of the finishing operation authorizes all pending changes in
+that worktree. The lifecycle verifies, commits, and attempts one fast-forward
+merge or one non-force push. If the destination advanced, preserve the outdated
+worktree, prepare from current state, and reapply the intended semantic change
+once. Do not rebase, loop, push manually, or open a fallback pull request. Keep
+each source-backed write and commit scoped to one source artifact. An invalid
+base blocks semantic changes; only an explicit repair request may produce a
+repair-only write and commit limited to validator findings.

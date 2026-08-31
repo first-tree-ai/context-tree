@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-
+import { realpathSync } from "node:fs";
+import { realDirectoryWithoutSymlinks } from "../path.js";
+import type { CommandRunner } from "./git.js";
 import { optionalGit } from "./git.js";
 
 /**
@@ -8,14 +8,9 @@ import { optionalGit } from "./git.js";
  * repository without an origin, a non-Git directory, a Git worktree, and a
  * separate clone are all independent checkouts with their own canonical root.
  */
-export function canonicalProjectRoot(path: string): string {
-  const absolute = resolve(path);
-  const entry = lstatSync(absolute);
-  if (entry.isSymbolicLink() || !entry.isDirectory()) {
-    throw new Error("Project path must be a real directory.");
-  }
-  const directory = realpathSync(absolute);
-  const toplevel = optionalGit(directory, ["rev-parse", "--show-toplevel"]);
+export function canonicalProjectRoot(path: string, runner?: CommandRunner): string {
+  const directory = realDirectoryWithoutSymlinks(path, "Project path");
+  const toplevel = optionalGit(directory, ["rev-parse", "--show-toplevel"], runner);
   if (toplevel === undefined || toplevel.length === 0) return directory;
   return realpathSync(toplevel);
 }

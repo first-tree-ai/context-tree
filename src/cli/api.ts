@@ -1,12 +1,14 @@
 import { resolve } from "node:path";
 
 import { Command, CommanderError } from "commander";
+import { ConnectionError, connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
+import { createProject } from "../core/create.js";
+import { sanitizeCommandOutput } from "../core/internal/git.js";
 import { readPackageVersion } from "../core/internal/packaged-resource.js";
-import { identifyProject, LinkError, linkProject, resolveLink } from "../core/links.js";
-import { inspectContextTreeDiff, refreshProject, stageContextWrite } from "../core/live.js";
-import type { PushTreeOptions } from "../core/push.js";
-import { pushTree } from "../core/push.js";
-import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../index.js";
+import { publishProject } from "../core/publish.js";
+import { syncProject } from "../core/sync.js";
+import { finishContextWrite, prepareContextWrite } from "../core/write.js";
+import { readContextTreePolicy, readTree, verifyTree } from "../index.js";
 import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION } from "../schemas.js";
 
 type ContextTreeCliIo = {
@@ -26,91 +28,99 @@ function line(io: ContextTreeCliIo, value: string): void {
 function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   const program = new Command()
     .name("context-tree")
-    .description("Portable tools for linking, resolving, scaffolding, reading, and validating Context Trees.")
+    .description("Create, connect, list, read, write, and publish Context Trees.")
     .addHelpCommand(false)
     .version(readPackageVersion())
     .exitOverride()
     .configureOutput({ writeErr: () => undefined, writeOut: io.stdout });
 
   program
-    .command("link")
-    .description("Link a project to a verified Context Tree checkout.")
-    .requiredOption("--project-path <path>", "Git project or non-Git project directory")
-    .requiredOption("--tree-path <path>", "Context Tree checkout")
-    .action((options: { projectPath: string; treePath: string }) => {
-      line(
-        io,
-        JSON.stringify(linkProject(resolve(io.cwd(), options.projectPath), resolve(io.cwd(), options.treePath))),
-      );
+    .command("create")
+    .description("Create and connect one uniquely named managed Context Tree for the current project.")
+    .option("--project-path <path>", "project directory", ".")
+    .action((options: { projectPath: string }) => {
+      line(io, JSON.stringify(createProject(resolve(io.cwd(), options.projectPath))));
     });
 
   program
-    .command("policy")
-    .description("Print the canonical packaged Context Tree policy.")
+    .command("connect")
+    .description("Connect the project by managed tree name, GitHub OWNER/REPO, or exact disk path.")
+    .argument("[name-or-repository]", "managed tree name or GitHub OWNER/REPO")
+    .option("--project-path <path>", "project directory", ".")
+    .option("--tree-path <path>", "exact Context Tree Git root to connect in place")
+    .action((target: string | undefined, options: { projectPath: string; treePath?: string }) => {
+      const projectPath = resolve(io.cwd(), options.projectPath);
+      if (target !== undefined && options.treePath !== undefined) {
+        throw new Error("Connect requires exactly one of a name/repository or --tree-path.");
+      }
+      if (target !== undefined) {
+        line(io, JSON.stringify(connectProject({ projectPath, target })));
+        return;
+      }
+      if (options.treePath !== undefined) {
+        line(io, JSON.stringify(connectProject({ projectPath, treePath: resolve(io.cwd(), options.treePath) })));
+        return;
+      }
+      throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
+    });
+
+  program
+    .command("list")
+    .description("List valid clean managed Context Trees.")
     .action(() => {
-      line(io, JSON.stringify(readContextTreePolicy()));
+      line(io, JSON.stringify(listManagedTrees()));
     });
 
   program
     .command("resolve")
-    .description("Resolve the linked Context Tree for a project.")
-    .option("--project-path <path>", "Git project or non-Git project directory", ".")
+    .description("Resolve the connected Context Tree for a project.")
+    .option("--project-path <path>", "project directory", ".")
     .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(resolveLink(resolve(io.cwd(), options.projectPath))));
+      line(io, JSON.stringify(resolveConnection(resolve(io.cwd(), options.projectPath))));
     });
 
   program
-    .command("refresh")
-    .description("Refresh a linked Context Tree to its live default branch.")
-    .option("--project-path <path>", "Git Tree or non-Git project directory", ".")
+    .command("sync")
+    .description("Synchronize the connected Context Tree for a project.")
+    .option("--project-path <path>", "project directory", ".")
     .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(refreshProject(resolve(io.cwd(), options.projectPath))));
+      line(io, JSON.stringify(syncProject(resolve(io.cwd(), options.projectPath))));
     });
 
   program
-    .command("stage")
-    .description("Prepare an isolated Context Tree worktree at the live default branch for a write.")
-    .option("--project-path <path>", "Git Tree or non-Git project directory", ".")
+    .command("prepare-write")
+    .description("Prepare an isolated Context Tree worktree for a write.")
+    .option("--project-path <path>", "project directory", ".")
     .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(stageContextWrite(resolve(io.cwd(), options.projectPath))));
+      line(io, JSON.stringify(prepareContextWrite(resolve(io.cwd(), options.projectPath))));
     });
 
   program
-    .command("diff")
-    .description("Inspect the pending changes of a prepared Context Tree worktree.")
-    .argument("[tree-path]", "Context Tree root", ".")
-    .option("--base <ref>", "Base ref or commit to diff against (default HEAD)")
-    .action((treePath: string, options: { base?: string }) => {
-      line(io, JSON.stringify(inspectContextTreeDiff(resolve(io.cwd(), treePath), options.base)));
+    .command("finish-write")
+    .description("Commit all pending changes in a prepared worktree and publish them.")
+    .requiredOption("--worktree-path <path>", "prepared worktree path")
+    .requiredOption("--message <message>", "commit message for the pending changes")
+    .option("--project-path <path>", "project directory", ".")
+    .action((options: { message: string; projectPath: string; worktreePath: string }) => {
+      line(
+        io,
+        JSON.stringify(
+          finishContextWrite({
+            message: options.message,
+            projectPath: resolve(io.cwd(), options.projectPath),
+            worktreePath: resolve(io.cwd(), options.worktreePath),
+          }),
+        ),
+      );
     });
 
   program
-    .command("init")
-    .description("Scaffold a new local Context Tree with an initial commit.")
-    .argument("<name>", "Local tree name")
-    .option("--tree-path <path>", "destination directory (default ./<name>)")
-    .action((name: string, options: { treePath?: string }) => {
-      const projectPath = resolve(io.cwd());
-      let project: ReturnType<typeof identifyProject> | undefined;
-      try {
-        project = identifyProject(projectPath);
-      } catch {
-        // A Git repository without an unambiguous safe origin is not automatically linked.
-      }
-      const result = scaffoldTree({ name, path: resolve(io.cwd(), options.treePath ?? name) });
-      if (project !== undefined) linkProject(projectPath, result.root);
-      line(io, JSON.stringify(result));
-    });
-
-  program
-    .command("push")
-    .description("Create a private GitHub repository when needed and push committed local state.")
-    .argument("[repository]", "GitHub OWNER/REPO to create and push to")
-    .option("--tree-path <path>", "Context Tree root", ".")
-    .action((repository: string | undefined, options: { treePath: string }) => {
-      const pushOptions: PushTreeOptions = { path: resolve(io.cwd(), options.treePath) };
-      if (repository !== undefined) pushOptions.repository = repository;
-      line(io, JSON.stringify(pushTree(pushOptions)));
+    .command("publish")
+    .description("Publish the local tree as a new private GitHub repository.")
+    .argument("[repository]", "GitHub OWNER/REPO override; defaults to the authenticated account and tree name")
+    .option("--project-path <path>", "project directory", ".")
+    .action((repository: string | undefined, options: { projectPath: string }) => {
+      line(io, JSON.stringify(publishProject(resolve(io.cwd(), options.projectPath), { repository })));
     });
 
   program
@@ -135,11 +145,18 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       if (!result.ok) process.exitCode = 1;
     });
 
+  program
+    .command("policy")
+    .description("Print the canonical packaged Context Tree policy.")
+    .action(() => {
+      line(io, JSON.stringify(readContextTreePolicy()));
+    });
+
   return program;
 }
 
 function sanitizeError(message: string): string {
-  return message.replace(/(?:https?|ssh):\/\/[^\s/@]+@/giu, "<redacted>@");
+  return sanitizeCommandOutput(message);
 }
 
 export async function runContextTreeCli(
@@ -152,7 +169,7 @@ export async function runContextTreeCli(
     return typeof process.exitCode === "number" && process.exitCode !== 0 ? process.exitCode : 0;
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
-    const code = error instanceof LinkError ? error.code : CLI_ERROR_CODES.failed;
+    const code = error instanceof ConnectionError ? error.code : CLI_ERROR_CODES.failed;
     const message = sanitizeError(error instanceof Error ? error.message : String(error));
     const envelope: ContextTreeCliErrorEnvelope = {
       error: { code, message },

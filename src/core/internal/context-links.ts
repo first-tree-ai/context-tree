@@ -28,7 +28,7 @@ function isWindowsAbsoluteTarget(target: string): boolean {
   return /^[a-z]:[\\/]/iu.test(target) || /^\\/u.test(target);
 }
 
-export function isTreeLocalTarget(target: string): boolean {
+function isTreeLocalTarget(target: string): boolean {
   const trimmed = target.trim();
   if (isWindowsAbsoluteTarget(decodeTarget(stripQueryAndFragment(trimmed)))) {
     return true;

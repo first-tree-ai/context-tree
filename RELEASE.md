@@ -30,14 +30,14 @@ configuration instead of the npm `latest` package:
 pnpm test:codex-plugin
 ```
 
-This opens Codex in a temporary unlinked project. Use
+This opens Codex in a temporary unconnected project. Use
 `pnpm test:codex-plugin --check` for a non-interactive installation and hook
 discovery smoke test. Both modes remove their temporary marketplace, plugin
 cache, Codex home, and project when they finish.
 
 Before advertising or releasing the remote marketplace flow, verify that npm
 `latest` contains the `.codex-plugin` and `.claude-plugin` current-client
-adapters, both marketplaces, `hooks`, all four `skills` and their launchers,
+adapters, both marketplaces, `hooks`, and all six `skills`,
 and `dist/cli/index.mjs`. It must not contain a root `plugin.json`, which
 suppresses bundled-hook discovery in Codex 0.151.0. The package
 end-to-end test and `npm pack --dry-run` cover the candidate tarball; checking

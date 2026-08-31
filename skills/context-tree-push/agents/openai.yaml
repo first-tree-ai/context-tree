@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Tree Push"
-  short_description: "Publish a local Context Tree to a new private GitHub repository"
-  default_prompt: "Use $context-tree-push with repository and optional tree_path."

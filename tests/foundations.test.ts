@@ -3,10 +3,18 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CommandError, defaultRunner, gh, git, optionalGh, optionalGit } from "../src/core/internal/git.js";
+import {
+  CommandError,
+  defaultRunner,
+  gh,
+  git,
+  optionalGh,
+  optionalGit,
+  sanitizeCommandOutput,
+} from "../src/core/internal/git.js";
 import { canonicalProjectRoot } from "../src/core/internal/project.js";
-import { resolveTreeState } from "../src/core/internal/tree-state.js";
-import { scaffoldTree } from "../src/index.js";
+import { resolveTreeState, validateStoredTreeState } from "../src/core/internal/tree-state.js";
+import { scaffoldTree } from "../src/core/scaffold.js";
 
 const temporaryRoots = new Set<string>();
 const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
@@ -91,6 +99,18 @@ describe("Git command runner", () => {
     const runner = () => ({ status: 0, stdout: "  value  \n", stderr: "" });
     expect(git("/unused", ["anything"], { runner })).toBe("value");
   });
+
+  it("redacts credentials and tokens from surfaced command failures", () => {
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz123456";
+    const runner = () => ({
+      status: 1,
+      stdout: "",
+      stderr: `failed https://user:pass@github.com/acme/tree.git Authorization: Bearer ${secret}`,
+    });
+    expect(() => git("/unused", ["fetch"], { runner })).toThrow(/<redacted>/u);
+    expect(() => git("/unused", ["fetch"], { runner })).not.toThrow(secret);
+    expect(sanitizeCommandOutput(secret)).toBe("<redacted>");
+  });
 });
 
 describe("canonical project roots", () => {
@@ -135,17 +155,44 @@ describe("canonical project roots", () => {
 });
 
 describe("tree-state resolution", () => {
+  it("uses the injected runner for exact Git-root and cleanliness validation", () => {
+    const root = validTree();
+    rmSync(join(root, ".git"), { force: true, recursive: true });
+    const calls: string[][] = [];
+    const runner = (command: string, args: string[]) => {
+      calls.push([command, ...args]);
+      if (args.includes("--show-toplevel")) return { status: 0, stdout: `${realpathSync(root)}\n`, stderr: "" };
+      if (args.includes("status")) return { status: 0, stdout: "", stderr: "" };
+      return { status: 1, stdout: "", stderr: "unexpected command" };
+    };
+
+    expect(resolveTreeState(root, runner)).toEqual({ kind: "local", path: realpathSync(root) });
+    expect(calls).toEqual([
+      ["git", "-C", realpathSync(root), "rev-parse", "--show-toplevel"],
+      ["git", "-C", realpathSync(root), "status", "--porcelain", "--untracked-files=all"],
+    ]);
+  });
+
   it("resolves a local-only tree without an origin", () => {
     const root = validTree();
     const state = resolveTreeState(root);
     expect(state).toEqual({ kind: "local", path: realpathSync(root) });
   });
 
-  it("resolves a published tree with its GitHub repository identity from the live origin", () => {
+  it("keeps explicitly local state local even when an origin exists", () => {
     const root = validTree();
     run(root, ["remote", "add", "origin", "git@github.com:acme/Context.git"]);
     const state = resolveTreeState(root);
-    expect(state).toEqual({ kind: "github", path: realpathSync(root), repository: "acme/Context" });
+    expect(state).toEqual({ kind: "local", path: realpathSync(root) });
+  });
+
+  it("keeps stored GitHub state GitHub even when its origin is absent", () => {
+    const root = validTree();
+    expect(validateStoredTreeState({ kind: "github", path: root, repository: "acme/context" })).toEqual({
+      kind: "github",
+      path: realpathSync(root),
+      repository: "acme/context",
+    });
   });
 
   it("rejects dirty trees, non-root paths, missing directories, and symlinked paths", () => {
@@ -169,10 +216,18 @@ describe("tree-state resolution", () => {
     expect(() => resolveTreeState(root)).toThrow();
   });
 
-  it("rejects a checkout whose origin is not a safe github.com repository URL", () => {
+  it("does not infer or mutate local state from a credential-bearing origin", () => {
     const root = validTree();
     run(root, ["remote", "add", "origin", "https://token@github.com/acme/context.git"]);
-    expect(() => resolveTreeState(root)).toThrow();
+    expect(resolveTreeState(root)).toEqual({ kind: "local", path: realpathSync(root) });
+  });
+
+  it("rejects an ancestor symlink", () => {
+    const parent = tempRoot();
+    const root = validTree();
+    const alias = join(parent, "alias");
+    symlinkSync(root, alias, "dir");
+    expect(() => resolveTreeState(alias)).toThrow(/symlink component/u);
   });
 
   it("exposes path containment for callers validating derived destinations", () => {

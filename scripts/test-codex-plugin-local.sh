@@ -113,7 +113,7 @@ if [[ $mode == "check" ]]; then
 fi
 
 echo ""
-echo "Starting Codex in an unlinked temporary project."
+echo "Starting Codex in an unconnected temporary project."
 echo 'Try: Use $context-tree-read for this project with agent_slug engineer.'
 echo "Exit Codex to remove the temporary marketplace, plugin, Codex home, and project."
 echo ""

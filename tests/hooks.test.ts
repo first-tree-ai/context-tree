@@ -1,14 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -42,15 +33,15 @@ function run(home: string, cwd: string, command: string, args: string[], input?:
   return { status: result.status, stdout: typeof result.stdout === "string" ? result.stdout : "" };
 }
 
-function initialize(root: string): string {
+function create(root: string): string {
   const project = resolve(root, "project");
   mkdirSync(project);
-  expect(run(root, project, process.execPath, [CLI, "init", "context", "--tree-path", "../tree"]).status).toBe(0);
+  expect(run(root, project, process.execPath, [CLI, "create"]).status).toBe(0);
   return project;
 }
 
 function hook(root: string, cwd: string, event = "SessionStart"): ProcessResult {
-  return run(root, root, process.execPath, [HOOK], JSON.stringify({ cwd, hook_event_name: event }));
+  return run(root, cwd, process.execPath, [HOOK], JSON.stringify({ hook_event_name: event }));
 }
 
 afterEach(() => {
@@ -59,20 +50,20 @@ afterEach(() => {
 });
 
 describe("lifecycle context injection", () => {
-  it("is silent without a link and injects minimal context for sessions and subagents", () => {
+  it("is silent without a connection and injects minimal context for sessions and subagents", () => {
     const root = workspace();
-    const unlinked = resolve(root, "unlinked");
-    mkdirSync(unlinked);
-    expect(hook(root, unlinked).stdout).toBe("");
-    expect(hook(root, unlinked, "UnsupportedEvent").stdout).toBe("");
+    const unconnected = resolve(root, "unconnected");
+    mkdirSync(unconnected);
+    expect(hook(root, unconnected).stdout).toBe("");
+    expect(hook(root, unconnected, "UnsupportedEvent").stdout).toBe("");
 
-    const project = initialize(root);
+    const project = create(root);
     for (const event of ["SessionStart", "SubagentStart"]) {
       const result = hook(root, project, event);
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
         hookSpecificOutput: {
-          additionalContext: expect.stringContaining("Context Tree checkout is linked"),
+          additionalContext: expect.stringMatching(/^Context Tree connected at \/.+/u),
           hookEventName: event,
         },
       });
@@ -100,19 +91,31 @@ describe("lifecycle context injection", () => {
       input: JSON.stringify({ cwd: root, hook_event_name: "SessionStart" }),
     });
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      systemMessage: "Context Tree setup warning: packaged CLI is unavailable.",
-    });
+    expect(result.stdout).toBe("");
     expect(existsSync(marker)).toBe(false);
   });
 
-  it("warns without repairing stale state and shares one script across host manifests", () => {
+  it.each(["CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"])("resolves the packaged CLI through %s", (variable) => {
     const root = workspace();
-    const project = initialize(root);
-    renameSync(resolve(root, "tree"), resolve(root, "moved"));
-    expect(JSON.parse(hook(root, project).stdout)).toMatchObject({
-      systemMessage: expect.stringContaining("no longer a valid clean candidate"),
+    const project = create(root);
+    const env = environment(root);
+    delete env.CLAUDE_PLUGIN_ROOT;
+    env[variable] = resolve(import.meta.dirname, "..");
+    const result = spawnSync(process.execPath, [HOOK], {
+      cwd: project,
+      encoding: "utf8",
+      env,
+      input: JSON.stringify({ hook_event_name: "SessionStart" }),
     });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toMatch(/^Context Tree connected at /u);
+  });
+
+  it("stays silent for stale state and shares one script across host manifests", () => {
+    const root = workspace();
+    const project = create(root);
+    writeFileSync(resolve(root, ".context-tree", "connections.json"), "{broken");
+    expect(hook(root, project).stdout).toBe("");
     expect(readFileSync(resolve(import.meta.dirname, "../hooks/hooks.json"), "utf8")).toContain(
       ["$", "{CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs"].join(""),
     );

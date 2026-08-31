@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Connect"
+  short_description: "Connect a project to durable context"
+  default_prompt: "Use $context-tree-connect with a managed name or OWNER/REPO."

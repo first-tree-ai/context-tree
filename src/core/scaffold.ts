@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { SCHEMA_VERSION, type ScaffoldTreeResult, treeNameSchema } from "../schemas.js";
+import { SCHEMA_VERSION, treeNameSchema, type VerifyTreeReport } from "../schemas.js";
+import { type CommandRunner, git, gitCommand } from "./internal/git.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 import { verifyTree } from "./verify.js";
 
@@ -17,42 +17,35 @@ function template(name: string, values: Record<string, string>): string {
 export type ScaffoldTreeOptions = {
   name: string;
   path: string;
+  runner?: CommandRunner | undefined;
+};
+
+type ScaffoldTreeResult = {
+  branch: string;
+  commit: string;
+  files: string[];
+  root: string;
+  schemaVersion: typeof SCHEMA_VERSION;
+  verification: VerifyTreeReport;
 };
 
 const SCAFFOLD_FILES = ["NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"];
 
-function git(root: string, args: string[], message: string): string {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  if (result.error !== undefined || result.status !== 0) throw new Error(message);
-  return result.stdout.replace(/\r?\n$/u, "");
-}
-
-function initializeGitRepository(root: string): string {
-  const initialized = spawnSync("git", ["init", "--quiet", root], { stdio: "ignore" });
-  if (initialized.error !== undefined || initialized.status !== 0) {
-    throw new Error("Failed to initialize Git repository.");
-  }
-  const branch = spawnSync("git", ["-C", root, "symbolic-ref", "--short", "HEAD"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+function initializeGitRepository(root: string, runner?: CommandRunner): string {
+  gitCommand(["init", "--quiet", "--", root], { message: "Failed to initialize Git repository.", runner });
+  return git(root, ["symbolic-ref", "--short", "HEAD"], {
+    message: "Failed to resolve the initial Git branch during repository initialization.",
+    runner,
   });
-  const name = branch.stdout.replace(/\r?\n$/u, "");
-  if (branch.error !== undefined || branch.status !== 0 || name.length === 0) {
-    throw new Error("Failed to resolve the initial Git branch during repository initialization.");
-  }
-  return name;
 }
 
-function commitScaffold(root: string): string {
+function commitScaffold(root: string, runner?: CommandRunner): string {
   for (const file of SCAFFOLD_FILES) {
-    const added = spawnSync("git", ["-C", root, "add", file], { stdio: "ignore" });
-    if (added.error !== undefined || added.status !== 0) throw new Error("Failed to stage the scaffold files.");
+    git(root, ["add", "--", file], { message: "Failed to stage the scaffold files.", runner });
   }
-  const committed = spawnSync(
-    "git",
+  git(
+    root,
     [
-      "-C",
-      root,
       "-c",
       "user.name=Context Tree",
       "-c",
@@ -64,10 +57,9 @@ function commitScaffold(root: string): string {
       "-m",
       "Initialize Context Tree",
     ],
-    { stdio: "ignore" },
+    { message: "Failed to commit the scaffold.", runner },
   );
-  if (committed.error !== undefined || committed.status !== 0) throw new Error("Failed to commit the scaffold.");
-  return git(root, ["rev-parse", "HEAD"], "Failed to resolve the scaffold commit.");
+  return git(root, ["rev-parse", "HEAD"], { message: "Failed to resolve the scaffold commit.", runner });
 }
 
 export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
@@ -82,7 +74,7 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
       throw new Error(`Refusing to scaffold into a non-empty directory: ${root}`);
     }
   }
-  const initialBranch = initializeGitRepository(root);
+  const initialBranch = initializeGitRepository(root, options.runner);
   const values = {
     branchJson: JSON.stringify(initialBranch),
     packageVersion: readPackageVersion(),
@@ -109,7 +101,7 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
 
   const verification = verifyTree(root);
   if (!verification.ok) throw new Error("Refusing to commit an invalid Context Tree scaffold.");
-  const commit = commitScaffold(root);
+  const commit = commitScaffold(root, options.runner);
 
   return {
     branch: initialBranch,

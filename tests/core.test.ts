@@ -17,8 +17,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type CommandRunner, pushTree } from "../src/core/push.js";
-import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { upsertConnection } from "../src/core/connections.js";
+import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
+import { publishProject } from "../src/core/publish.js";
+import { scaffoldTree } from "../src/core/scaffold.js";
+import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
 import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
@@ -300,7 +303,7 @@ describe("scaffold and policy", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
     expect(workflow).toContain('branches: ["trunk"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.5 verify");
+    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.6 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
@@ -400,125 +403,179 @@ describe("scaffold and policy", () => {
   });
 });
 
-describe("push", () => {
+describe("publish", () => {
+  const originalHome = process.env.HOME;
+  beforeEach(() => {
+    process.env.HOME = tempRoot();
+  });
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+  });
+
   type Script = (command: string, args: string[]) => { status?: number; stderr?: string; stdout?: string } | undefined;
 
   function scriptedRunner(script: Script, log: string[][] = []): CommandRunner {
     return (command, args) => {
       log.push([command, ...args]);
       const response = script(command, args);
+      if (response === undefined && command === "git") return defaultRunner(command, args);
       return { status: response?.status ?? 0, stderr: response?.stderr ?? "", stdout: response?.stdout ?? "" };
     };
   }
 
-  function pushError(run: () => unknown): { code: string | undefined; message: string } {
+  function publishError(run: () => unknown): { code: string | undefined; message: string } {
     try {
       run();
     } catch (error) {
       return { code: (error as { code?: string }).code, message: (error as Error).message };
     }
-    throw new Error("Expected push to fail.");
+    throw new Error("Expected publish to fail.");
   }
 
-  function scaffold(): string {
-    const root = join(tempRoot(), "push-tree");
-    return scaffoldTree({ path: root, name: "context" }).root;
+  function linkedProject(): { project: string; tree: string } {
+    const project = join(tempRoot(), "service");
+    mkdirSync(project, { recursive: true });
+    const tree = join(process.env.HOME ?? "", ".context-tree", "trees", "publish-tree");
+    mkdirSync(join(process.env.HOME ?? "", ".context-tree", "trees"), { recursive: true });
+    scaffoldTree({ path: tree, name: "context" });
+    const realProject = realpathSync(project);
+    const realTree = realpathSync(tree);
+    upsertConnection({ projectPath: realProject, tree: { kind: "local", path: realTree } });
+    return { project: realProject, tree: realTree };
   }
 
-  function originRunner(origin: string | undefined, log: string[][]): CommandRunner {
+  function accountRunner(log: string[][]): CommandRunner {
     return scriptedRunner((command, args) => {
-      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
-      if (command === "git" && args[2] === "rev-parse") return { stdout: "a".repeat(40) };
-      if (command === "git" && args[2] === "status") return { stdout: "?? notes.md\n" };
-      if (command === "git" && args[2] === "remote" && args[3] === "get-url") {
-        return origin === undefined ? { status: 1 } : { stdout: origin };
-      }
-      if (command === "git" && args[2] === "ls-remote") return { stdout: "ref: refs/heads/main\tHEAD\n" };
+      if (command === "gh" && args[0] === "api") return { stdout: "octocat\n" };
       return undefined;
     }, log);
   }
 
-  it("refuses to push commits before they exist", () => {
-    const root = scaffold();
+  it("creates the default private repository for the authenticated account and managed tree name", () => {
+    const { project, tree } = linkedProject();
     const log: string[][] = [];
-    const runner = scriptedRunner((command, args) => {
-      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
-      if (command === "git" && args[2] === "rev-parse") return { status: 1 };
-      return undefined;
-    }, log);
-    const failure = pushError(() => pushTree({ path: root }, runner));
-    expect(failure.code).toBe("NO_COMMITS");
-  });
-
-  it("creates a private repository, configures origin, pushes, and sets the default branch", () => {
-    const root = scaffold();
-    const log: string[][] = [];
-    const result = pushTree({ path: root, repository: "acme/context" }, originRunner(undefined, log));
+    const result = publishProject(project, {}, accountRunner(log));
     expect(result).toEqual({
       branch: "trunk",
-      defaultBranch: "trunk",
-      remote: {
-        name: "origin",
-        repository: "acme/context",
-        url: "https://github.com/acme/context.git",
-      },
-      root: realpathSync(root),
+      repository: "octocat/publish-tree",
       schemaVersion: 1,
-      sha: "a".repeat(40),
-      uncommittedFiles: 1,
+      sha: expect.stringMatching(/^[a-f\d]{40}$/u),
+      url: "https://github.com/octocat/publish-tree.git",
     });
-    expect(log).toContainEqual(["gh", "repo", "create", "acme/context", "--private"]);
     expect(log).toContainEqual([
-      "git",
-      "-C",
-      realpathSync(root),
-      "remote",
-      "add",
+      "gh",
+      "repo",
+      "create",
+      "octocat/publish-tree",
+      "--private",
+      "--source",
+      tree,
+      "--remote",
       "origin",
-      "https://github.com/acme/context.git",
+      "--push",
     ]);
-    expect(log).toContainEqual(["git", "-C", realpathSync(root), "push", "--set-upstream", "origin", "trunk"]);
-    expect(log).toContainEqual(["gh", "repo", "edit", "acme/context", "--default-branch", "trunk"]);
   });
 
-  it("pushes to an existing origin and discovers its default branch", () => {
-    const root = scaffold();
+  it("accepts an explicit OWNER/REPO override without contacting the account", () => {
+    const { project } = linkedProject();
     const log: string[][] = [];
-    const result = pushTree({ path: root }, originRunner("https://github.com/acme/context.git", log));
-    expect(result.remote).toEqual({
-      name: "origin",
-      repository: "acme/context",
-      url: "https://github.com/acme/context.git",
+    const runner = scriptedRunner(() => undefined, log);
+    const result = publishProject(project, { repository: "acme/Context" }, runner);
+    expect(result.repository).toBe("acme/Context");
+    expect(log.some(([command, ...args]) => command === "gh" && args[0] === "api")).toBe(false);
+  });
+
+  it("rejects local state that already has an origin", () => {
+    const { project, tree } = linkedProject();
+    const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
+      encoding: "utf8",
     });
-    expect(result.defaultBranch).toBe("main");
-    expect(log.some(([command, ...args]) => command === "gh" && args.join(" ").includes("repo create"))).toBe(false);
-  });
-
-  it("rejects pushing without an origin and without an owner/repository", () => {
-    const root = scaffold();
-    const failure = pushError(() => pushTree({ path: root }, originRunner(undefined, [])));
-    expect(failure.code).toBe("NO_REMOTE");
-  });
-
-  it("rejects an owner/repository that differs from the existing origin", () => {
-    const root = scaffold();
-    const failure = pushError(() =>
-      pushTree({ path: root, repository: "acme/other" }, originRunner("https://github.com/acme/context.git", [])),
+    if (added.status !== 0) throw new Error(added.stderr);
+    const failure = publishError(() =>
+      publishProject(
+        project,
+        { repository: "acme/context" },
+        scriptedRunner(() => undefined),
+      ),
     );
-    expect(failure.message).toContain("different repository");
+    expect(failure.code).toBe("CONTEXT_TREE_FAILED");
+    expect(failure.message).toContain("must not already have an origin");
   });
 
-  it("surfaces GitHub creation failures with their stderr", () => {
-    const root = scaffold();
+  it("rejects an already published tree", () => {
+    const { project, tree } = linkedProject();
+    const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
+      encoding: "utf8",
+    });
+    if (added.status !== 0) throw new Error(added.stderr);
+    upsertConnection({ projectPath: project, tree: { kind: "github", path: tree, repository: "acme/context" } });
+    const failure = publishError(() => publishProject(project, {}, accountRunner([])));
+    expect(failure.code).toBe("CONTEXT_TREE_FAILED");
+    expect(failure.message).toContain("already published");
+  });
+
+  it("reports repository name collisions as REPOSITORY_EXISTS", () => {
+    const { project } = linkedProject();
     const runner = scriptedRunner((command, args) => {
-      if (command === "git" && args[2] === "symbolic-ref") return { stdout: "trunk" };
-      if (command === "git" && args[2] === "rev-parse") return { stdout: "a".repeat(40) };
-      if (command === "git" && args[2] === "status") return { stdout: "" };
-      if (command === "git" && args[2] === "remote" && args[3] === "get-url") return { status: 1 };
-      if (command === "gh") return { status: 1, stderr: "name already exists on this account" };
+      if (command === "gh" && args[0] === "repo") return { status: 1, stderr: "owner/name already exists" };
       return undefined;
     });
-    const failure = pushError(() => pushTree({ path: root, repository: "acme/context" }, runner));
-    expect(failure.message).toContain("name already exists on this account");
+    const failure = publishError(() => publishProject(project, { repository: "acme/context" }, runner));
+    expect(failure.code).toBe("REPOSITORY_EXISTS");
+  });
+
+  it("reports missing GitHub authentication as GITHUB_AUTH", () => {
+    const { project } = linkedProject();
+    const runner = scriptedRunner((command) =>
+      command === "gh" ? { status: 1, stderr: "gh auth login required" } : undefined,
+    );
+    const failure = publishError(() => publishProject(project, {}, runner));
+    expect(failure.code).toBe("GITHUB_AUTH");
+  });
+
+  it.each(["network unreachable", "HTTP 403 permission denied"])(
+    "reports ambiguous account lookup failure %j as PUBLISH_INCOMPLETE",
+    (stderr) => {
+      const { project } = linkedProject();
+      const runner = scriptedRunner((command, args) => {
+        if (command === "gh" && args[0] === "api") return { status: 1, stderr };
+        return undefined;
+      });
+      const failure = publishError(() => publishProject(project, {}, runner));
+      expect(failure.code).toBe("PUBLISH_INCOMPLETE");
+    },
+  );
+
+  it.each([
+    "gh auth login required",
+    "HTTP 403 permission denied",
+    "network unreachable",
+    "repository created but push failed",
+  ])("surfaces ambiguous publication failure %j as PUBLISH_INCOMPLETE", (stderr) => {
+    const { project } = linkedProject();
+    const runner = scriptedRunner((command, args) => {
+      if (command === "gh" && args[0] === "repo") return { status: 1, stderr };
+      return undefined;
+    });
+    const failure = publishError(() => publishProject(project, { repository: "acme/context" }, runner));
+    expect(failure.code).toBe("PUBLISH_INCOMPLETE");
+  });
+
+  it("refuses to publish an invalid tree", () => {
+    const { project, tree } = linkedProject();
+    // A clean but structurally invalid tree fails verification at publish time.
+    const members = join(tree, "members", "engineer");
+    mkdirSync(members, { recursive: true });
+    writeFileSync(join(members, "memory.md"), '---\ntitle: "Memory"\n---\n\n# Memory\n');
+    const gitRun = (args: string[]): void => {
+      const result = spawnSync("git", ["-C", tree, ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(result.stderr);
+    };
+    gitRun(["add", "."]);
+    gitRun(["-c", "user.name=T", "-c", "user.email=t@example.test", "commit", "--quiet", "-m", "invalid"]);
+    const failure = publishError(() => publishProject(project, {}, accountRunner([])));
+    expect(failure.code).toBe("STALE_CONNECTION");
+    expect(failure.message).toContain("invalid");
   });
 });

@@ -5,12 +5,12 @@
     "url": "https://github.com/first-tree-ai"
   },
   "metadata": {
-    "description": "Install the complete Context Tree plugin for linked, durable project context."
+    "description": "Install the Context Tree plugin for durable project context."
   },
   "plugins": [
     {
       "name": "context-tree",
-      "description": "Complete Context Tree plugin for linking, reading, and publishing durable project context.",
+      "description": "Create, connect, read, write, and privately publish durable project context.",
       "source": {
         "source": "npm",
         "package": "@first-tree-ai/context-tree",

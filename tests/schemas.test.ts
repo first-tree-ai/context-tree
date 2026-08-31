@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { scaffoldTree } from "../src/core/scaffold.js";
+import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
 import {
   connectProjectResultSchema,
   contextTreeCliErrorEnvelopeSchema,
-  contextTreeLinkResultSchema,
+  contextTreeConnectionResultSchema,
   contextTreePolicySchema,
   contextTreePublishResultSchema,
   contextTreeReadChildSchema,
@@ -15,10 +16,10 @@ import {
   contextTreeReadResultSchema,
   contextTreeStateSchema,
   contextTreeSyncResultSchema,
+  createProjectResultSchema,
   finishContextWriteResultSchema,
-  initializeProjectResultSchema,
+  managedTreeListingResultSchema,
   prepareContextWriteResultSchema,
-  scaffoldTreeResultSchema,
   treeValidationFindingSchema,
   validationCodeSchema,
   verifyTreeReportSchema,
@@ -52,15 +53,29 @@ describe("public JSON schemas", () => {
       [readTree(root), contextTreeReadResultSchema],
     ];
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
-    const scaffoldRoot = join(tempRoot(), "tree");
-    const scaffold = scaffoldTree({
-      name: "other",
-      path: scaffoldRoot,
-    });
-    expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
     const read = readTree(root);
     expect(contextTreeReadNodeSchema.parse(read.node)).toEqual(read.node);
     for (const child of read.children) expect(contextTreeReadChildSchema.parse(child)).toEqual(child);
+  });
+
+  it("parses managed tree listings strictly", () => {
+    const listing = {
+      schemaVersion: 1,
+      trees: [
+        { name: "acme-context", tree: { kind: "local", path: "/tmp/tree" } },
+        { name: "other", tree: { kind: "github", path: "/tmp/other", repository: "acme/other" } },
+      ],
+    };
+    expect(managedTreeListingResultSchema.parse(listing)).toEqual(listing);
+    expect(managedTreeListingResultSchema.safeParse({ schemaVersion: 1, trees: [] }).success).toBe(true);
+    expect(
+      managedTreeListingResultSchema.safeParse({
+        schemaVersion: 1,
+        trees: [{ name: "Bad/Name", tree: { kind: "local", path: "/tmp/tree" } }],
+      }).success,
+    ).toBe(false);
+    expect(managedTreeListingResultSchema.safeParse({ schemaVersion: 2, trees: [] }).success).toBe(false);
+    expect(managedTreeListingResultSchema.safeParse({ schemaVersion: 1, trees: [], extra: true }).success).toBe(false);
   });
 
   it("rejects incompatible versions, malformed structures, and unknown codes", () => {
@@ -84,49 +99,39 @@ describe("public JSON schemas", () => {
     ).toBe(false);
   });
 
-  it("defines strict link results and specific link errors", () => {
-    const link = {
-      link: {
-        project: { kind: "git", origin: "https://github.com/acme/service.git" },
-        tree: { path: "/work/context", repository: "acme/context" },
-      },
-      schemaVersion: 1,
-    };
-    expect(contextTreeLinkResultSchema.parse(link)).toEqual(link);
-    const localLink = {
-      ...link,
-      link: { ...link.link, tree: { path: "/work/local" } },
-    };
-    expect(contextTreeLinkResultSchema.parse(localLink)).toEqual(localLink);
+  it("defines strict connection results and specific connection errors", () => {
+    const published = { schemaVersion: 1, tree: { kind: "github", path: "/work/context", repository: "acme/context" } };
+    expect(contextTreeConnectionResultSchema.parse(published)).toEqual(published);
+    const local = { schemaVersion: 1, tree: { kind: "local", path: "/work/context" } };
+    expect(contextTreeConnectionResultSchema.parse(local)).toEqual(local);
     expect(
-      contextTreeLinkResultSchema.safeParse({
-        ...localLink,
-        link: { ...localLink.link, tree: { path: "/work/local", repository: 42 } },
+      contextTreeConnectionResultSchema.safeParse({
+        ...local,
+        tree: { kind: "local", path: "/work/context", repository: 42 },
       }).success,
     ).toBe(false);
     for (const path of ["relative/context", "/work/control\ncontext", "/work/control\tcontext"]) {
-      expect(
-        contextTreeLinkResultSchema.safeParse({
-          ...link,
-          link: { ...link.link, tree: { ...link.link.tree, path } },
-        }).success,
-      ).toBe(false);
+      expect(contextTreeConnectionResultSchema.safeParse({ ...local, tree: { kind: "local", path } }).success).toBe(
+        false,
+      );
     }
-    expect(
-      contextTreeLinkResultSchema.safeParse({
-        ...link,
-        link: { ...link.link, future: true },
-      }).success,
-    ).toBe(false);
-    for (const code of ["NO_LINK", "AMBIGUOUS_LINK", "CORRUPT_LINK", "STALE_LINK", "NO_REMOTE", "NO_COMMITS"]) {
+    expect(contextTreeConnectionResultSchema.safeParse({ ...local, connection: { future: true } }).success).toBe(false);
+    for (const code of ["NO_CONNECTION", "CORRUPT_CONNECTION", "STALE_CONNECTION", "WRITE_OUTDATED"]) {
       expect(
         contextTreeCliErrorEnvelopeSchema.safeParse({
-          error: { code, message: "link error" },
+          error: { code, message: "connection error" },
           ok: false,
           schemaVersion: 1,
         }).success,
       ).toBe(true);
     }
+    expect(
+      contextTreeCliErrorEnvelopeSchema.safeParse({
+        error: { code: "NO_REMOTE", message: "removed" },
+        ok: false,
+        schemaVersion: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it("parses the discriminated tree state for local and published trees", () => {
@@ -145,19 +150,19 @@ describe("public JSON schemas", () => {
     }
   });
 
-  it("parses the setup result contract strictly", () => {
+  it("parses the create result contract strictly", () => {
     const result = {
       branch: "trunk",
       commitSha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
       created: true,
       schemaVersion: 1,
-      title: "service",
-      treePath: "/home/user/.context-tree/trees/service-1a2b3c",
+      title: "service-context-tree",
+      treePath: "/home/user/.context-tree/trees/service-context-tree",
     };
-    expect(initializeProjectResultSchema.parse(result)).toEqual(result);
-    expect(initializeProjectResultSchema.safeParse({ ...result, created: "yes" }).success).toBe(false);
-    expect(initializeProjectResultSchema.safeParse({ ...result, treePath: "relative/path" }).success).toBe(false);
-    expect(initializeProjectResultSchema.safeParse({ ...result, future: true }).success).toBe(false);
+    expect(createProjectResultSchema.parse(result)).toEqual(result);
+    expect(createProjectResultSchema.safeParse({ ...result, created: "yes" }).success).toBe(false);
+    expect(createProjectResultSchema.safeParse({ ...result, treePath: "relative/path" }).success).toBe(false);
+    expect(createProjectResultSchema.safeParse({ ...result, future: true }).success).toBe(false);
   });
 
   it("parses connect, sync, and prepare-write results around the tree state", () => {
@@ -171,58 +176,30 @@ describe("public JSON schemas", () => {
       schemaVersion: 1,
       sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
       tree: local,
-      updated: false,
     };
     expect(contextTreeSyncResultSchema.parse(sync)).toEqual(sync);
     expect(contextTreeSyncResultSchema.safeParse({ ...sync, branch: "" }).success).toBe(false);
     const prepared = {
-      baseSha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
       schemaVersion: 1,
-      taskBranch: "context-tree/write/abc123",
-      tree: local,
       worktreePath: "/tmp/context-tree-write-abc123",
     };
     expect(prepareContextWriteResultSchema.parse(prepared)).toEqual(prepared);
     expect(prepareContextWriteResultSchema.safeParse({ ...prepared, extra: 1 }).success).toBe(false);
   });
 
-  it("parses every finish-write outcome and rejects unknown statuses", () => {
-    const applied = {
+  it("parses the lean finish-write result strictly", () => {
+    const result = {
       branch: "trunk",
       schemaVersion: 1,
       sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
-      status: "applied",
-      tree: { kind: "local", path: "/work/context" },
     };
-    const pullRequest = {
-      branch: "trunk",
-      pullRequestUrl: "https://github.com/acme/context/pull/7",
-      schemaVersion: 1,
-      sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
-      status: "pull-request",
-      tree: { kind: "github", path: "/work/context", repository: "acme/context" },
-    };
-    const conflict = {
-      message: "Semantic resolution required.",
-      schemaVersion: 1,
-      status: "conflict",
-      taskBranch: "context-tree/write/abc123",
-      worktreePath: "/tmp/context-tree-write-abc123",
-    };
-    const outdated = { ...conflict, status: "outdated" };
-    for (const result of [applied, pullRequest, conflict, outdated]) {
-      expect(finishContextWriteResultSchema.parse(result)).toEqual(result);
-    }
-    expect(finishContextWriteResultSchema.safeParse({ ...applied, status: "merged" }).success).toBe(false);
-    expect(
-      finishContextWriteResultSchema.safeParse({ ...applied, tree: { kind: "local", path: "relative" } }).success,
-    ).toBe(false);
+    expect(finishContextWriteResultSchema.parse(result)).toEqual(result);
+    expect(finishContextWriteResultSchema.safeParse({ ...result, status: "applied" }).success).toBe(false);
   });
 
   it("parses publish results and requires a safe repository URL", () => {
     const result = {
       branch: "trunk",
-      created: true,
       repository: "acme/service-context",
       schemaVersion: 1,
       sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",

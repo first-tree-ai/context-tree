@@ -30,13 +30,21 @@ export class CommandError extends Error {
   public readonly stderr: string;
 
   public constructor(command: "git" | "gh", status: number | null, stderr: string, message: string) {
-    const detail = stderr.trim();
+    const detail = sanitizeCommandOutput(stderr).trim();
     super(detail.length > 0 ? `${message}: ${detail}` : message);
     this.name = "CommandError";
     this.command = command;
     this.status = status;
-    this.stderr = stderr;
+    this.stderr = detail;
   }
+}
+
+/** Remove credentials and common access-token shapes before surfacing subprocess output. */
+export function sanitizeCommandOutput(value: string): string {
+  return value
+    .replace(/((?:https?|ssh):\/\/)[^\s/@]+@/giu, "$1<redacted>@")
+    .replace(/\b(?:gh[opsu]_[A-Za-z\d_]{20,}|github_pat_[A-Za-z\d_]{20,})\b/gu, "<redacted>")
+    .replace(/(authorization\s*:\s*(?:bearer|token)\s+)[^\s]+/giu, "$1<redacted>");
 }
 
 function trimOutput(value: string): string {
@@ -47,6 +55,11 @@ function execute(runner: CommandRunner, command: "git" | "gh", args: string[], m
   const result = runner(command, args);
   if (result.status !== 0) throw new CommandError(command, result.status, result.stderr, message);
   return trimOutput(result.stdout);
+}
+
+/** Run a Git command that is not scoped by `-C`, such as `git init <path>`. */
+export function gitCommand(args: string[], options: CommandOptions = {}): string {
+  return execute(options.runner ?? defaultRunner, "git", args, options.message ?? "A Git operation failed.");
 }
 
 /** Run `git -C <root> <args>` and return trimmed stdout, throwing on failure. */

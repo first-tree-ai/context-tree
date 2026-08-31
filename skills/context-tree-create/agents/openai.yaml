@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Create"
+  short_description: "Create managed durable project context"
+  default_prompt: "Use $context-tree-create for the current project."

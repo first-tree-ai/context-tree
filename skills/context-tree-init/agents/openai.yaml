@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Tree Init"
-  short_description: "Create a local Context Tree with a committed scaffold"
-  default_prompt: "Use $context-tree-init with name and optional tree_path."
