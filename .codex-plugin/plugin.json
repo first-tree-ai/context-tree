@@ -1,0 +1,28 @@
+{
+  "name": "context-tree",
+  "version": "0.1.2",
+  "description": "Complete Context Tree plugin with linking, reading, durable writes, and a packaged CLI.",
+  "author": {
+    "name": "First Tree AI",
+    "url": "https://github.com/first-tree-ai"
+  },
+  "homepage": "https://github.com/first-tree-ai/context-tree",
+  "repository": "https://github.com/first-tree-ai/context-tree",
+  "license": "Apache-2.0",
+  "keywords": ["context-tree", "memory", "agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Context Tree",
+    "shortDescription": "Resolve and use durable project context",
+    "longDescription": "Link projects to verified Context Tree checkouts, then resolve, read, and publish durable context without persisting branches or credentials.",
+    "developerName": "First Tree AI",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/first-tree-ai/context-tree",
+    "defaultPrompt": [
+      "Link this project to its Context Tree.",
+      "Read the relevant Context Tree context.",
+      "Publish this durable decision to the Context Tree."
+    ]
+  }
+}

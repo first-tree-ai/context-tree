@@ -2,8 +2,6 @@
 schemaVersion: 1
 title: "Example Context Tree"
 description: "A small valid Context Tree fixture."
-relatedRepositories:
-  - https://github.com/first-tree-ai/context-tree.git
 ---
 
 # Example Context Tree

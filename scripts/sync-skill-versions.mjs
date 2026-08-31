@@ -1,8 +1,8 @@
-// Propagates package.json's version into every skills/*/SKILL.md frontmatter.
+// Propagates package.json's version into skills and all plugin manifests.
 //
-// tests/skills.test.ts asserts `metadata.version` equals the package version,
-// so the two must move together. Release automation rewrites package.json on
-// the runner and then calls this script; run it manually after a local bump.
+// Package contract tests assert skill and manifest versions equal the package
+// version, so they must move together. Release automation rewrites package.json
+// on the runner and then calls this script; run it manually after a local bump.
 //
 // Usage:
 //   node scripts/sync-skill-versions.mjs           rewrite SKILL.md in place
@@ -52,15 +52,27 @@ for (const file of skillFiles) {
   if (!checkOnly) writeFileSync(file, source.replace(frontmatter, updated));
 }
 
+const manifestPaths = ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
+
+for (const relativePath of manifestPaths) {
+  const file = join(projectRoot, relativePath);
+  const manifest = JSON.parse(readFileSync(file, "utf8"));
+  if (manifest.version === version) continue;
+  drifted.push(relativePath);
+  if (!checkOnly) writeFileSync(file, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`);
+}
+
 if (drifted.length === 0) {
-  console.log(`All ${skillFiles.length} skills already declare version ${version}.`);
+  console.log(
+    `All ${skillFiles.length} skills and ${manifestPaths.length} plugin manifests already declare version ${version}.`,
+  );
   process.exit(0);
 }
 
 if (checkOnly) {
-  console.error(`Skill version drift from package.json ${version}: ${drifted.join(", ")}`);
+  console.error(`Packaged version drift from package.json ${version}: ${drifted.join(", ")}`);
   console.error("Run `node scripts/sync-skill-versions.mjs` to fix.");
   process.exit(1);
 }
 
-console.log(`Set version ${version} on ${drifted.length} skill(s): ${drifted.join(", ")}`);
+console.log(`Set packaged version ${version} on ${drifted.length} artifact(s): ${drifted.join(", ")}`);

@@ -16,17 +16,12 @@ It must contain non-empty prose and schema-version-1 frontmatter:
 schemaVersion: 1
 title: "Service Context"
 description: "Durable decisions shared across service domains."
-relatedRepositories:
-  - https://github.com/acme/service.git
 ---
 ```
 
-Root-only `schemaVersion` is required. Root-only `relatedRepositories` is
-optional, remains provider-neutral, and accepts at most 64
-credential-free HTTP(S), `ssh://`, or scp-style SSH references. It describes
-related source repositories; it does not identify the Context Tree repository.
-Neither root-only field is valid on domain nodes or Markdown leaves. A legacy
-`SCOPE.md` has no special meaning and is validated as an ordinary leaf.
+Root-only `schemaVersion` is required and is not valid on domain nodes or
+Markdown leaves. A legacy `SCOPE.md` has no special meaning and is validated as
+an ordinary leaf.
 
 ## Nodes and content classes
 
@@ -82,28 +77,68 @@ the root, schema version, validity, findings, and content-class counts. None
 includes a tree digest or per-entry digest. The Git commit SHA is recorded by
 the surrounding host Git workflow rather than computed by the core.
 
+`link` and `resolve` return a strict link result containing the
+project identity and tree `OWNER/REPO` plus a canonical absolute, single-line
+checkout path. Link
+failures distinguish `NO_LINK`, `AMBIGUOUS_LINK`,
+`CORRUPT_LINK`, and `STALE_LINK` from other CLI failures.
+
 ## Lifecycle
 
-Scaffolding creates exactly two files: root `NODE.md` and
-`.github/workflows/validate-context-tree.yml`. The workflow is pinned to the
-package version that generated it. Init takes canonical `OWNER/REPO` and an
+Scaffolding creates exactly four files: root `NODE.md`, root `AGENTS.md`, root
+`CLAUDE.md`, and `.github/workflows/validate-context-tree.yml`. `AGENTS.md`
+explains the tree's purpose, structure, authority, and write discipline to
+agents entering the repository. `CLAUDE.md` is a relative symlink to `AGENTS.md`
+so both instruction filenames expose the same packaged guidance. The workflow
+is pinned to the package version that generated it. Init takes canonical `OWNER/REPO` and an
 optional absent or empty destination. It requires Git, runs ordinary `git init`, and uses the
 unborn branch selected by Git's effective `init.defaultBranch` configuration or
 compiled fallback. The generated workflow filters pushes to that exact branch.
-The local tree title and default destination name come from `REPO`. The core and
-CLI perform no GitHub or credential operations.
+The local tree title and default destination name come from `REPO`. Init
+configures a credential-free `https://github.com/OWNER/REPO.git` origin. Init
+records an unambiguous current project link only in the machine-local links
+file and never embeds the source-project association in the tree.
+The core and CLI perform no authenticated GitHub operations.
 
-Reads take `agent_slug`, an existing checkout path, and `branch`. Writes take
-`agent_slug`, an existing fetch-only checkout path, and the authoritative
-`default_branch` publication target.
-The exact clean, non-symlink Git root and its credential-free GitHub `origin`
-form the authorization boundary. Reads refresh fast-forward-only, validate, and
-report the commit SHA; authorized stale reads stay read-only.
+Internal links live at `~/.context-tree/connections.json`. A link
+maps a normalized Git project origin or a real non-Git directory to canonical
+tree `OWNER/REPO` and checkout path. Git lookup also confirms that the project
+origin matches the local record; non-Git lookup includes descendants.
+Zero or multiple matches fail, and a project cannot link to different tree
+repositories. Explicit linking requires a clean exact Git root, safe GitHub
+origin, and complete tree verification. Init may
+automatically link only its exact new uncommitted scaffold. Resolve rejects symlinked,
+dirty, moved, mismatched-origin, and invalid-root candidates, but parses only
+root `NODE.md` rather than scanning all semantic content. Full verification is
+the responsibility of read and write after refresh.
 
-Writes fetch the supplied default branch through that checkout and edit an
+A moved checkout produces `STALE_LINK`; explicit linking may replace its
+path only after verifying the same stored tree repository and proving the prior
+path absent, no longer an exact checkout, or occupied by another repository. A
+second live checkout cannot replace the stored path, even when the stored
+checkout is dirty. Relinking the same canonical path is idempotent.
+
+Link setup selects or clones a verified checkout and writes only the local link
+record. It never mutates or publishes the Context Tree repository.
+
+Reads and writes take only `agent_slug`, sourced from authoritative task role
+instructions. They resolve the current project, then discover the live default
+branch using `git ls-remote --symref origin HEAD`; branches are never configured
+or cached. The exact clean, non-symlink Git root and its credential-free GitHub
+`origin` remain the authorization boundary. Resolution selects a candidate and
+does not replace full semantic verification. Reads refresh fast-forward-only,
+validate, and report the commit SHA; authorized stale reads stay read-only.
+
+The package root exports `linkProject`, `resolveLink`,
+`readContextTreePolicy`, `readTree`, `scaffoldTree`, and `verifyTree`.
+Project identification, URL normalization, and the links-file storage
+schema are internal. Public strict CLI result schemas remain available from
+the schemas entrypoint.
+
+Writes fetch the discovered default branch through that checkout and edit an
 isolated worktree. One source comes from task context, not an invocation
 argument, and scopes one write and commit. The base and result must validate;
-publication first uses a non-force direct push to the supplied default branch.
+publication first uses a non-force direct push to the discovered default branch.
 Concurrent updates are rebased, resolved from authorized evidence, and verified
 again with bounded retries. Explicit direct-push denial or exhausted retries
 uses a latest-base, conflict-free task-branch PR fallback that remains open.

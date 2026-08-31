@@ -1,7 +1,7 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.1",
-  "description": "Portable Context Tree schemas, tooling, and agent skills.",
+  "version": "0.1.2",
+  "description": "Context Tree plugin for Codex and Claude Code, with a CLI for shell automation.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -40,9 +40,14 @@
     }
   },
   "files": [
+    "plugin.json",
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin",
+    ".codex-plugin",
     "dist",
     "docs",
     "examples",
+    "hooks",
     "skills",
     "policy",
     "templates",
@@ -50,12 +55,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown src/index.ts src/schemas.ts src/cli/index.ts --format esm --dts",
+    "build": "tsdown src/index.ts src/schemas.ts --format esm --dts && tsdown src/cli/index.ts --format esm --dts --out-dir dist/cli --no-clean --deps.alwaysBundle '/.*/'",
     "check": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
-    "validate:skills": "vitest run tests/skills.test.ts",
+    "test:codex-plugin": "bash scripts/test-codex-plugin-local.sh",
+    "validate:skills": "vitest run tests/skills.test.ts tests/plugin.test.ts",
     "check:package": "pnpm build && publint && attw --pack . --profile esm-only && pnpm package:e2e",
     "package:e2e": "node scripts/package-e2e.mjs",
     "check:names": "vitest run tests/names.test.ts",

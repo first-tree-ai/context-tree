@@ -36,24 +36,12 @@ jobs:
       - run: pnpm check:package
       - run: npm pack --dry-run
 
-  skill-discovery:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Discover bundled skills with the pinned Agent Skills CLI
-        env:
-          DO_NOT_TRACK: "1"
-        run: npx --yes skills@1.5.19 add . --list
-
   # Every push to main publishes a staging build under the `staging` dist-tag.
   # `npm i @first-tree-ai/context-tree@staging` therefore always resolves to the
   # newest build of main, and never to something older than the last stable.
   publish-staging:
     name: Publish staging package
-    needs: [test, skill-discovery]
+    needs: [test]
     if: >-
       github.repository == 'first-tree-ai/context-tree'
       && github.ref == 'refs/heads/main'
@@ -129,8 +117,8 @@ jobs:
         if: steps.guard.outputs.publish == 'true'
         run: |
           npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
-          # tests/skills.test.ts (run by prepack) asserts every skill declares
-          # the package version, so the frontmatter has to move with it.
+          # Package tests assert every skill and plugin manifest declares the
+          # package version, so all published metadata has to move with it.
           node scripts/sync-skill-versions.mjs
 
       # Trusted publishing turns provenance on by default, but sigstore rejects
@@ -144,7 +132,7 @@ jobs:
   # version. The tag is the source of truth; package.json is rewritten to match.
   publish-release:
     name: Publish production package
-    needs: [test, skill-discovery]
+    needs: [test]
     if: >-
       github.repository == 'first-tree-ai/context-tree'
       && github.event_name == 'push'

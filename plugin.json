@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "context-tree",
+  "version": "0.1.2",
+  "description": "Complete Context Tree plugin with linking, reading, durable writes, and a packaged CLI.",
+  "author": {
+    "name": "First Tree AI",
+    "url": "https://github.com/first-tree-ai"
+  },
+  "homepage": "https://github.com/first-tree-ai/context-tree",
+  "repository": "https://github.com/first-tree-ai/context-tree",
+  "license": "Apache-2.0",
+  "keywords": ["context-tree", "memory", "agents"]
+}
