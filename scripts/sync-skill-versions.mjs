@@ -1,8 +1,8 @@
-// Propagates package.json's version into skills and host plugin manifests.
+// Propagates package.json's version into skills and all plugin manifests.
 //
-// tests/skills.test.ts asserts `metadata.version` equals the package version,
-// so the two must move together. Release automation rewrites package.json on
-// the runner and then calls this script; run it manually after a local bump.
+// Package contract tests assert skill and manifest versions equal the package
+// version, so they must move together. Release automation rewrites package.json
+// on the runner and then calls this script; run it manually after a local bump.
 //
 // Usage:
 //   node scripts/sync-skill-versions.mjs           rewrite SKILL.md in place
@@ -52,7 +52,9 @@ for (const file of skillFiles) {
   if (!checkOnly) writeFileSync(file, source.replace(frontmatter, updated));
 }
 
-for (const relativePath of [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"]) {
+const manifestPaths = ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
+
+for (const relativePath of manifestPaths) {
   const file = join(projectRoot, relativePath);
   const manifest = JSON.parse(readFileSync(file, "utf8"));
   if (manifest.version === version) continue;
@@ -61,7 +63,9 @@ for (const relativePath of [".codex-plugin/plugin.json", ".claude-plugin/plugin.
 }
 
 if (drifted.length === 0) {
-  console.log(`All ${skillFiles.length} skills and both plugin manifests already declare version ${version}.`);
+  console.log(
+    `All ${skillFiles.length} skills and ${manifestPaths.length} plugin manifests already declare version ${version}.`,
+  );
   process.exit(0);
 }
 

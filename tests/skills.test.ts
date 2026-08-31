@@ -53,7 +53,7 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     ]);
   });
 
-  it("ships matching Codex and Claude plugin manifests", () => {
+  it("ships matching Codex and Claude Code adapter manifests", () => {
     for (const host of ["codex", "claude"]) {
       const manifest = record(
         JSON.parse(readFileSync(resolve(import.meta.dirname, `../.${host}-plugin/plugin.json`), "utf8")),

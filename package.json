@@ -40,6 +40,7 @@
     }
   },
   "files": [
+    "plugin.json",
     ".agents/plugins/marketplace.json",
     ".claude-plugin",
     ".codex-plugin",
@@ -60,7 +61,7 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
     "test:codex-plugin": "bash scripts/test-codex-plugin-local.sh",
-    "validate:skills": "vitest run tests/skills.test.ts",
+    "validate:skills": "vitest run tests/skills.test.ts tests/plugin.test.ts",
     "check:package": "pnpm build && publint && attw --pack . --profile esm-only && pnpm package:e2e",
     "package:e2e": "node scripts/package-e2e.mjs",
     "check:names": "vitest run tests/names.test.ts",

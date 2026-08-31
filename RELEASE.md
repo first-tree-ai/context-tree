@@ -36,10 +36,11 @@ test. Both modes remove their temporary marketplace, plugin cache, Codex home,
 and project when they finish.
 
 Before advertising or releasing the remote marketplace flow, verify that npm
-`latest` contains `.codex-plugin`, `.claude-plugin`, `hooks`, all four `skills`
-and their launchers, and `dist/cli/index.mjs`. The package end-to-end test and
-`npm pack --dry-run` cover the candidate tarball; checking `latest` is a release
-verification step after production publication.
+`latest` contains the portable root `plugin.json`, the `.codex-plugin` and
+`.claude-plugin` current-client adapters, both marketplaces, `hooks`, all four
+`skills` and their launchers, and `dist/cli/index.mjs`. The package end-to-end
+test and `npm pack --dry-run` cover the candidate tarball; checking `latest` is
+a release verification step after production publication.
 
 ## Staging releases
 
@@ -111,14 +112,15 @@ Only a clean `X.Y.Z` tag moves the stable channel.
 
 ## Version bookkeeping
 
-The package version is declared in `package.json`, the `metadata.version`
-frontmatter of every `skills/*/SKILL.md`, and both host plugin manifests.
-`tests/skills.test.ts` asserts they match, and `prepack` runs that test on every
-publish, so version drift fails the release.
+The package version is declared in `package.json`, the portable root
+`plugin.json`, the `metadata.version` frontmatter of every
+`skills/*/SKILL.md`, and both current-client adapter manifests.
+The skill and plugin package-contract tests assert they match, and `prepack`
+runs those tests on every publish, so version drift fails the release.
 
 `scripts/sync-skill-versions.mjs` copies `package.json`'s version into each
-skill and plugin manifest. It is idempotent and takes `--check` to report drift
-without writing:
+skill and all three plugin manifests. It is idempotent and takes `--check` to
+report drift without writing:
 
 ```bash
 node scripts/sync-skill-versions.mjs           # fix

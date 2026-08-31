@@ -58,6 +58,12 @@ function parseWithInstalledSchema(consumerRoot, schemaName, json) {
   );
 }
 
+function requirePackagedFile(packageRoot, relativePath) {
+  const path = join(packageRoot, relativePath);
+  assert.equal(lstatSync(path).isFile(), true, `packed package must include ${relativePath}`);
+  assert.notEqual(readFileSync(path, "utf8").length, 0, `packed package file must not be empty: ${relativePath}`);
+}
+
 try {
   execFileSync("npm", ["pack", "--silent", "--pack-destination", temporaryRoot], {
     cwd: projectRoot,
@@ -76,11 +82,34 @@ try {
   assert.equal(existsSync(join(extractedRoot, "node_modules")), false);
   assert.equal(existsSync(join(temporaryRoot, "node_modules")), false);
 
+  for (const relativePath of [
+    "plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin/marketplace.json",
+    "hooks/hooks.json",
+    "hooks/session-start.mjs",
+    "dist/cli/index.mjs",
+  ]) {
+    requirePackagedFile(extractedPackage, relativePath);
+  }
+
+  const packagedSkills = ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"];
+  for (const skill of packagedSkills) {
+    requirePackagedFile(extractedPackage, `skills/${skill}/SKILL.md`);
+    requirePackagedFile(extractedPackage, `skills/${skill}/agents/openai.yaml`);
+    requirePackagedFile(extractedPackage, `skills/${skill}/scripts/context-tree.mjs`);
+  }
+
   const extractedCli = join(extractedPackage, "dist/cli/index.mjs");
   const extractedVersion = runNode(extractedCli, extractedPackage, ["--version"]);
   assert.equal(extractedVersion.status, 0);
   const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
   assert.equal(extractedVersion.stdout, `${manifest.version}\n`);
+  const portableManifest = JSON.parse(readFileSync(join(extractedPackage, "plugin.json"), "utf8"));
+  assert.equal(portableManifest.version, manifest.version);
+  assert.equal(portableManifest.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
 
   const hook = runNode(join(extractedPackage, "hooks/session-start.mjs"), extractedPackage, [], {
     env: { ...npmEnvironment, CLAUDE_PLUGIN_ROOT: extractedPackage },
@@ -89,7 +118,7 @@ try {
   assert.equal(hook.status, 0);
   assert.equal(hook.stdout, "", "the packaged hook must remain silent for an unlinked project");
 
-  for (const skill of ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"]) {
+  for (const skill of packagedSkills) {
     const launcher = join(extractedPackage, "skills", skill, "scripts/context-tree.mjs");
     const directHelp = runNode(extractedCli, extractedPackage, ["--help"]);
     const launchedHelp = runNode(launcher, extractedPackage, ["--help"]);
@@ -114,7 +143,7 @@ try {
   const fakeGlobal = join(fakeBin, "context-tree");
   writeFileSync(fakeGlobal, `#!/bin/sh\n: >"${invocationMarker}"\nexit 23\n`);
   chmodSync(fakeGlobal, 0o755);
-  for (const skill of ["context-tree-link", "context-tree-init", "context-tree-read", "context-tree-write"]) {
+  for (const skill of packagedSkills) {
     const launcher = join(extractedPackage, "skills", skill, "scripts/context-tree.mjs");
     const missing = runNode(launcher, extractedPackage, ["--version"], {
       env: { ...npmEnvironment, PATH: fakeBin },
@@ -224,32 +253,17 @@ try {
   const resolved = runCli(cliPath, consumerRoot, ["resolve"]);
   assert.equal(resolved.status, 0);
   parseWithInstalledSchema(consumerRoot, "contextTreeLinkResultSchema", resolved.stdout);
-  assert.equal(
-    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.codex-plugin/plugin.json"), "utf8")
-      .length > 0,
-    true,
-  );
-  assert.equal(
-    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.claude-plugin/plugin.json"), "utf8")
-      .length > 0,
-    true,
-  );
-  assert.equal(
-    readFileSync(
-      join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.agents/plugins/marketplace.json"),
-      "utf8",
-    ).length > 0,
-    true,
-  );
-  assert.equal(
-    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/.claude-plugin/marketplace.json"), "utf8")
-      .length > 0,
-    true,
-  );
-  assert.equal(
-    readFileSync(join(consumerRoot, "node_modules/@first-tree-ai/context-tree/hooks/hooks.json"), "utf8").length > 0,
-    true,
-  );
+  const installedPackage = join(consumerRoot, "node_modules/@first-tree-ai/context-tree");
+  for (const relativePath of [
+    "plugin.json",
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin/marketplace.json",
+    "hooks/hooks.json",
+  ]) {
+    requirePackagedFile(installedPackage, relativePath);
+  }
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", "tree"]);
   assert.equal(validVerify.status, 0);

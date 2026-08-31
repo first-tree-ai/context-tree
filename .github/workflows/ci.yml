@@ -117,8 +117,8 @@ jobs:
         if: steps.guard.outputs.publish == 'true'
         run: |
           npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
-          # tests/skills.test.ts (run by prepack) asserts every skill declares
-          # the package version, so the frontmatter has to move with it.
+          # Package tests assert every skill and plugin manifest declares the
+          # package version, so all published metadata has to move with it.
           node scripts/sync-skill-versions.mjs
 
       # Trusted publishing turns provenance on by default, but sigstore rejects
