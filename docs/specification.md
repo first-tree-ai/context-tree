@@ -85,9 +85,12 @@ failures distinguish `NO_LINK`, `AMBIGUOUS_LINK`,
 
 ## Lifecycle
 
-Scaffolding creates exactly two files: root `NODE.md` and
-`.github/workflows/validate-context-tree.yml`. The workflow is pinned to the
-package version that generated it. Init takes canonical `OWNER/REPO` and an
+Scaffolding creates exactly four files: root `NODE.md`, root `AGENTS.md`, root
+`CLAUDE.md`, and `.github/workflows/validate-context-tree.yml`. `AGENTS.md`
+explains the tree's purpose, structure, authority, and write discipline to
+agents entering the repository. `CLAUDE.md` is a relative symlink to `AGENTS.md`
+so both instruction filenames expose the same packaged guidance. The workflow
+is pinned to the package version that generated it. Init takes canonical `OWNER/REPO` and an
 optional absent or empty destination. It requires Git, runs ordinary `git init`, and uses the
 unborn branch selected by Git's effective `init.defaultBranch` configuration or
 compiled fallback. The generated workflow filters pushes to that exact branch.

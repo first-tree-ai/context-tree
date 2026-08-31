@@ -172,7 +172,7 @@ function requireCheckoutClean(root: string, mode: CheckoutMode): void {
   if (status.length === 0) return;
   if (mode === "scaffold") {
     const lines = status.split("\n").sort();
-    const expected = ["?? .github/workflows/validate-context-tree.yml", "?? NODE.md"];
+    const expected = ["?? .github/workflows/validate-context-tree.yml", "?? AGENTS.md", "?? CLAUDE.md", "?? NODE.md"];
     if (
       git(root, ["rev-parse", "--verify", "HEAD"]) === undefined &&
       JSON.stringify(lines) === JSON.stringify(expected)

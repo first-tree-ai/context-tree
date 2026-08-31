@@ -1,4 +1,16 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -276,6 +288,11 @@ describe("indexed reading", () => {
 });
 
 describe("scaffold and policy", () => {
+  it("packages the agent instructions with their exact filename", () => {
+    expect(readdirSync(resolve(import.meta.dirname, "../templates"))).toContain("AGENTS.md");
+    expect(readdirSync(resolve(import.meta.dirname, "../templates"))).not.toContain("agents.md");
+  });
+
   it("includes version-pinned GitHub validation for the authoritative default branch", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
@@ -283,6 +300,19 @@ describe("scaffold and policy", () => {
     expect(workflow).toContain("@first-tree-ai/context-tree@0.1.2 verify");
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
+  });
+
+  it("includes agent instructions describing the tree purpose and structure", () => {
+    const root = validTree();
+    const instructions = readFileSync(join(root, "AGENTS.md"), "utf8");
+    expect(instructions).toContain("durable shared memory for agents");
+    expect(instructions).toContain("not a source-code mirror, wiki dump, or task log");
+    expect(instructions).toContain("Each content directory is a domain and has a `NODE.md` index");
+    expect(instructions).toContain("Would it remain true if the triggering work were redone?");
+    expect(instructions).toContain("Run `context-tree verify` before committing");
+    expect(lstatSync(join(root, "CLAUDE.md")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(root, "CLAUDE.md"))).toBe("AGENTS.md");
+    expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
   it("rejects malformed GitHub identities", () => {

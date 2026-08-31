@@ -2,9 +2,11 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -82,7 +84,7 @@ function git(cwd: string, args: string[], linkHome: string): void {
 }
 
 function commitTree(treePath: string, linkHome: string): void {
-  git(treePath, ["add", "NODE.md", ".github/workflows/validate-context-tree.yml"], linkHome);
+  git(treePath, ["add", "NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"], linkHome);
   git(
     treePath,
     ["-c", "user.name=Context Tree Test", "-c", "user.email=test@example.com", "commit", "-m", "Initialize tree"],
@@ -117,7 +119,18 @@ describe("built CLI", () => {
     const initialized = cli(cwd, ["init", ...INIT_ARGS]);
     expect(initialized.status).toBe(0);
     const scaffold = scaffoldTreeResultSchema.parse(JSON.parse(initialized.stdout));
-    expect(scaffold.files).toEqual(["NODE.md", ".github/workflows/validate-context-tree.yml"]);
+    expect(scaffold.files).toEqual([
+      "NODE.md",
+      "AGENTS.md",
+      "CLAUDE.md",
+      ".github/workflows/validate-context-tree.yml",
+    ]);
+    const agents = readFileSync(resolve(cwd, "tree/AGENTS.md"), "utf8");
+    expect(agents).toContain("This repository is a Context Tree: durable shared memory for agents.");
+    expect(agents).toContain("Root `NODE.md` contains repository-wide context");
+    expect(agents).toContain("Would this change how a future agent acts?");
+    expect(lstatSync(resolve(cwd, "tree/CLAUDE.md")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(resolve(cwd, "tree/CLAUDE.md"))).toBe("AGENTS.md");
     expect(existsSync(resolve(cwd, "tree/.git"))).toBe(true);
     expect(readFileSync(resolve(cwd, "tree/.git/config"), "utf8")).toContain(
       "url = https://github.com/acme/context.git",

@@ -116,7 +116,7 @@ existing checkout or clone a managed one beneath
 
 Explicit linking requires a clean exact Git root, a safe GitHub origin, and a
 fully valid tree. Init has one narrow exception
-for the two newly scaffolded uncommitted files. A relink is idempotent at the
+for the four newly scaffolded uncommitted files. A relink is idempotent at the
 same canonical path. It may replace a different path only when the old checkout
 is absent, is no longer an exact checkout, or identifies a different repository,
 and the new checkout identifies the stored repository. A dirty old checkout is

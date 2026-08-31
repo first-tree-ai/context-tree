@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { SCHEMA_VERSION, type ScaffoldTreeResult } from "../schemas.js";
@@ -62,19 +62,27 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
     title,
     titleJson: JSON.stringify(title),
   };
-  const files: Array<readonly [string, string]> = [
+  const regularFiles: Array<readonly [string, string]> = [
     ["NODE.md", "root-node.md"],
+    ["AGENTS.md", "AGENTS.md"],
     [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
   ];
+  const files = ["NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"];
 
-  for (const [relativePath, source] of files) {
+  for (const [relativePath, source] of regularFiles.slice(0, 2)) {
+    const path = join(root, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
+  }
+  symlinkSync("AGENTS.md", join(root, "CLAUDE.md"), "file");
+  for (const [relativePath, source] of regularFiles.slice(2)) {
     const path = join(root, relativePath);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
   }
 
   return {
-    files: files.map(([path]) => path),
+    files,
     root,
     schemaVersion: SCHEMA_VERSION,
     verification: verifyTree(root),

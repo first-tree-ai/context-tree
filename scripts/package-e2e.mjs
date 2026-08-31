@@ -3,10 +3,12 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -187,6 +189,17 @@ try {
   const init = runCli(cliPath, consumerRoot, ["init", "--repository", "acme/context", "--tree-path", "tree"]);
   assert.equal(init.status, 0);
   parseWithInstalledSchema(consumerRoot, "scaffoldTreeResultSchema", init.stdout);
+  assert.deepEqual(JSON.parse(init.stdout).files, [
+    "NODE.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".github/workflows/validate-context-tree.yml",
+  ]);
+  const packagedTemplates = readdirSync(join(extractedPackage, "templates"));
+  assert.equal(packagedTemplates.includes("AGENTS.md"), true);
+  assert.equal(packagedTemplates.includes("agents.md"), false);
+  assert.equal(lstatSync(join(consumerRoot, "tree/CLAUDE.md")).isSymbolicLink(), true);
+  assert.equal(readlinkSync(join(consumerRoot, "tree/CLAUDE.md")), "AGENTS.md");
   assert.equal(readFileSync(join(consumerRoot, "tree/.git/HEAD"), "utf8"), "ref: refs/heads/trunk\n");
   assert.match(
     readFileSync(join(consumerRoot, "tree/.github/workflows/validate-context-tree.yml"), "utf8"),

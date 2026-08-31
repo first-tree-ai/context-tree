@@ -251,7 +251,9 @@ describe("Agent Skills instruction contracts (Markdown assertions do not execute
     expect(init).toContain("Treat the Git repository and credential-free `origin` created by the CLI as authoritative");
     expect(init).toContain('git -C "<tree_path>" symbolic-ref --short HEAD');
     expect(init).toContain("do not run `git init`");
-    expect(init).toContain("stage only `NODE.md` and `.github/workflows/validate-context-tree.yml`");
+    expect(init).toContain(
+      "stage only `NODE.md`, `AGENTS.md`, `CLAUDE.md`, and `.github/workflows/validate-context-tree.yml`",
+    );
     expect(init).toContain("complete staged diff");
     expect(init).toContain("no GitHub repository was created");
     expect(init).toContain("credential-free origin is configured");
