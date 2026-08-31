@@ -264,6 +264,9 @@ try {
   ]) {
     requirePackagedFile(installedPackage, relativePath);
   }
+  const installedCodexManifest = JSON.parse(readFileSync(join(installedPackage, ".codex-plugin/plugin.json"), "utf8"));
+  assert.equal(installedCodexManifest.hooks, "./hooks/hooks.json");
+  requirePackagedFile(installedPackage, installedCodexManifest.hooks);
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", "tree"]);
   assert.equal(validVerify.status, 0);

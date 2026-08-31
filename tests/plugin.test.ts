@@ -74,15 +74,19 @@ describe("Agent Plugins package contracts", () => {
     }
 
     expect(codex.skills).toBe("./skills/");
+    expect(codex.hooks).toBe("./hooks/hooks.json");
     expect(codex.interface).toBeDefined();
-    expect(codex).not.toHaveProperty("hooks");
     expect(claude).not.toHaveProperty("skills");
     expect(claude).not.toHaveProperty("hooks");
   });
 
-  it("keeps native hooks at their default discovery path", () => {
+  it("declares Codex hooks explicitly while preserving Claude Code default discovery", () => {
+    const codex = json(".codex-plugin/plugin.json");
+    const claude = json(".claude-plugin/plugin.json");
     const hooks = json("hooks/hooks.json");
     const pluginRoot = ["$", "{CLAUDE_PLUGIN_ROOT}"].join("");
+    expect(codex.hooks).toBe("./hooks/hooks.json");
+    expect(claude).not.toHaveProperty("hooks");
     expect(Object.keys(record(hooks.hooks)).sort()).toEqual(["SessionStart", "SubagentStart"]);
     expect(JSON.stringify(hooks)).toContain(`node \\"${pluginRoot}/hooks/session-start.mjs\\"`);
   });
