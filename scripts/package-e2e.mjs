@@ -81,9 +81,9 @@ try {
   assert.equal(existsSync(join(extractedPackage, "node_modules")), false);
   assert.equal(existsSync(join(extractedRoot, "node_modules")), false);
   assert.equal(existsSync(join(temporaryRoot, "node_modules")), false);
+  assert.equal(existsSync(join(extractedPackage, "plugin.json")), false, "packed plugin must omit root plugin.json");
 
   for (const relativePath of [
-    "plugin.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
     ".agents/plugins/marketplace.json",
@@ -107,9 +107,6 @@ try {
   assert.equal(extractedVersion.status, 0);
   const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
   assert.equal(extractedVersion.stdout, `${manifest.version}\n`);
-  const portableManifest = JSON.parse(readFileSync(join(extractedPackage, "plugin.json"), "utf8"));
-  assert.equal(portableManifest.version, manifest.version);
-  assert.equal(portableManifest.$schema, "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json");
 
   const hook = runNode(join(extractedPackage, "hooks/session-start.mjs"), extractedPackage, [], {
     env: { ...npmEnvironment, CLAUDE_PLUGIN_ROOT: extractedPackage },
@@ -254,8 +251,8 @@ try {
   assert.equal(resolved.status, 0);
   parseWithInstalledSchema(consumerRoot, "contextTreeLinkResultSchema", resolved.stdout);
   const installedPackage = join(consumerRoot, "node_modules/@first-tree-ai/context-tree");
+  assert.equal(existsSync(join(installedPackage, "plugin.json")), false, "installed plugin must omit root plugin.json");
   for (const relativePath of [
-    "plugin.json",
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
     ".agents/plugins/marketplace.json",

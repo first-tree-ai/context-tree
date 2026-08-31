@@ -111,7 +111,7 @@ describe("built CLI", () => {
       "verify",
     ]);
     const version = cli(workspace(), ["--version"]);
-    expect(version).toMatchObject({ status: 0, stderr: "", stdout: "0.1.4\n" });
+    expect(version).toMatchObject({ status: 0, stderr: "", stdout: "0.1.5\n" });
   });
 
   it("runs init, policy, verify, and read with versioned JSON", () => {
@@ -139,7 +139,7 @@ describe("built CLI", () => {
     const workflowPath = resolve(cwd, "tree/.github/workflows/validate-context-tree.yml");
     expect(existsSync(workflowPath)).toBe(true);
     expect(readFileSync(workflowPath, "utf8")).toContain('branches: ["trunk"]');
-    expect(readFileSync(workflowPath, "utf8")).toContain("@first-tree-ai/context-tree@0.1.4 verify");
+    expect(readFileSync(workflowPath, "utf8")).toContain("@first-tree-ai/context-tree@0.1.5 verify");
 
     const policy = cli(cwd, ["policy"]);
     expect(policy.status).toBe(0);

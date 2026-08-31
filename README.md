@@ -171,8 +171,9 @@ selection, read/write lifecycle details, and exact public contracts, see the
 
 ## Compatibility
 
-The root `plugin.json` is the portable Agent Plugins v1 manifest, and compatible
-hosts discover the four skills from `skills/`. The Codex and Claude manifests
-are current-client adapters for installation and lifecycle integration. Both
+The package uses `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` as
+host adapters for installation and lifecycle integration. It intentionally
+omits a root `plugin.json`: Codex 0.151.0 treats that portable manifest as an
+alternate plugin shape and fails to discover bundled lifecycle hooks. Both
 marketplaces install the same npm package, and all plugin components use its
 private packaged CLI at the same version rather than a global `PATH` command.

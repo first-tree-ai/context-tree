@@ -31,16 +31,17 @@ pnpm test:codex-plugin
 ```
 
 This opens Codex in a temporary unlinked project. Use
-`pnpm test:codex-plugin --check` for a non-interactive installation smoke
-test. Both modes remove their temporary marketplace, plugin cache, Codex home,
-and project when they finish.
+`pnpm test:codex-plugin --check` for a non-interactive installation and hook
+discovery smoke test. Both modes remove their temporary marketplace, plugin
+cache, Codex home, and project when they finish.
 
 Before advertising or releasing the remote marketplace flow, verify that npm
-`latest` contains the portable root `plugin.json`, the `.codex-plugin` and
-`.claude-plugin` current-client adapters, both marketplaces, `hooks`, all four
-`skills` and their launchers, and `dist/cli/index.mjs`. The package end-to-end
-test and `npm pack --dry-run` cover the candidate tarball; checking `latest` is
-a release verification step after production publication.
+`latest` contains the `.codex-plugin` and `.claude-plugin` current-client
+adapters, both marketplaces, `hooks`, all four `skills` and their launchers,
+and `dist/cli/index.mjs`. It must not contain a root `plugin.json`, which
+suppresses bundled-hook discovery in Codex 0.151.0. The package
+end-to-end test and `npm pack --dry-run` cover the candidate tarball; checking
+`latest` is a release verification step after production publication.
 
 ## Staging releases
 
@@ -78,6 +79,7 @@ from the Actions tab (`workflow_dispatch` on `main`).
    pnpm validate:skills
    pnpm check:package
    npm pack --dry-run
+   pnpm test:codex-plugin --check
    ```
 
 3. Merge to `main`, then tag that commit and push the tag:
@@ -112,14 +114,14 @@ Only a clean `X.Y.Z` tag moves the stable channel.
 
 ## Version bookkeeping
 
-The package version is declared in `package.json`, the portable root
-`plugin.json`, the `metadata.version` frontmatter of every
-`skills/*/SKILL.md`, and both current-client adapter manifests.
+The package version is declared in `package.json`, the `metadata.version`
+frontmatter of every `skills/*/SKILL.md`, and both current-client adapter
+manifests.
 The skill and plugin package-contract tests assert they match, and `prepack`
 runs those tests on every publish, so version drift fails the release.
 
 `scripts/sync-skill-versions.mjs` copies `package.json`'s version into each
-skill and all three plugin manifests. It is idempotent and takes `--check` to
+skill and both plugin manifests. It is idempotent and takes `--check` to
 report drift without writing:
 
 ```bash

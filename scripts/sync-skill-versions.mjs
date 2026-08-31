@@ -1,4 +1,4 @@
-// Propagates package.json's version into skills and all plugin manifests.
+// Propagates package.json's version into skills and both host plugin manifests.
 //
 // Package contract tests assert skill and manifest versions equal the package
 // version, so they must move together. Release automation rewrites package.json
@@ -52,7 +52,7 @@ for (const file of skillFiles) {
   if (!checkOnly) writeFileSync(file, source.replace(frontmatter, updated));
 }
 
-const manifestPaths = ["plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
+const manifestPaths = [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
 
 for (const relativePath of manifestPaths) {
   const file = join(projectRoot, relativePath);

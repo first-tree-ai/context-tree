@@ -6,7 +6,7 @@ usage() {
   echo "Usage: scripts/test-codex-plugin-local.sh [--check]"
   echo ""
   echo "With no option, install the packed working tree into an isolated Codex home and launch Codex."
-  echo "With --check, verify installation non-interactively and exit."
+  echo "With --check, verify installation and hook discovery non-interactively and exit."
 }
 
 mode="launch"
@@ -103,8 +103,12 @@ echo "Installed plugins:"
 CODEX_HOME="$codex_test_home" codex plugin list
 
 if [[ $mode == "check" ]]; then
+  node "$script_directory/check-codex-plugin-hooks.mjs" \
+    "$codex_test_home" \
+    "$smoke_project" \
+    "$marketplace_root/.agents/plugins/marketplace.json"
   echo ""
-  echo "Local Codex plugin smoke test passed."
+  echo "Local Codex plugin installation and hook-discovery smoke test passed."
   exit 0
 fi
 
