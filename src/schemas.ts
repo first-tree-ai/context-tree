@@ -33,9 +33,12 @@ export const CLI_ERROR_CODES = {
   ambiguousLink: "AMBIGUOUS_LINK",
   corruptLink: "CORRUPT_LINK",
   failed: "CONTEXT_TREE_FAILED",
+  githubAuth: "GITHUB_AUTH",
   noCommits: "NO_COMMITS",
   noLink: "NO_LINK",
   noRemote: "NO_REMOTE",
+  publishIncomplete: "PUBLISH_INCOMPLETE",
+  repositoryExists: "REPOSITORY_EXISTS",
   staleLink: "STALE_LINK",
 } as const;
 
@@ -284,6 +287,113 @@ export const contextTreeDiffResultSchema = z
   })
   .strict();
 export type ContextTreeDiffResult = z.infer<typeof contextTreeDiffResultSchema>;
+
+export const contextTreeStateSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("local"), path: absoluteSingleLinePathSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("github"),
+      path: absoluteSingleLinePathSchema,
+      repository: githubRepositoryIdentitySchema,
+    })
+    .strict(),
+]);
+export type ContextTreeState = z.infer<typeof contextTreeStateSchema>;
+
+export const initializeProjectResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    commitSha: z.string(),
+    created: z.boolean(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    title: z.string().trim().min(1),
+    treePath: absoluteSingleLinePathSchema,
+  })
+  .strict();
+export type InitializeProjectResult = z.infer<typeof initializeProjectResultSchema>;
+
+export const connectProjectResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    tree: contextTreeStateSchema,
+  })
+  .strict();
+export type ConnectProjectResult = z.infer<typeof connectProjectResultSchema>;
+
+export const contextTreeSyncResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    sha: z.string(),
+    tree: contextTreeStateSchema,
+    updated: z.boolean(),
+  })
+  .strict();
+export type ContextTreeSyncResult = z.infer<typeof contextTreeSyncResultSchema>;
+
+export const prepareContextWriteResultSchema = z
+  .object({
+    baseSha: z.string(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    taskBranch: z.string().trim().min(1),
+    tree: contextTreeStateSchema,
+    worktreePath: absoluteSingleLinePathSchema,
+  })
+  .strict();
+export type PrepareContextWriteResult = z.infer<typeof prepareContextWriteResultSchema>;
+
+export const finishContextWriteResultSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      branch: z.string().trim().min(1),
+      schemaVersion: z.literal(SCHEMA_VERSION),
+      sha: z.string(),
+      status: z.literal("applied"),
+      tree: contextTreeStateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      branch: z.string().trim().min(1),
+      pullRequestUrl: z.string(),
+      schemaVersion: z.literal(SCHEMA_VERSION),
+      sha: z.string(),
+      status: z.literal("pull-request"),
+      tree: contextTreeStateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      message: z.string(),
+      schemaVersion: z.literal(SCHEMA_VERSION),
+      status: z.literal("conflict"),
+      taskBranch: z.string().trim().min(1),
+      worktreePath: absoluteSingleLinePathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      message: z.string(),
+      schemaVersion: z.literal(SCHEMA_VERSION),
+      status: z.literal("outdated"),
+      taskBranch: z.string().trim().min(1),
+      worktreePath: absoluteSingleLinePathSchema,
+    })
+    .strict(),
+]);
+export type FinishContextWriteResult = z.infer<typeof finishContextWriteResultSchema>;
+
+export const contextTreePublishResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    created: z.boolean(),
+    repository: githubRepositoryIdentitySchema,
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    sha: z.string(),
+    url: credentialFreeRepositoryUrlSchema,
+  })
+  .strict();
+export type ContextTreePublishResult = z.infer<typeof contextTreePublishResultSchema>;
 
 export const contextTreePushResultSchema = z
   .object({
