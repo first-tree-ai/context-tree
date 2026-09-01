@@ -1,7 +1,7 @@
 # Context Tree
 
 `@first-tree-ai/context-tree` provides durable, structured project context for
-coding agents. It ships a portable core, CLI, policy, templates, hook, and six
+coding agents. It ships a portable core, CLI, templates, and six
 framework-neutral skills.
 
 A Context Tree records current decisions, constraints, relationships, and their
@@ -19,43 +19,41 @@ are credential-free `OWNER/REPO` identities, never URLs containing credentials.
 
 ## Install
 
-### Codex or Claude Code plugin (recommended)
-
-Install the marketplace and plugin, then start a new session so the host can
-discover the skills and lifecycle hook.
-
-For Codex:
-
 ```bash
-codex plugin marketplace add first-tree-ai/context-tree
-codex plugin add context-tree@context-tree
+npm install --global @first-tree-ai/context-tree
 ```
 
-For Claude Code:
+That installs the `context-tree` command and copies the six skills into the
+skill directory of every agent you already have:
 
-```bash
-claude plugin marketplace add first-tree-ai/context-tree
-claude plugin install context-tree@context-tree
+```text
+✓ claude  → ~/.claude/skills/   (6 skills)
+✓ codex   → ~/.codex/skills/    (6 skills)
 ```
 
-Both marketplaces install the same npm package, and every plugin component uses
-its private packaged CLI rather than a global `PATH` command — so plugin users
-need no separate CLI installation. Review and trust the session-start hook if
-your host asks. Then try asking:
+Restart your agent so it discovers them, then try asking:
 
 > Set up a Context Tree for this project, then read the relevant context.
 
 > Write this architectural decision to the Context Tree.
 
-### Global CLI (optional)
-
-Install globally only when scripts or terminal workflows need a `context-tree`
-command on `PATH`:
+Skill installation is a normal command, so you can re-run it after installing a
+new agent, or scope it to one project:
 
 ```bash
-npm install --global @first-tree-ai/context-tree
-context-tree --help
+context-tree install                       # every agent you have
+context-tree install --host codex          # one agent
+context-tree install --project .           # ./.claude/skills and ./.codex/skills
 ```
+
+Installing only ever writes `context-tree-*` skill directories, never touches
+skills it does not own, and never creates a configuration directory for an agent
+that is not present. Adding support for another agent is one entry in the host
+table in `src/core/install.ts`.
+
+Once a project is connected, `create` and `connect` record the tree in the
+project's own `AGENTS.md`, so any agent that reads instruction files knows the
+tree exists without host-specific configuration.
 
 ## Six skills
 
@@ -65,8 +63,7 @@ context-tree --help
 connection. It asks whether to create a new tree or connect an existing one,
 then delegates to the create or connect workflow rather than duplicating
 lifecycle policy. Read and write invoke setup when the current project has no
-connection, and the session hook remains silent. Setup never publishes without
-explicit confirmation.
+connection. Setup never publishes without explicit confirmation.
 
 ### Create
 
@@ -142,9 +139,12 @@ preserves the worktree. Prepare again and reapply the intended semantic change
 once; there is no automatic rebase, retry loop, or pull-request fallback.
 
 A preserved or abandoned write leaves its temporary worktree on disk and a
-`context-tree/write/<name>` branch in the tree. Nothing removes these for you:
-clear them with `git worktree remove <path>` and `git branch -D <branch>` in the
-connected tree once you no longer need the pending edits.
+`context-tree/write/<name>` branch in the tree. The next `prepare-write` reclaims
+one of these only when it holds no commit your checkout lacks, has no pending
+change, and has gone untouched for twenty-four hours, so a worktree you are still
+editing and a `WRITE_OUTDATED` worktree awaiting its retry are both left alone.
+Those keep their pending edits until you clear them with
+`git worktree remove <path>` and `git branch -D <branch>` in the connected tree.
 
 ### Publish
 
@@ -181,15 +181,15 @@ commit or discard them), `INVALID_TREE` (structure fails `verify`),
 The public command inventory is:
 
 ```text
-create  connect  list  resolve  sync  prepare-write  finish-write
-publish  read  verify  policy
+install  create  connect  list  resolve  sync  prepare-write
+finish-write  publish  read  verify
 ```
 
 Setup, create, connect, read, write, and publish ship as six skills; setup
-orchestrates the five concrete workflows. `resolve`, `sync`, `prepare-write`,
-`finish-write`, `verify`, and `policy` are plugin plumbing or diagnostic
-commands rather than separate user intentions; `list` backs setup's
-connect-target discovery.
+orchestrates the five concrete workflows. `install` is the distribution
+entry point, run for you by `npm install`. `resolve`, `sync`, `prepare-write`,
+`finish-write`, and `verify` are plumbing or diagnostic commands rather than
+separate user intentions; `list` backs setup's connect-target discovery.
 All machine-readable responses use strict schema version `1`.
 
 `verify` is intended for CI and diagnostics. Normal skills invoke it only after
@@ -202,10 +202,7 @@ pnpm install
 pnpm check
 pnpm typecheck
 pnpm test
-pnpm build
-pnpm validate:skills
 pnpm check:package
-npm pack --dry-run
 ```
 
 See [docs/specification.md](docs/specification.md) for contracts and safety

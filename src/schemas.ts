@@ -2,8 +2,6 @@ import { isAbsolute } from "node:path";
 
 import { z } from "zod";
 
-import { parseMarkdownFrontmatter } from "./internal/frontmatter.js";
-
 export const SCHEMA_VERSION = 1 as const;
 export const CONTEXT_TREE_ROOT_NODE_MAX_BYTES = 16 * 1024;
 
@@ -121,20 +119,6 @@ export const contextTreeRootNodeSchema = z.object({
 
 export type ContextTreeRootNode = z.infer<typeof contextTreeRootNodeSchema>;
 
-export function parseContextTreeRootNode(markdown: string): ContextTreeRootNode {
-  if (Buffer.byteLength(markdown, "utf8") > CONTEXT_TREE_ROOT_NODE_MAX_BYTES) {
-    throw new Error(`Root NODE.md exceeds the ${CONTEXT_TREE_ROOT_NODE_MAX_BYTES}-byte limit.`);
-  }
-  const document = parseMarkdownFrontmatter(markdown);
-  if (document.frontmatter === "missing") {
-    throw new Error("Root NODE.md must contain YAML frontmatter.");
-  }
-  if (document.frontmatter === "invalid") {
-    throw new Error(`Root NODE.md frontmatter is invalid: ${document.error}`);
-  }
-  return contextTreeRootNodeSchema.parse({ frontmatter: document.data, body: document.body });
-}
-
 export const contextContentClassSchema = z.enum(["normal", "member", "repo-infra"]);
 export type ContextContentClass = z.infer<typeof contextContentClassSchema>;
 
@@ -160,13 +144,36 @@ export const contextContentClassCountsSchema = z
   .strict();
 export type ContextContentClassCounts = z.infer<typeof contextContentClassCountsSchema>;
 
-export const contextTreePolicySchema = z
+export const SKILL_HOSTS = ["claude", "codex"] as const;
+export const skillHostSchema = z.enum(SKILL_HOSTS);
+export type SkillHost = z.infer<typeof skillHostSchema>;
+
+export const skillInstallationSchema = z
   .object({
-    content: z.string(),
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    host: skillHostSchema,
+    path: absoluteSingleLinePathSchema,
+    skills: z.array(z.string().trim().min(1)),
   })
   .strict();
-export type ContextTreePolicy = z.infer<typeof contextTreePolicySchema>;
+export type SkillInstallation = z.infer<typeof skillInstallationSchema>;
+
+export const skillInstallSkipSchema = z
+  .object({
+    host: skillHostSchema,
+    reason: z.string().trim().min(1),
+  })
+  .strict();
+export type SkillInstallSkip = z.infer<typeof skillInstallSkipSchema>;
+
+export const installSkillsResultSchema = z
+  .object({
+    installed: z.array(skillInstallationSchema),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    skipped: z.array(skillInstallSkipSchema),
+    version: z.string().trim().min(1),
+  })
+  .strict();
+export type InstallSkillsResult = z.infer<typeof installSkillsResultSchema>;
 
 const contextTreeReadKindSchema = z.enum(["directory", "file"]);
 const contextTreeReadCommonFields = {
@@ -243,11 +250,16 @@ export const contextTreeConnectionResultSchema = z
   .strict();
 export type ContextTreeConnectionResult = z.infer<typeof contextTreeConnectionResultSchema>;
 
+/** Whether the project's AGENTS.md pointer was created, rewritten, or left alone. */
+export const projectPointerOutcomeSchema = z.enum(["written", "updated", "skipped"]);
+export type ProjectPointerOutcome = z.infer<typeof projectPointerOutcomeSchema>;
+
 export const createProjectResultSchema = z
   .object({
     branch: z.string().trim().min(1),
     commitSha: z.string(),
     created: z.boolean(),
+    pointer: projectPointerOutcomeSchema,
     schemaVersion: z.literal(SCHEMA_VERSION),
     title: z.string().trim().min(1),
     treePath: absoluteSingleLinePathSchema,
@@ -255,7 +267,13 @@ export const createProjectResultSchema = z
   .strict();
 export type CreateProjectResult = z.infer<typeof createProjectResultSchema>;
 
-export const connectProjectResultSchema = contextTreeConnectionResultSchema;
+export const connectProjectResultSchema = z
+  .object({
+    pointer: projectPointerOutcomeSchema,
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    tree: contextTreeStateSchema,
+  })
+  .strict();
 export type ConnectProjectResult = z.infer<typeof connectProjectResultSchema>;
 
 export const managedTreeListingEntrySchema = z

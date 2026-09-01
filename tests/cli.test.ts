@@ -16,7 +16,6 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   contextTreeCliErrorEnvelopeSchema,
-  contextTreePolicySchema,
   contextTreeReadResultSchema,
   managedTreeListingResultSchema,
   verifyTreeReportSchema,
@@ -118,8 +117,8 @@ describe("built CLI", () => {
       "connect",
       "create",
       "finish-write",
+      "install",
       "list",
-      "policy",
       "prepare-write",
       "publish",
       "read",
@@ -151,12 +150,73 @@ describe("built CLI", () => {
 
     const read = JSON.parse(cli(project, ["read", "--tree-path", created.treePath], undefined, root).stdout);
     expect(contextTreeReadResultSchema.parse(read)).toMatchObject({ target: "." });
-    expect(JSON.parse(cli(project, ["policy"], undefined, root).stdout)).toEqual(
-      JSON.parse(cli(project, ["policy"], undefined, root).stdout),
+  });
+
+  it("records the tree in the project's own AGENTS.md", () => {
+    const root = workspace();
+    const project = join(root, "service");
+    mkdirSync(project);
+    const created = JSON.parse(cli(project, ["create"], undefined, root).stdout) as CreateResult & {
+      pointer: string;
+    };
+    expect(created.pointer).toBe("written");
+    const instructions = readFileSync(join(project, "AGENTS.md"), "utf8");
+    expect(instructions).toContain("<!-- context-tree:begin -->");
+    expect(instructions).toContain(created.treePath);
+    expect(instructions).toContain("<!-- context-tree:end -->");
+
+    // Reconnecting the same tree rewrites the single block rather than appending another.
+    const reconnected = JSON.parse(cli(project, ["connect", "service-context-tree"], undefined, root).stdout) as {
+      pointer: string;
+    };
+    expect(reconnected.pointer).toBe("skipped");
+    const after = readFileSync(join(project, "AGENTS.md"), "utf8");
+    expect(after.match(/context-tree:begin/gu)).toHaveLength(1);
+  });
+
+  it("installs the packaged skills into a named project directory", () => {
+    const root = workspace();
+    const project = join(root, "service");
+    mkdirSync(project);
+    const result = JSON.parse(
+      cli(project, ["install", "--host", "claude", "--project", project], undefined, root).stdout,
     );
-    expect(
-      contextTreePolicySchema.safeParse(JSON.parse(cli(project, ["policy"], undefined, root).stdout)).success,
-    ).toBe(true);
+    expect(result.schemaVersion).toBe(1);
+    expect(result.version).toBe(PACKAGE_VERSION);
+    expect(result.installed).toHaveLength(1);
+    expect(result.installed[0].host).toBe("claude");
+    expect(result.installed[0].skills).toEqual([
+      "context-tree-connect",
+      "context-tree-create",
+      "context-tree-publish",
+      "context-tree-read",
+      "context-tree-setup",
+      "context-tree-write",
+    ]);
+    const installed = join(project, ".claude", "skills", "context-tree-read", "SKILL.md");
+    expect(existsSync(installed)).toBe(true);
+    expect(readFileSync(installed, "utf8")).toContain("context-tree sync");
+    // Codex interface metadata travels with the skill.
+    expect(existsSync(join(project, ".claude", "skills", "context-tree-read", "agents", "openai.yaml"))).toBe(true);
+  });
+
+  it("skips absent hosts on a home install rather than creating their directories", () => {
+    const root = workspace();
+    const result = JSON.parse(cli(root, ["install"], undefined, root).stdout);
+    expect(result.installed).toEqual([]);
+    expect(result.skipped.map((entry: { host: string }) => entry.host).sort()).toEqual(["claude", "codex"]);
+    expect(existsSync(join(root, ".claude"))).toBe(false);
+    expect(existsSync(join(root, ".codex"))).toBe(false);
+  });
+
+  it("installs into a host directory the user already has", () => {
+    const root = workspace();
+    mkdirSync(join(root, ".claude"));
+    const result = JSON.parse(cli(root, ["install"], undefined, root).stdout);
+    expect(result.installed.map((entry: { host: string }) => entry.host)).toEqual(["claude"]);
+    expect(result.skipped.map((entry: { host: string }) => entry.host)).toEqual(["codex"]);
+    expect(existsSync(join(root, ".claude", "skills", "context-tree-write", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(root, ".codex"))).toBe(false);
   });
 
   it("is idempotent for repeated create", () => {
@@ -228,7 +288,11 @@ describe("built CLI", () => {
     const second = join(root, "second");
     mkdirSync(second);
     const connected = JSON.parse(cli(second, ["connect", "first-context-tree"], undefined, root).stdout);
-    expect(connected).toEqual({ schemaVersion: 1, tree: { kind: "local", path: created.treePath } });
+    expect(connected).toEqual({
+      pointer: "written",
+      schemaVersion: 1,
+      tree: { kind: "local", path: created.treePath },
+    });
     expect(JSON.parse(cli(second, ["resolve"], undefined, root).stdout)).toEqual({
       schemaVersion: 1,
       tree: { kind: "local", path: created.treePath },
@@ -255,7 +319,7 @@ describe("built CLI", () => {
     mkdirSync(second);
     const tree = create(root, first).treePath;
     const connected = JSON.parse(cli(second, ["connect", "--tree-path", tree], undefined, root).stdout);
-    expect(connected).toEqual({ schemaVersion: 1, tree: { kind: "local", path: tree } });
+    expect(connected).toEqual({ pointer: "written", schemaVersion: 1, tree: { kind: "local", path: tree } });
     expect(JSON.parse(cli(second, ["resolve"], undefined, root).stdout).tree.path).toBe(tree);
   });
 

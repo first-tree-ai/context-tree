@@ -7,10 +7,11 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectProject, listManagedTrees, managedTreesRoot, resolveConnection } from "../src/core/connections.js";
@@ -66,6 +67,16 @@ function project(name = "service"): string {
 
 function addLeaf(root: string, name: string): void {
   writeFileSync(join(root, `${name}.md`), `---\ntitle: "${name}"\n---\n\n# ${name}\n`);
+}
+
+/** Age a prepared worktree past the abandonment threshold. */
+function backdate(path: string): void {
+  const past = Date.now() / 1000 - 48 * 60 * 60;
+  utimesSync(path, past, past);
+}
+
+function writeBranches(treePath: string): string {
+  return git(treePath, ["for-each-ref", "--format=%(refname:short)", "refs/heads/context-tree/write/"]);
 }
 
 function githubRunner(remote: string, log: string[][] = []): CommandRunner {
@@ -219,6 +230,52 @@ describe("disk-path connections", () => {
   });
 });
 
+describe("abandoned write reclamation", () => {
+  it("reclaims a stale preparation that was never edited", () => {
+    const currentProject = project();
+    const treePath = createProject(currentProject).treePath;
+    const abandoned = prepareContextWrite(currentProject);
+    expect(writeBranches(treePath)).not.toBe("");
+
+    backdate(abandoned.worktreePath);
+    const current = prepareContextWrite(currentProject);
+    expect(existsSync(abandoned.worktreePath)).toBe(false);
+    expect(writeBranches(treePath).split("\n")).toEqual([`context-tree/write/${basename(current.worktreePath)}`]);
+
+    // Reclamation stays invisible in the contract and leaves the new write usable.
+    expect(current).toEqual({ schemaVersion: 1, worktreePath: expect.any(String) });
+    addLeaf(current.worktreePath, "survivor");
+    expect(
+      finishContextWrite({
+        message: "Write after reclamation",
+        projectPath: currentProject,
+        worktreePath: current.worktreePath,
+      }),
+    ).toMatchObject({ branch: "trunk" });
+  });
+
+  it("preserves a stale preparation that holds pending edits", () => {
+    const currentProject = project();
+    createProject(currentProject);
+    const editing = prepareContextWrite(currentProject);
+    addLeaf(editing.worktreePath, "in-progress");
+    backdate(editing.worktreePath);
+
+    prepareContextWrite(currentProject);
+    expect(existsSync(join(editing.worktreePath, "in-progress.md"))).toBe(true);
+  });
+
+  it("preserves a fresh preparation so concurrent writes survive", () => {
+    const currentProject = project();
+    const treePath = createProject(currentProject).treePath;
+    const concurrent = prepareContextWrite(currentProject);
+
+    prepareContextWrite(currentProject);
+    expect(existsSync(concurrent.worktreePath)).toBe(true);
+    expect(writeBranches(treePath).split("\n")).toHaveLength(2);
+  });
+});
+
 describe("GitHub lifecycle", () => {
   it("clones, syncs the checked-out branch, and pushes one direct write", () => {
     const { remote } = bareTree();
@@ -227,7 +284,12 @@ describe("GitHub lifecycle", () => {
     const runner = githubRunner(remote, log);
     const connected = connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
     expect(connected.tree).toMatchObject({ kind: "github", repository: "acme/context" });
-    expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner)).toEqual(connected);
+    expect(connected.pointer).toBe("written");
+    // An identical reconnect is idempotent, including the project pointer it already wrote.
+    expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner)).toEqual({
+      ...connected,
+      pointer: "skipped",
+    });
     expect(syncProject(currentProject, runner).branch).toBe("trunk");
     const prepared = prepareContextWrite(currentProject, runner);
     addLeaf(prepared.worktreePath, "published");
@@ -275,6 +337,12 @@ describe("GitHub lifecycle", () => {
       ),
     ).toThrow(expect.objectContaining({ code: "WRITE_OUTDATED" }));
     expect(existsSync(prepared.worktreePath)).toBe(true);
+
+    // Its commit is unmerged, so reclamation must leave it alone however stale it looks.
+    backdate(prepared.worktreePath);
+    const retry = prepareContextWrite(currentProject, runner);
+    expect(existsSync(prepared.worktreePath)).toBe(true);
+    expect(retry.worktreePath).not.toBe(prepared.worktreePath);
   });
 
   it("rejects a foreign prepared worktree", () => {

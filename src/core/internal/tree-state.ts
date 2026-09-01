@@ -1,11 +1,9 @@
-import { lstatSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { realpathSync } from "node:fs";
 import type { ContextTreeState } from "../../schemas.js";
-import { CLI_ERROR_CODES, parseContextTreeRootNode } from "../../schemas.js";
+import { CLI_ERROR_CODES } from "../../schemas.js";
 import { realDirectoryWithoutSymlinks } from "../path.js";
 import { verifyTree } from "../verify.js";
 import { ContextTreeError } from "./errors.js";
-import { readUtf8File } from "./filesystem.js";
 import { type CommandRunner, git, optionalGit } from "./git.js";
 
 /**
@@ -26,16 +24,6 @@ function exactGitRoot(treePath: string, runner?: CommandRunner): string {
     throw new Error("Context Tree path must be the real Git root.");
   }
   return root;
-}
-
-/** Parse the root NODE.md, refusing symlinked or irregular files. */
-export function parseRootNode(root: string): ReturnType<typeof parseContextTreeRootNode> {
-  const path = join(root, "NODE.md");
-  const entry = lstatSync(path);
-  if (entry.isSymbolicLink() || !entry.isFile()) {
-    throw new Error("Context Tree root NODE.md must be a regular file.");
-  }
-  return parseContextTreeRootNode(readUtf8File(path));
 }
 
 /**

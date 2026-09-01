@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 
@@ -10,17 +10,20 @@ import {
 } from "../schemas.js";
 import { resolveConnectionRecord } from "./connections.js";
 import { ContextTreeError } from "./internal/errors.js";
-import { CommandError, type CommandRunner, git } from "./internal/git.js";
+import { CommandError, type CommandRunner, git, optionalGit } from "./internal/git.js";
 import { realDirectoryWithoutSymlinks } from "./path.js";
 import { syncProject } from "./sync.js";
 import { verifyTree } from "./verify.js";
 
 const TASK_BRANCH_PREFIX = "context-tree/write/";
+/** A prepared worktree left untouched for longer than this is treated as abandoned. */
+const ABANDONED_WRITE_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Synchronize first, then create an isolated task worktree at the exact HEAD. */
 export function prepareContextWrite(projectPath: string, runner?: CommandRunner): PrepareContextWriteResult {
   const synchronized = syncProject(projectPath, runner);
   const root = synchronized.tree.path;
+  reclaimAbandonedWrites(root, synchronized.branch, runner);
   const destination = mkdtempSync(join(tmpdir(), "context-tree-write-"));
   const taskBranch = `${TASK_BRANCH_PREFIX}${basename(destination)}`;
   try {
@@ -141,4 +144,68 @@ function isNonFastForward(error: unknown): boolean {
 function removeWorktree(root: string, worktreePath: string, taskBranch: string, runner?: CommandRunner): void {
   git(root, ["worktree", "remove", worktreePath], { message: "Removing the write worktree failed.", runner });
   git(root, ["branch", "-D", taskBranch], { message: "Deleting the write branch failed.", runner });
+}
+
+/** Map every reserved write branch that still has a registered worktree to its path. */
+function listWriteWorktrees(root: string, runner?: CommandRunner): Map<string, string> {
+  const paths = new Map<string, string>();
+  const output = optionalGit(root, ["worktree", "list", "--porcelain"], runner);
+  if (output === undefined) return paths;
+  let path: string | undefined;
+  for (const record of output.split("\n")) {
+    if (record.startsWith("worktree ")) {
+      path = record.slice("worktree ".length).trim();
+      continue;
+    }
+    if (!record.startsWith("branch refs/heads/")) continue;
+    const branch = record.slice("branch refs/heads/".length).trim();
+    if (path !== undefined && branch.startsWith(TASK_BRANCH_PREFIX)) paths.set(branch, path);
+  }
+  return paths;
+}
+
+function millisecondsSinceModification(path: string): number | undefined {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A preparation is abandoned only when it carries no commit the connected
+ * checkout lacks, has no pending edits, and has gone untouched. Every unknown
+ * answer preserves the worktree, so a `WRITE_OUTDATED` commit awaiting its
+ * retry and a concurrent preparation both survive.
+ */
+function isAbandonedWrite(
+  root: string,
+  branch: string,
+  checkoutBranch: string,
+  path: string | undefined,
+  runner?: CommandRunner,
+): boolean {
+  if (optionalGit(root, ["rev-list", "--count", branch, "--not", checkoutBranch], runner) !== "0") return false;
+  if (path === undefined) return true;
+  const age = millisecondsSinceModification(path);
+  if (age === undefined || age < ABANDONED_WRITE_AGE_MS) return false;
+  return optionalGit(path, ["status", "--porcelain", "--untracked-files=all"], runner) === "";
+}
+
+/** Reclaim earlier preparations that were never finished. Every step is best effort. */
+function reclaimAbandonedWrites(root: string, checkoutBranch: string, runner?: CommandRunner): void {
+  optionalGit(root, ["worktree", "prune"], runner);
+  const paths = listWriteWorktrees(root, runner);
+  const branches = optionalGit(
+    root,
+    ["for-each-ref", "--format=%(refname:short)", `refs/heads/${TASK_BRANCH_PREFIX}`],
+    runner,
+  );
+  if (branches === undefined) return;
+  for (const branch of branches.split("\n").filter((value) => value.length > 0)) {
+    const path = paths.get(branch);
+    if (!isAbandonedWrite(root, branch, checkoutBranch, path, runner)) continue;
+    if (path !== undefined) optionalGit(root, ["worktree", "remove", path], runner);
+    optionalGit(root, ["branch", "-D", branch], runner);
+  }
 }

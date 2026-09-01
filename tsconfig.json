@@ -9,8 +9,6 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "declaration": true,
-    "outDir": "dist",
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]

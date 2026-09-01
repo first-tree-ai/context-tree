@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { readContextDocument } from "../src/core/internal/context-document.js";
+import { parseContextTreeRootNode } from "../src/core/internal/root-node.js";
 import { parseMarkdownFrontmatter } from "../src/internal/frontmatter.js";
-import { parseContextTreeRootNode } from "../src/schemas.js";
 
 const temporaryRoots = new Set<string>();
 

@@ -5,19 +5,15 @@ license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
   author: first-tree-ai
-  version: "0.1.6"
 ---
 
 # Context Tree Publish
 
-Resolve `<skill-directory>` to this skill's directory and run
-`node "<skill-directory>/scripts/context-tree.mjs" --version` once per session.
-If the packaged CLI is unavailable, stop and ask the user to reinstall or
-update the plugin.
+If `context-tree` is not found, stop and ask the user to run
+`npm install --global @first-tree-ai/context-tree`.
 
-Run `node "<skill-directory>/scripts/context-tree.mjs" publish`. When the user
-explicitly supplies an alternative, append the validated `OWNER/REPO` argument.
-Never accept a repository URL.
+Run `context-tree publish`. When the user explicitly supplies an alternative,
+append the validated `OWNER/REPO` argument. Never accept a repository URL.
 
 Publication creates one new private repository, and the local connection update
 that follows is not part of the same atomic step. If it reports

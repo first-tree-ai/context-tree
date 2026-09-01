@@ -1,10 +1,10 @@
 # Release
 
 `@first-tree-ai/context-tree` publishes from `.github/workflows/ci.yml` using
-npm trusted publishing. npm is both the plugin artifact channel used by the
-Codex and Claude Code marketplaces and the optional global CLI distribution
-channel. Authentication is short-lived OIDC exchanged at publish time; the
-repository holds no npm token and no publish secret.
+npm trusted publishing. npm is the single distribution channel: it delivers the
+CLI and, through `postinstall`, the six skills. Authentication is short-lived
+OIDC exchanged at publish time; the repository holds no npm token and no publish
+secret.
 
 Two channels exist:
 
@@ -20,28 +20,18 @@ npm install @first-tree-ai/context-tree@staging    # newest build of main
 
 Both channels run behind the `test` job. A red CI run publishes nothing.
 
-## Local plugin testing
+## Local install testing
 
-Marketplace installation from the repository requires repository access. For
-local development, test the actual packed working tree in an isolated Codex
-configuration instead of the npm `latest` package:
+`pnpm check:package` packs the real working tree, installs it into a scratch
+consumer with scripts enabled, and asserts that a local install writes no
+skills, that a global `postinstall` places all six at mode `0644` for a host
+that exists while skipping one that does not, and that the repository docs, a
+library entry point, and per-skill launcher scripts stay out of the tarball. It
+then drives the create/resolve/install/verify/read lifecycle against the
+installed CLI and removes everything it created.
 
-```bash
-pnpm test:codex-plugin
-```
-
-This opens Codex in a temporary unconnected project. Use
-`pnpm test:codex-plugin --check` for a non-interactive installation and hook
-discovery smoke test. Both modes remove their temporary marketplace, plugin
-cache, Codex home, and project when they finish.
-
-Before advertising or releasing the remote marketplace flow, verify that npm
-`latest` contains the `.codex-plugin` and `.claude-plugin` current-client
-adapters, both marketplaces, `hooks`, all six `skills` and their launchers, and
-`dist/cli/index.mjs`. It must not contain a root `plugin.json`, which
-suppresses bundled-hook discovery in Codex 0.151.0. The package
-end-to-end test and `npm pack --dry-run` cover the candidate tarball; checking
-`latest` is a release verification step after production publication.
+This is the only tarball check CI runs. It asserts the packed file list entry by
+entry, so a separate `npm pack --dry-run` step would add nothing.
 
 ## Staging releases
 
@@ -61,26 +51,13 @@ from the Actions tab (`workflow_dispatch` on `main`).
 
 ## Production releases
 
-1. Bump `version` in `package.json` and propagate it to the skills:
+1. Bump `version` in `package.json`:
 
    ```bash
    npm version <X.Y.Z> --no-git-tag-version
-   node scripts/sync-skill-versions.mjs
    ```
 
-2. Run the full pre-publish set from `AGENTS.md`:
-
-   ```bash
-   pnpm install
-   pnpm check
-   pnpm typecheck
-   pnpm test
-   pnpm build
-   pnpm validate:skills
-   pnpm check:package
-   npm pack --dry-run
-   pnpm test:codex-plugin --check
-   ```
+2. Run the full pre-publish command set from `AGENTS.md`.
 
 3. Merge to `main`, then tag that commit and push the tag:
 
@@ -114,23 +91,10 @@ Only a clean `X.Y.Z` tag moves the stable channel.
 
 ## Version bookkeeping
 
-The package version is declared in `package.json`, the `metadata.version`
-frontmatter of every `skills/*/SKILL.md`, and both current-client adapter
-manifests.
-The skill and plugin package-contract tests assert they match, and `prepack`
-runs those tests on every publish, so version drift fails the release.
-
-`scripts/sync-skill-versions.mjs` copies `package.json`'s version into each
-skill and both plugin manifests. It is idempotent and takes `--check` to
-report drift without writing:
-
-```bash
-node scripts/sync-skill-versions.mjs           # fix
-node scripts/sync-skill-versions.mjs --check   # verify
-```
-
-CI runs it on the runner after rewriting the version. That rewrite is never
-committed back to the repository — releases do not push to `main`.
+`package.json` is the only place the version is declared. The skills ship in the
+same tarball as the CLI that installs them, so there is nothing to keep in sync
+and no drift to guard against. CI rewrites `package.json` on the runner; that
+rewrite is never committed back — releases do not push to `main`.
 
 ## What CI does not do
 
@@ -187,10 +151,12 @@ not match this repository or workflow filename, or the job is missing
 `id-token: write`. Compare against the table above; the match is exact and
 case-sensitive.
 
-**Publish fails inside `prepack`** — `npm publish` re-runs
-`pnpm build && pnpm validate:skills`. A skills assertion failure here almost
-always means the skill frontmatter version drifted from `package.json`; run
-`node scripts/sync-skill-versions.mjs`.
+**Publish fails inside `prepack`** — `npm publish` re-runs `pnpm build`. A
+failure here is a build failure; reproduce it locally with `pnpm build`.
+
+**A consumer installed the CLI but has no skills** — they installed locally
+rather than with `--global`, or with `--ignore-scripts`, so `postinstall` either
+declined to write or never ran. Have them run `context-tree install`.
 
 **A version is permanently unavailable** — npm never lets an unpublished
 version number be reused. Choose the next version rather than trying to

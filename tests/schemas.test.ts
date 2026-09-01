@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { readTree } from "../src/core/read.js";
 import { scaffoldTree } from "../src/core/scaffold.js";
-import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
+import { verifyTree } from "../src/core/verify.js";
 import {
   contextTreeCliErrorEnvelopeSchema,
-  contextTreePolicySchema,
   contextTreePublishResultSchema,
   contextTreeReadChildSchema,
   contextTreeReadNodeSchema,
@@ -37,14 +37,13 @@ afterEach(() => {
 /**
  * The wire contracts are exercised end to end in cli.test.ts, which parses real
  * command output through these schemas. These cases cover only what that cannot:
- * that library results serialize unchanged, and that the two hand-written
+ * that core results serialize unchanged, and that the two hand-written
  * refinements actually refuse unsafe values.
  */
-describe("public JSON schemas", () => {
-  it("parses every library result without changing serialized form", () => {
+describe("JSON schemas", () => {
+  it("parses every core result without changing serialized form", () => {
     const root = tree();
     const results: Array<readonly [unknown, { parse: (value: unknown) => unknown }]> = [
-      [readContextTreePolicy(), contextTreePolicySchema],
       [verifyTree(root), verifyTreeReportSchema],
       [readTree(root), contextTreeReadResultSchema],
     ];

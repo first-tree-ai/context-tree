@@ -31,6 +31,7 @@ import { ContextTreeError } from "./internal/errors.js";
 import { type CommandRunner, git, optionalGit } from "./internal/git.js";
 import { canonicalGitHubRepositoryUrl, gitHubRepositoryFromOriginUrl } from "./internal/github-repository.js";
 import { canonicalProjectRoot } from "./internal/project.js";
+import { writeProjectPointer } from "./internal/project-pointer.js";
 import { validateStoredTreeState, validateTreeCheckout } from "./internal/tree-state.js";
 
 const connectionsFileSchema = z
@@ -263,10 +264,18 @@ export type ConnectProjectOptions = { projectPath: string; target: string } | { 
  * clean, fully valid Git checkout at an explicit disk path in place.
  */
 export function connectProject(options: ConnectProjectOptions, runner?: CommandRunner): ConnectProjectResult {
-  if ("treePath" in options) {
-    const tree = classifyCheckout(options.treePath, runner);
-    return upsertConnection({ projectPath: options.projectPath, tree }, runner);
-  }
+  /** Store the connection, then record it in the project so any agent can find it. */
+  const connect = (tree: ContextTreeConnection["tree"]): ConnectProjectResult => {
+    const result = upsertConnection({ projectPath: options.projectPath, tree }, runner);
+    const canonical = canonicalProjectRoot(options.projectPath, runner);
+    return {
+      pointer: writeProjectPointer(canonical, result.tree.path),
+      schemaVersion: SCHEMA_VERSION,
+      tree: result.tree,
+    };
+  };
+
+  if ("treePath" in options) return connect(classifyCheckout(options.treePath, runner));
 
   const treesRoot = managedTreesRoot();
   if (!options.target.includes("/")) {
@@ -274,8 +283,7 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     const destination = join(treesRoot, name);
     if (!existsSync(destination)) throw new Error(`No managed Context Tree named ${name} exists.`);
     realManagedDirectory(name, destination);
-    const tree = classifyCheckout(destination, runner);
-    return upsertConnection({ projectPath: options.projectPath, tree }, runner);
+    return connect(classifyCheckout(destination, runner));
   }
 
   const repository = githubRepositoryIdentitySchema.parse(options.target);
@@ -290,7 +298,7 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     if (tree.kind !== "github" || !sameRepository(tree.repository, repository)) {
       throw new Error(`Managed Context Tree name ${name} is already used by a different tree.`);
     }
-    return upsertConnection({ projectPath: options.projectPath, tree }, runner);
+    return connect(tree);
   }
 
   mkdirSync(destination, { mode: 0o700 });
@@ -304,7 +312,7 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     if (tree.kind !== "github" || !sameRepository(tree.repository, repository)) {
       throw new Error("The cloned Context Tree origin does not match the requested repository.");
     }
-    return upsertConnection({ projectPath: options.projectPath, tree }, runner);
+    return connect(tree);
   } catch (error) {
     rmSync(destination, { force: true, recursive: true });
     throw error;
