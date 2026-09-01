@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -7,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,11 +17,16 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { upsertConnection } from "../src/core/connections.js";
+import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
+import { publishProject } from "../src/core/publish.js";
+import { scaffoldTree } from "../src/core/scaffold.js";
+import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
 import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
 const EXAMPLES = resolve(import.meta.dirname, "../examples");
+const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8")).version;
 const temporaryRoots = new Set<string>();
 const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
 const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
@@ -48,7 +55,7 @@ beforeEach(() => {
 
 function validTree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context" });
+  scaffoldTree({ path: root, name: "context" });
   return root;
 }
 
@@ -297,7 +304,7 @@ describe("scaffold and policy", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
     expect(workflow).toContain('branches: ["trunk"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.5 verify");
+    expect(workflow).toContain(`@first-tree-ai/context-tree@${PACKAGE_VERSION} verify`);
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
@@ -315,19 +322,10 @@ describe("scaffold and policy", () => {
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
   });
 
-  it("rejects malformed GitHub identities", () => {
+  it("rejects malformed tree names", () => {
     const base = { path: join(tempRoot(), "tree") };
-    for (const repository of [
-      "https://github.com/acme/context",
-      "acme-/context",
-      `${"a".repeat(40)}/context`,
-      "acme/.",
-      "acme/..",
-      "acme/context.git",
-      "acme/context/extra",
-      " acme/context",
-    ]) {
-      expect(() => scaffoldTree({ ...base, repository }), repository).toThrow();
+    for (const name of ["acme/context", "context.git", ".", "..", ".hidden", " context", "a/b/c"]) {
+      expect(() => scaffoldTree({ ...base, name }), name).toThrow();
     }
   });
 
@@ -341,10 +339,27 @@ describe("scaffold and policy", () => {
     symlinkSync(realDirectory, linkedDirectory);
     symlinkSync(join(temporary, "missing"), danglingLink);
     writeFileSync(file, "not a directory\n");
-    const options = { repository: "acme/context" };
+    const options = { name: "context" };
     expect(() => scaffoldTree({ ...options, path: linkedDirectory })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: danglingLink })).toThrow(/symlink or non-directory/u);
     expect(() => scaffoldTree({ ...options, path: file })).toThrow(/symlink or non-directory/u);
+  });
+
+  it("commits the verified scaffold without configuring an origin", () => {
+    const root = join(tempRoot(), "committed");
+    const result = scaffoldTree({ path: root, name: "context" });
+    expect(result.branch).toBe("trunk");
+    expect(result.commit).toMatch(/^[0-9a-f]{40}$/u);
+    const status = spawnSync("git", ["-C", root, "status", "--porcelain", "--untracked-files=all"], {
+      encoding: "utf8",
+    });
+    expect(status.stdout).toBe("");
+    const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
+    expect(head.stdout.trim()).toBe(result.commit);
+    const remotes = spawnSync("git", ["-C", root, "remote"], { encoding: "utf8" });
+    expect(remotes.stdout).toBe("");
+    const message = spawnSync("git", ["-C", root, "log", "-1", "--format=%s"], { encoding: "utf8" });
+    expect(message.stdout).toBe("Initialize Context Tree\n");
   });
 
   it("uses Git's effective default branch and initializes the repository", () => {
@@ -361,7 +376,7 @@ describe("scaffold and policy", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = tempRoot();
     try {
-      expect(() => scaffoldTree({ path: root, repository: "acme/context" })).toThrow(/initialize Git repository/u);
+      expect(() => scaffoldTree({ path: root, name: "context" })).toThrow(/initialize Git repository/u);
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
@@ -386,5 +401,182 @@ describe("scaffold and policy", () => {
     const root = validTree();
     writeFileSync(join(root, "legacy.md"), '---\ntitle: "Legacy metadata"\nowners: false\n---\n');
     expect(verifyTree(root)).toMatchObject({ findings: [], ok: true });
+  });
+});
+
+describe("publish", () => {
+  const originalHome = process.env.HOME;
+  beforeEach(() => {
+    process.env.HOME = tempRoot();
+  });
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+  });
+
+  type Script = (command: string, args: string[]) => { status?: number; stderr?: string; stdout?: string } | undefined;
+
+  function scriptedRunner(script: Script, log: string[][] = []): CommandRunner {
+    return (command, args) => {
+      log.push([command, ...args]);
+      const response = script(command, args);
+      if (response === undefined && command === "git") return defaultRunner(command, args);
+      return { status: response?.status ?? 0, stderr: response?.stderr ?? "", stdout: response?.stdout ?? "" };
+    };
+  }
+
+  function publishError(run: () => unknown): { code: string | undefined; message: string } {
+    try {
+      run();
+    } catch (error) {
+      return { code: (error as { code?: string }).code, message: (error as Error).message };
+    }
+    throw new Error("Expected publish to fail.");
+  }
+
+  function connectedProject(): { project: string; tree: string } {
+    const project = join(tempRoot(), "service");
+    mkdirSync(project, { recursive: true });
+    const tree = join(process.env.HOME ?? "", ".context-tree", "trees", "publish-tree");
+    mkdirSync(join(process.env.HOME ?? "", ".context-tree", "trees"), { recursive: true });
+    scaffoldTree({ path: tree, name: "context" });
+    const realProject = realpathSync(project);
+    const realTree = realpathSync(tree);
+    upsertConnection({ projectPath: realProject, tree: { kind: "local", path: realTree } });
+    return { project: realProject, tree: realTree };
+  }
+
+  function accountRunner(log: string[][]): CommandRunner {
+    return scriptedRunner((command, args) => {
+      if (command === "gh" && args[0] === "api") return { stdout: "octocat\n" };
+      return undefined;
+    }, log);
+  }
+
+  it("creates the default private repository for the authenticated account and managed tree name", () => {
+    const { project, tree } = connectedProject();
+    const log: string[][] = [];
+    const result = publishProject(project, {}, accountRunner(log));
+    expect(result).toEqual({
+      branch: "trunk",
+      repository: "octocat/publish-tree",
+      schemaVersion: 1,
+      sha: expect.stringMatching(/^[a-f\d]{40}$/u),
+      url: "https://github.com/octocat/publish-tree.git",
+    });
+    expect(log).toContainEqual([
+      "gh",
+      "repo",
+      "create",
+      "octocat/publish-tree",
+      "--private",
+      "--source",
+      tree,
+      "--remote",
+      "origin",
+      "--push",
+    ]);
+  });
+
+  it("accepts an explicit OWNER/REPO override without contacting the account", () => {
+    const { project } = connectedProject();
+    const log: string[][] = [];
+    const runner = scriptedRunner(() => undefined, log);
+    const result = publishProject(project, { repository: "acme/Context" }, runner);
+    expect(result.repository).toBe("acme/Context");
+    expect(log.some(([command, ...args]) => command === "gh" && args[0] === "api")).toBe(false);
+  });
+
+  it("rejects local state that already has an origin", () => {
+    const { project, tree } = connectedProject();
+    const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
+      encoding: "utf8",
+    });
+    if (added.status !== 0) throw new Error(added.stderr);
+    const failure = publishError(() =>
+      publishProject(
+        project,
+        { repository: "acme/context" },
+        scriptedRunner(() => undefined),
+      ),
+    );
+    expect(failure.code).toBe("CONTEXT_TREE_FAILED");
+    expect(failure.message).toContain("must not already have an origin");
+  });
+
+  it("rejects an already published tree", () => {
+    const { project, tree } = connectedProject();
+    const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
+      encoding: "utf8",
+    });
+    if (added.status !== 0) throw new Error(added.stderr);
+    upsertConnection({ projectPath: project, tree: { kind: "github", path: tree, repository: "acme/context" } });
+    const failure = publishError(() => publishProject(project, {}, accountRunner([])));
+    expect(failure.code).toBe("CONTEXT_TREE_FAILED");
+    expect(failure.message).toContain("already published");
+  });
+
+  it("reports repository name collisions as REPOSITORY_EXISTS", () => {
+    const { project } = connectedProject();
+    const runner = scriptedRunner((command, args) => {
+      if (command === "gh" && args[0] === "repo") return { status: 1, stderr: "owner/name already exists" };
+      return undefined;
+    });
+    const failure = publishError(() => publishProject(project, { repository: "acme/context" }, runner));
+    expect(failure.code).toBe("REPOSITORY_EXISTS");
+  });
+
+  it("reports missing GitHub authentication as GITHUB_AUTH", () => {
+    const { project } = connectedProject();
+    const runner = scriptedRunner((command) =>
+      command === "gh" ? { status: 1, stderr: "gh auth login required" } : undefined,
+    );
+    const failure = publishError(() => publishProject(project, {}, runner));
+    expect(failure.code).toBe("GITHUB_AUTH");
+  });
+
+  it.each(["network unreachable", "HTTP 403 permission denied"])(
+    "reports ambiguous account lookup failure %j as PUBLISH_INCOMPLETE",
+    (stderr) => {
+      const { project } = connectedProject();
+      const runner = scriptedRunner((command, args) => {
+        if (command === "gh" && args[0] === "api") return { status: 1, stderr };
+        return undefined;
+      });
+      const failure = publishError(() => publishProject(project, {}, runner));
+      expect(failure.code).toBe("PUBLISH_INCOMPLETE");
+    },
+  );
+
+  it.each([
+    "gh auth login required",
+    "HTTP 403 permission denied",
+    "network unreachable",
+    "repository created but push failed",
+  ])("surfaces ambiguous publication failure %j as PUBLISH_INCOMPLETE", (stderr) => {
+    const { project } = connectedProject();
+    const runner = scriptedRunner((command, args) => {
+      if (command === "gh" && args[0] === "repo") return { status: 1, stderr };
+      return undefined;
+    });
+    const failure = publishError(() => publishProject(project, { repository: "acme/context" }, runner));
+    expect(failure.code).toBe("PUBLISH_INCOMPLETE");
+  });
+
+  it("refuses to publish an invalid tree", () => {
+    const { project, tree } = connectedProject();
+    // A clean but structurally invalid tree fails verification at publish time.
+    const members = join(tree, "members", "engineer");
+    mkdirSync(members, { recursive: true });
+    writeFileSync(join(members, "memory.md"), '---\ntitle: "Memory"\n---\n\n# Memory\n');
+    const gitRun = (args: string[]): void => {
+      const result = spawnSync("git", ["-C", tree, ...args], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(result.stderr);
+    };
+    gitRun(["add", "."]);
+    gitRun(["-c", "user.name=T", "-c", "user.email=t@example.test", "commit", "--quiet", "-m", "invalid"]);
+    const failure = publishError(() => publishProject(project, {}, accountRunner([])));
+    expect(failure.code).toBe("INVALID_TREE");
+    expect(failure.message).toContain("context-tree verify");
   });
 });

@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Read"
-  short_description: "Read Context Tree decisions and memory"
-  default_prompt: "Use $context-tree-read with the agent_slug from authoritative role instructions."
+  short_description: "Read durable project decisions"
+  default_prompt: "Use $context-tree-read before planning or changing code."

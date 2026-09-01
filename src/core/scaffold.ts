@@ -1,9 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { SCHEMA_VERSION, type ScaffoldTreeResult } from "../schemas.js";
-import { canonicalGitHubRepositoryUrl, parseGitHubRepositoryIdentity } from "./internal/github-repository.js";
+import { treeNameSchema } from "../schemas.js";
+import { type CommandRunner, git, gitCommand } from "./internal/git.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 import { verifyTree } from "./verify.js";
 
@@ -16,35 +15,59 @@ function template(name: string, values: Record<string, string>): string {
 }
 
 export type ScaffoldTreeOptions = {
+  name: string;
   path: string;
-  repository: string;
+  runner?: CommandRunner | undefined;
 };
 
-function initializeGitRepository(root: string, repository: string): string {
-  const initialized = spawnSync("git", ["init", "--quiet", root], { stdio: "ignore" });
-  if (initialized.error !== undefined || initialized.status !== 0) {
-    throw new Error("Failed to initialize Git repository.");
-  }
+type ScaffoldTreeResult = {
+  branch: string;
+  commit: string;
+  root: string;
+};
 
-  const branch = spawnSync("git", ["-C", root, "symbolic-ref", "--short", "HEAD"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+/** Templated regular files, written before the CLAUDE.md -> AGENTS.md symlink. */
+const TEMPLATED_FILES: Array<readonly [string, string]> = [
+  ["NODE.md", "root-node.md"],
+  ["AGENTS.md", "AGENTS.md"],
+  [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
+];
+
+const SCAFFOLD_FILES = ["NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"];
+
+function initializeGitRepository(root: string, runner?: CommandRunner): string {
+  gitCommand(["init", "--quiet", "--", root], { message: "Failed to initialize Git repository.", runner });
+  return git(root, ["symbolic-ref", "--short", "HEAD"], {
+    message: "Failed to resolve the initial Git branch during repository initialization.",
+    runner,
   });
-  const name = branch.stdout.replace(/\r?\n$/u, "");
-  if (branch.error !== undefined || branch.status !== 0 || name.length === 0) {
-    throw new Error("Failed to resolve the initial Git branch during repository initialization.");
+}
+
+function commitScaffold(root: string, runner?: CommandRunner): string {
+  for (const file of SCAFFOLD_FILES) {
+    git(root, ["add", "--", file], { message: "Failed to stage the scaffold files.", runner });
   }
-  const remote = spawnSync("git", ["-C", root, "remote", "add", "origin", canonicalGitHubRepositoryUrl(repository)], {
-    stdio: "ignore",
-  });
-  if (remote.error !== undefined || remote.status !== 0) {
-    throw new Error("Failed to configure the credential-free Context Tree origin.");
-  }
-  return name;
+  git(
+    root,
+    [
+      "-c",
+      "user.name=Context Tree",
+      "-c",
+      "user.email=context-tree@localhost",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--quiet",
+      "-m",
+      "Initialize Context Tree",
+    ],
+    { message: "Failed to commit the scaffold.", runner },
+  );
+  return git(root, ["rev-parse", "HEAD"], { message: "Failed to resolve the scaffold commit.", runner });
 }
 
 export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
-  const title = parseGitHubRepositoryIdentity(options.repository);
+  const name = treeNameSchema.parse(options.name);
   const root = resolve(options.path);
   const destination = lstatSync(root, { throwIfNoEntry: false });
   if (destination !== undefined) {
@@ -55,36 +78,20 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
       throw new Error(`Refusing to scaffold into a non-empty directory: ${root}`);
     }
   }
-  const initialBranch = initializeGitRepository(root, options.repository);
+  const initialBranch = initializeGitRepository(root, options.runner);
   const values = {
     branchJson: JSON.stringify(initialBranch),
     packageVersion: readPackageVersion(),
-    title,
-    titleJson: JSON.stringify(title),
+    title: name,
+    titleJson: JSON.stringify(name),
   };
-  const regularFiles: Array<readonly [string, string]> = [
-    ["NODE.md", "root-node.md"],
-    ["AGENTS.md", "AGENTS.md"],
-    [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
-  ];
-  const files = ["NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"];
-
-  for (const [relativePath, source] of regularFiles.slice(0, 2)) {
+  for (const [relativePath, source] of TEMPLATED_FILES) {
     const path = join(root, relativePath);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
   }
   symlinkSync("AGENTS.md", join(root, "CLAUDE.md"), "file");
-  for (const [relativePath, source] of regularFiles.slice(2)) {
-    const path = join(root, relativePath);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
-  }
 
-  return {
-    files,
-    root,
-    schemaVersion: SCHEMA_VERSION,
-    verification: verifyTree(root),
-  };
+  if (!verifyTree(root).ok) throw new Error("Refusing to commit an invalid Context Tree scaffold.");
+  return { branch: initialBranch, commit: commitScaffold(root, options.runner), root };
 }

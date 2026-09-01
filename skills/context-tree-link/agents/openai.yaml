@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Tree Link"
-  short_description: "Link a project to its Context Tree"
-  default_prompt: "Use $context-tree-link with an optional project_path and either tree_path or repository."

@@ -1,6 +1,6 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Context Tree plugin for Codex and Claude Code, with a CLI for shell automation.",
   "type": "module",
   "license": "Apache-2.0",

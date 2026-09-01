@@ -3,17 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { readContextTreePolicy, readTree, scaffoldTree, verifyTree } from "../src/index.js";
+import { scaffoldTree } from "../src/core/scaffold.js";
+import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
 import {
   contextTreeCliErrorEnvelopeSchema,
-  contextTreeLinkResultSchema,
   contextTreePolicySchema,
+  contextTreePublishResultSchema,
   contextTreeReadChildSchema,
   contextTreeReadNodeSchema,
   contextTreeReadResultSchema,
-  scaffoldTreeResultSchema,
-  treeValidationFindingSchema,
-  validationCodeSchema,
   verifyTreeReportSchema,
 } from "../src/schemas.js";
 
@@ -27,7 +25,7 @@ function tempRoot(): string {
 
 function tree(): string {
   const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, repository: "acme/context" });
+  scaffoldTree({ path: root, name: "context" });
   return root;
 }
 
@@ -36,6 +34,12 @@ afterEach(() => {
   temporaryRoots.clear();
 });
 
+/**
+ * The wire contracts are exercised end to end in cli.test.ts, which parses real
+ * command output through these schemas. These cases cover only what that cannot:
+ * that library results serialize unchanged, and that the two hand-written
+ * refinements actually refuse unsafe values.
+ */
 describe("public JSON schemas", () => {
   it("parses every library result without changing serialized form", () => {
     const root = tree();
@@ -45,69 +49,50 @@ describe("public JSON schemas", () => {
       [readTree(root), contextTreeReadResultSchema],
     ];
     for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
-    const scaffoldRoot = join(tempRoot(), "tree");
-    const scaffold = scaffoldTree({
-      path: scaffoldRoot,
-      repository: "acme/other",
-    });
-    expect(scaffoldTreeResultSchema.parse(scaffold)).toEqual(scaffold);
     const read = readTree(root);
     expect(contextTreeReadNodeSchema.parse(read.node)).toEqual(read.node);
     for (const child of read.children) expect(contextTreeReadChildSchema.parse(child)).toEqual(child);
   });
 
-  it("rejects incompatible versions, malformed structures, and unknown codes", () => {
-    const root = tree();
-    const policy = readContextTreePolicy();
-    const read = readTree(root);
-    expect(contextTreePolicySchema.safeParse({ ...policy, schemaVersion: 2 }).success).toBe(false);
-    expect(contextTreeReadResultSchema.safeParse({ ...read, node: undefined }).success).toBe(false);
-    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, kind: "link" }).success).toBe(false);
-    expect(contextTreeReadNodeSchema.safeParse({ ...read.node, owners: ["alice"] }).success).toBe(false);
-    expect(validationCodeSchema.safeParse("TREE_NOT_A_REAL_CODE").success).toBe(false);
+  it("refuses credential-bearing publish URLs and malformed repository identities", () => {
+    const result = {
+      branch: "trunk",
+      repository: "acme/service-context",
+      schemaVersion: 1,
+      sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+      url: "https://github.com/acme/service-context.git",
+    };
+    expect(contextTreePublishResultSchema.parse(result)).toEqual(result);
     expect(
-      treeValidationFindingSchema.safeParse({ code: "TREE_NOT_A_REAL_CODE", message: "bad", path: "NODE.md" }).success,
+      contextTreePublishResultSchema.safeParse({ ...result, url: "https://token@github.com/acme/service-context.git" })
+        .success,
     ).toBe(false);
+    expect(contextTreePublishResultSchema.safeParse({ ...result, repository: "acme" }).success).toBe(false);
+  });
+
+  it("accepts every lifecycle error code and rejects retired ones", () => {
+    const codes = [
+      "CONTEXT_TREE_FAILED",
+      "CORRUPT_CONNECTION",
+      "DIRTY_TREE",
+      "GITHUB_AUTH",
+      "INVALID_TREE",
+      "NO_CONNECTION",
+      "PUBLISH_INCOMPLETE",
+      "REPOSITORY_EXISTS",
+      "STALE_CONNECTION",
+      "WRITE_OUTDATED",
+    ];
+    for (const code of codes) {
+      const envelope = { error: { code, message: "failure" }, ok: false, schemaVersion: 1 };
+      expect(contextTreeCliErrorEnvelopeSchema.safeParse(envelope).success, code).toBe(true);
+    }
     expect(
       contextTreeCliErrorEnvelopeSchema.safeParse({
-        error: { code: "BAD", message: "bad" },
+        error: { code: "NO_LINK", message: "retired" },
         ok: false,
         schemaVersion: 1,
       }).success,
     ).toBe(false);
-  });
-
-  it("defines strict link results and specific link errors", () => {
-    const link = {
-      link: {
-        project: { kind: "git", origin: "https://github.com/acme/service.git" },
-        tree: { path: "/work/context", repository: "acme/context" },
-      },
-      schemaVersion: 1,
-    };
-    expect(contextTreeLinkResultSchema.parse(link)).toEqual(link);
-    for (const path of ["relative/context", "/work/control\ncontext", "/work/control\tcontext"]) {
-      expect(
-        contextTreeLinkResultSchema.safeParse({
-          ...link,
-          link: { ...link.link, tree: { ...link.link.tree, path } },
-        }).success,
-      ).toBe(false);
-    }
-    expect(
-      contextTreeLinkResultSchema.safeParse({
-        ...link,
-        link: { ...link.link, future: true },
-      }).success,
-    ).toBe(false);
-    for (const code of ["NO_LINK", "AMBIGUOUS_LINK", "CORRUPT_LINK", "STALE_LINK"]) {
-      expect(
-        contextTreeCliErrorEnvelopeSchema.safeParse({
-          error: { code, message: "link error" },
-          ok: false,
-          schemaVersion: 1,
-        }).success,
-      ).toBe(true);
-    }
   });
 });

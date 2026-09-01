@@ -1,7 +1,7 @@
 {
   "name": "context-tree",
-  "version": "0.1.5",
-  "description": "Complete Context Tree plugin with linking, reading, durable writes, and a packaged CLI.",
+  "version": "0.1.6",
+  "description": "Durable project context for coding agents: set up, read, write, and privately publish a Context Tree.",
   "author": {
     "name": "First Tree AI",
     "url": "https://github.com/first-tree-ai"
@@ -14,16 +14,16 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Context Tree",
-    "shortDescription": "Resolve and use durable project context",
-    "longDescription": "Link projects to verified Context Tree checkouts, then resolve, read, and publish durable context without persisting branches or credentials.",
+    "shortDescription": "Read and write durable project context",
+    "longDescription": "Set up (create or connect) a verified Context Tree, read the decisions and constraints that bear on a task, record durable decisions, and publish local trees privately.",
     "developerName": "First Tree AI",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/first-tree-ai/context-tree",
     "defaultPrompt": [
-      "Link this project to its Context Tree.",
-      "Read the relevant Context Tree context.",
-      "Publish this durable decision to the Context Tree."
+      "Set up a Context Tree (create or connect) when this project has none.",
+      "Read the relevant Context Tree decisions before changing this code.",
+      "Write this durable decision to the Context Tree."
     ]
   }
 }

@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Write"
-  short_description: "Publish durable Context Tree updates"
-  default_prompt: "Use $context-tree-write with concrete evidence and the agent_slug from authoritative role instructions."
+  short_description: "Write a durable project decision"
+  default_prompt: "Use $context-tree-write once a decision is settled."

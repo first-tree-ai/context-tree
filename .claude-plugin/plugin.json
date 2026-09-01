@@ -1,7 +1,7 @@
 {
   "name": "context-tree",
-  "version": "0.1.5",
-  "description": "Complete Context Tree plugin with linking, reading, durable writes, and a packaged CLI.",
+  "version": "0.1.6",
+  "description": "Durable project context for coding agents: set up, read, write, and privately publish a Context Tree.",
   "author": {
     "name": "First Tree AI"
   },

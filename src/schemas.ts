@@ -30,11 +30,16 @@ export const VALIDATION_CODES = {
 } as const;
 
 export const CLI_ERROR_CODES = {
-  ambiguousLink: "AMBIGUOUS_LINK",
-  corruptLink: "CORRUPT_LINK",
+  corruptConnection: "CORRUPT_CONNECTION",
+  dirtyTree: "DIRTY_TREE",
   failed: "CONTEXT_TREE_FAILED",
-  noLink: "NO_LINK",
-  staleLink: "STALE_LINK",
+  githubAuth: "GITHUB_AUTH",
+  invalidTree: "INVALID_TREE",
+  noConnection: "NO_CONNECTION",
+  publishIncomplete: "PUBLISH_INCOMPLETE",
+  repositoryExists: "REPOSITORY_EXISTS",
+  staleConnection: "STALE_CONNECTION",
+  writeOutdated: "WRITE_OUTDATED",
 } as const;
 
 function hasUnsafeCharacter(value: string): boolean {
@@ -80,6 +85,12 @@ export const credentialFreeRepositoryUrlSchema = z.string().superRefine((value, 
   }
 });
 
+export const treeNameSchema = z.string().superRefine((value, context) => {
+  if (!/^[A-Za-z\d][A-Za-z\d._-]{0,99}$/u.test(value) || /\.git$/iu.test(value)) {
+    context.addIssue({ code: "custom", message: "Tree name must be a safe single path segment." });
+  }
+});
+
 export const githubRepositoryIdentitySchema = z.string().superRefine((value, context) => {
   const parts = value.split("/");
   const [owner, name] = parts;
@@ -88,10 +99,7 @@ export const githubRepositoryIdentitySchema = z.string().superRefine((value, con
     owner === undefined ||
     name === undefined ||
     !/^[A-Za-z\d](?:[A-Za-z\d-]{0,37}[A-Za-z\d])?$/u.test(owner) ||
-    !/^[A-Za-z\d._-]{1,100}$/u.test(name) ||
-    name === "." ||
-    name === ".." ||
-    /\.git$/iu.test(name)
+    !treeNameSchema.safeParse(name).success
   ) {
     context.addIssue({ code: "custom", message: "Repository must be an explicit GitHub OWNER/REPO identity." });
   }
@@ -207,74 +215,102 @@ export const verifyTreeReportSchema = z
   .strict();
 export type VerifyTreeReport = z.infer<typeof verifyTreeReportSchema>;
 
-export const scaffoldTreeResultSchema = z
-  .object({
-    files: z.array(z.string()),
-    root: z.string(),
-    schemaVersion: z.literal(SCHEMA_VERSION),
-    verification: verifyTreeReportSchema,
-  })
-  .strict();
-export type ScaffoldTreeResult = z.infer<typeof scaffoldTreeResultSchema>;
-
-export const contextTreeProjectIdentitySchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("git"), origin: credentialFreeRepositoryUrlSchema }).strict(),
-  z.object({ kind: z.literal("directory"), path: absoluteSingleLinePathSchema }).strict(),
+export const contextTreeStateSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("local"), path: absoluteSingleLinePathSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("github"),
+      path: absoluteSingleLinePathSchema,
+      repository: githubRepositoryIdentitySchema,
+    })
+    .strict(),
 ]);
-export type ContextTreeProjectIdentity = z.infer<typeof contextTreeProjectIdentitySchema>;
+export type ContextTreeState = z.infer<typeof contextTreeStateSchema>;
 
-export const contextTreeLinkSchema = z
+export const contextTreeConnectionSchema = z
   .object({
-    project: contextTreeProjectIdentitySchema,
-    tree: z.object({ path: absoluteSingleLinePathSchema, repository: githubRepositoryIdentitySchema }).strict(),
+    projectPath: absoluteSingleLinePathSchema,
+    tree: contextTreeStateSchema,
   })
   .strict();
-export type ContextTreeLink = z.infer<typeof contextTreeLinkSchema>;
+export type ContextTreeConnection = z.infer<typeof contextTreeConnectionSchema>;
 
-export const contextTreeLinkResultSchema = z
-  .object({ link: contextTreeLinkSchema, schemaVersion: z.literal(SCHEMA_VERSION) })
-  .strict();
-export type ContextTreeLinkResult = z.infer<typeof contextTreeLinkResultSchema>;
-
-export const contextTreeRefreshResultSchema = z
+export const contextTreeConnectionResultSchema = z
   .object({
-    link: contextTreeLinkSchema,
-    defaultBranch: z.string().trim().min(1),
-    refreshed: z.boolean(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    tree: contextTreeStateSchema,
+  })
+  .strict();
+export type ContextTreeConnectionResult = z.infer<typeof contextTreeConnectionResultSchema>;
+
+export const createProjectResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    commitSha: z.string(),
+    created: z.boolean(),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    title: z.string().trim().min(1),
+    treePath: absoluteSingleLinePathSchema,
+  })
+  .strict();
+export type CreateProjectResult = z.infer<typeof createProjectResultSchema>;
+
+export const connectProjectResultSchema = contextTreeConnectionResultSchema;
+export type ConnectProjectResult = z.infer<typeof connectProjectResultSchema>;
+
+export const managedTreeListingEntrySchema = z
+  .object({
+    name: treeNameSchema,
+    tree: contextTreeStateSchema,
+  })
+  .strict();
+export type ManagedTreeListingEntry = z.infer<typeof managedTreeListingEntrySchema>;
+
+export const managedTreeListingResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    trees: z.array(managedTreeListingEntrySchema),
+  })
+  .strict();
+export type ManagedTreeListingResult = z.infer<typeof managedTreeListingResultSchema>;
+
+export const contextTreeSyncResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    sha: z.string(),
+    tree: contextTreeStateSchema,
+  })
+  .strict();
+export type ContextTreeSyncResult = z.infer<typeof contextTreeSyncResultSchema>;
+
+export const prepareContextWriteResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    worktreePath: absoluteSingleLinePathSchema,
+  })
+  .strict();
+export type PrepareContextWriteResult = z.infer<typeof prepareContextWriteResultSchema>;
+
+export const finishContextWriteResultSchema = z
+  .object({
+    branch: z.string().trim().min(1),
     schemaVersion: z.literal(SCHEMA_VERSION),
     sha: z.string(),
   })
   .strict();
-export type ContextTreeRefreshResult = z.infer<typeof contextTreeRefreshResultSchema>;
+export type FinishContextWriteResult = z.infer<typeof finishContextWriteResultSchema>;
 
-export const contextTreeStageResultSchema = z
+export const contextTreePublishResultSchema = z
   .object({
-    link: contextTreeLinkSchema,
-    defaultBranch: z.string().trim().min(1),
-    baseSha: z.string(),
+    branch: z.string().trim().min(1),
+    repository: githubRepositoryIdentitySchema,
     schemaVersion: z.literal(SCHEMA_VERSION),
-    taskBranch: z.string().trim().min(1),
-    worktreePath: z.string(),
+    sha: z.string(),
+    url: credentialFreeRepositoryUrlSchema,
   })
   .strict();
-export type ContextTreeStageResult = z.infer<typeof contextTreeStageResultSchema>;
-
-export const contextTreeDiffResultSchema = z
-  .object({
-    base: z.string(),
-    files: z
-      .array(
-        z
-          .object({ path: z.string(), status: z.enum(["added", "deleted", "modified", "renamed", "untracked"]) })
-          .strict(),
-      )
-      .max(4096),
-    patch: z.string(),
-    schemaVersion: z.literal(SCHEMA_VERSION),
-    treePath: z.string(),
-  })
-  .strict();
-export type ContextTreeDiffResult = z.infer<typeof contextTreeDiffResultSchema>;
+export type ContextTreePublishResult = z.infer<typeof contextTreePublishResultSchema>;
 
 export const contextTreeCliErrorCodeSchema = z.enum(CLI_ERROR_CODES);
 export type ContextTreeCliErrorCode = z.infer<typeof contextTreeCliErrorCodeSchema>;

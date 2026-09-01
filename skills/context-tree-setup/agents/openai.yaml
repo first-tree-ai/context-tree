@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Setup"
+  short_description: "Create or connect durable project context"
+  default_prompt: "Use $context-tree-setup when this project has no Context Tree."

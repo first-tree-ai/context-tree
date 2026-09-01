@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Publish"
+  short_description: "Publish durable context privately"
+  default_prompt: "Use $context-tree-publish to share this project's tree privately."
