@@ -28,7 +28,7 @@ describe("plugin package contracts", () => {
       expect(adapter.name).toBe("context-tree");
       expect(adapter.version).toBe(packageManifest.version);
       expect(adapter.description).toBe(
-        "Context Tree setup, creation, connection, reading, writing, and private publication.",
+        "Durable project context for coding agents: set up, read, write, and privately publish a Context Tree.",
       );
     }
 
@@ -37,7 +37,7 @@ describe("plugin package contracts", () => {
     expect(codex.interface).toBeDefined();
     expect(record(codex.interface).defaultPrompt).toEqual([
       "Set up a Context Tree (create or connect) when this project has none.",
-      "Read the relevant Context Tree context for this task.",
+      "Read the relevant Context Tree decisions before changing this code.",
       "Write this durable decision to the Context Tree.",
     ]);
     expect(claude).not.toHaveProperty("skills");

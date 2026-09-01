@@ -153,7 +153,7 @@ write skills, never in the hook. With a connection, it reports only
 `Context Tree connected at <path>`.
 
 Skills invoke the packaged CLI directly as
-`node "<skill-directory>/../../dist/cli/index.mjs"` after checking `--version`.
+`node "<skill-directory>/scripts/context-tree.mjs"` after checking `--version`.
 They rely on the packaged CLI and do not prescribe raw Git/GitHub operations.
 
 The skill inventory is setup, create, connect, read, write, and publish;

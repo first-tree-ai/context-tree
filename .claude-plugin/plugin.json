@@ -1,7 +1,7 @@
 {
   "name": "context-tree",
   "version": "0.1.6",
-  "description": "Context Tree setup, creation, connection, reading, writing, and private publication.",
+  "description": "Durable project context for coding agents: set up, read, write, and privately publish a Context Tree.",
   "author": {
     "name": "First Tree AI"
   },

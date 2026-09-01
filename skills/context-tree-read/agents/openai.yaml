@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Read"
-  short_description: "Synchronize and read durable context"
-  default_prompt: "Use $context-tree-read for task-relevant project context."
+  short_description: "Read durable project decisions"
+  default_prompt: "Use $context-tree-read before planning or changing code."

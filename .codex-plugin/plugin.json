@@ -1,7 +1,7 @@
 {
   "name": "context-tree",
   "version": "0.1.6",
-  "description": "Context Tree setup, creation, connection, reading, writing, and private publication.",
+  "description": "Durable project context for coding agents: set up, read, write, and privately publish a Context Tree.",
   "author": {
     "name": "First Tree AI",
     "url": "https://github.com/first-tree-ai"
@@ -14,15 +14,15 @@
   "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Context Tree",
-    "shortDescription": "Resolve and use durable project context",
-    "longDescription": "Set up (create or connect) verified Context Trees, read relevant context, write durable decisions, and publish local trees privately.",
+    "shortDescription": "Read and write durable project context",
+    "longDescription": "Set up (create or connect) a verified Context Tree, read the decisions and constraints that bear on a task, record durable decisions, and publish local trees privately.",
     "developerName": "First Tree AI",
     "category": "Developer Tools",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/first-tree-ai/context-tree",
     "defaultPrompt": [
       "Set up a Context Tree (create or connect) when this project has none.",
-      "Read the relevant Context Tree context for this task.",
+      "Read the relevant Context Tree decisions before changing this code.",
       "Write this durable decision to the Context Tree."
     ]
   }

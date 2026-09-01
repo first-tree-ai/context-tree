@@ -1,6 +1,6 @@
 ---
 name: context-tree-connect
-description: Connect the current project to a managed Context Tree by name, GitHub OWNER/REPO, or an exact disk path.
+description: Connect the current project to an existing Context Tree by managed name, GitHub OWNER/REPO, or exact disk path. Use when the tree already exists; context-tree-setup delegates here once the user has chosen a target.
 license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
@@ -10,23 +10,25 @@ metadata:
 
 # Context Tree Connect
 
-Resolve `<skill-directory>` to this skill's directory. First run
-`node "<skill-directory>/scripts/context-tree.mjs" --version`. If the packaged
-CLI is unavailable, stop and ask the user to reinstall or update the plugin.
+Resolve `<skill-directory>` to this skill's directory and run
+`node "<skill-directory>/scripts/context-tree.mjs" --version` once per session.
+If the packaged CLI is unavailable, stop and ask the user to reinstall or
+update the plugin.
 
-Run `node "<skill-directory>/scripts/context-tree.mjs" connect "<name-or-OWNER/REPO>"`
-with exactly one managed tree name or GitHub `OWNER/REPO` supplied by the
-user. If the user instead supplies an exact disk path to an existing Context
-Tree checkout, run
-`node "<skill-directory>/scripts/context-tree.mjs" connect --tree-path "<path>"`
-instead. Never accept a repository URL, and never infer, guess, or search the
-filesystem for a path yourself — only pass through a name, `OWNER/REPO`, or
-disk path the user explicitly typed or confirmed. An explicit connect
-automatically switches the project's connection. Report the resulting tree
-kind and canonical path.
+Connect exactly one target supplied by the user:
 
-If connection reports `INVALID_TREE` or `DIRTY_TREE`, report the failure. A
-managed or GitHub tree must be repaired or committed separately before it can
-be selected; for `--tree-path`, the checkout at that exact path must be
-repaired or committed in place, since there is no managed tree to fall back
-to.
+- A managed tree name or GitHub `OWNER/REPO`:
+  `node "<skill-directory>/scripts/context-tree.mjs" connect "<name-or-OWNER/REPO>"`.
+- An exact path to an existing Context Tree checkout:
+  `node "<skill-directory>/scripts/context-tree.mjs" connect --tree-path "<path>"`.
+  That checkout is attached where it already lives and is never copied, moved,
+  or deleted.
+
+Never accept a repository URL, and never infer, guess, or search the filesystem
+for a target yourself; pass through only what the user typed or confirmed. An
+explicit connect switches the project's connection. Report whether the
+connected tree is local or GitHub-backed, with its canonical path.
+
+If connection reports `INVALID_TREE` or `DIRTY_TREE`, report the failure and
+stop. The tree must be repaired or committed at its own location before it can
+be connected.
