@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -104,53 +103,5 @@ describe("skill installation", () => {
     mkdirSync(join(root, ".claude"));
     symlinkSync(outside, join(root, ".claude", "skills"), "dir");
     expect(() => installSkills({ hosts: ["claude"], projectPath: root })).toThrow(/real directory/u);
-  });
-});
-
-/**
- * The postinstall script is the only code that writes to a user's agent configuration without
- * being asked, so its guard is worth testing directly. `npm_config_global` alone is not enough:
- * npm sets it for every dependency of a global install too, so a package that merely depends on
- * Context Tree would otherwise install skills as a side effect.
- */
-describe("postinstall guard", () => {
-  const script = resolve(import.meta.dirname, "..", "scripts", "postinstall.mjs");
-
-  /** Run the guard from a copy of the package placed at `packageRoot`, with an isolated home. */
-  function runFrom(packageRoot: string, home: string, global: boolean): string {
-    mkdirSync(join(packageRoot, "scripts"), { recursive: true });
-    mkdirSync(join(packageRoot, "dist", "cli"), { recursive: true });
-    writeFileSync(join(packageRoot, "scripts", "postinstall.mjs"), readFileSync(script, "utf8"));
-    // Stand in for the built CLI so a permitted run reports an install without doing one.
-    writeFileSync(
-      join(packageRoot, "dist", "cli", "index.mjs"),
-      'process.stdout.write(JSON.stringify({ installed: [{ host: "codex", path: "p", skills: ["s"] }], skipped: [] }));\n',
-    );
-    mkdirSync(join(home, ".codex"), { recursive: true });
-    const result = spawnSync(process.execPath, [join(packageRoot, "scripts", "postinstall.mjs")], {
-      encoding: "utf8",
-      env: { HOME: home, PATH: process.env.PATH ?? "", ...(global ? { npm_config_global: "true" } : {}) },
-    });
-    return result.stdout;
-  }
-
-  it("installs only for a direct global install, never as another package's dependency", () => {
-    const prefix = workspace();
-    const home = workspace();
-
-    // A direct global install: the parent of `node_modules` is npm's prefix, not a package.
-    const direct = join(prefix, "lib", "node_modules", "@first-tree-ai", "context-tree");
-    expect(runFrom(direct, home, true)).toContain("installed 1 skills");
-
-    // A dependency of a global install: the parent of `node_modules` is the owning package.
-    const nested = join(prefix, "lib", "node_modules", "open-tag", "node_modules", "@first-tree-ai", "context-tree");
-    mkdirSync(join(prefix, "lib", "node_modules", "open-tag"), { recursive: true });
-    writeFileSync(join(prefix, "lib", "node_modules", "open-tag", "package.json"), '{"name":"open-tag"}\n');
-    expect(runFrom(nested, workspace(), true)).toContain("run `context-tree install`");
-  });
-
-  it("stays inert for a local install even at the top level", () => {
-    const root = join(workspace(), "node_modules", "@first-tree-ai", "context-tree");
-    expect(runFrom(root, workspace(), false)).toContain("run `context-tree install`");
   });
 });

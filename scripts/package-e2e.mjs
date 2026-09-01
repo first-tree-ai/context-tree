@@ -136,9 +136,8 @@ try {
     "a local install must not write skills to the home directory",
   );
 
-  // Neither does a global install of some *other* package that depends on this one: npm sets
-  // npm_config_global for its dependencies too, so the flag alone cannot authorize the write.
-  // This copy is nested inside the consumer, which is exactly that layout.
+  // Nor does a global install of a package that depends on this one: npm sets npm_config_global
+  // for its dependencies too, and this copy is nested inside the consumer, which is that layout.
   const nestedPostinstall = spawnSync(process.execPath, [join(installedPackage, "scripts/postinstall.mjs")], {
     cwd: consumerRoot,
     encoding: "utf8",
@@ -152,8 +151,8 @@ try {
     "a global install of a dependent package must not write skills to the home directory",
   );
 
-  // A direct global install does, which is the documented path. Installing for real is what
-  // proves it, because the layout npm produces is the whole basis of the distinction.
+  // A direct global install does. Installing for real is what proves it, because the layout npm
+  // produces is the whole basis of the distinction.
   const globalPrefix = join(temporaryRoot, "global-prefix");
   execFileSync("npm", ["install", "-g", "--prefix", globalPrefix, "--no-audit", "--no-fund", tarball], {
     cwd: temporaryRoot,
