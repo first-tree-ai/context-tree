@@ -24,10 +24,13 @@ Context Tree or connect an existing one:
 - To create, delegate to `$context-tree-create`.
 - To connect, run `node "<skill-directory>/scripts/context-tree.mjs" list`.
   When managed trees exist, offer the listed names alongside a GitHub
-  `OWNER/REPO` and an exact disk path. When no managed trees exist, offer only
-  a GitHub `OWNER/REPO` and an exact disk path. Delegate the selected target
-  to `$context-tree-connect`; never accept a repository URL. An explicit
-  connect automatically switches the project's connection.
+  `OWNER/REPO` and an exact disk path (`--tree-path`). When no managed trees
+  exist, offer only a GitHub `OWNER/REPO` and an exact disk path
+  (`--tree-path`). Delegate the selected target to `$context-tree-connect`;
+  never accept a repository URL, and never infer, guess, or search the
+  filesystem for a path yourself — only offer a disk path the user has
+  explicitly typed or confirmed. An explicit connect automatically switches
+  the project's connection.
 
 Never publish a tree without explicit user confirmation. If `resolve` reports
 `CORRUPT_CONNECTION`, `STALE_CONNECTION`, `DIRTY_TREE`, or `INVALID_TREE`,
