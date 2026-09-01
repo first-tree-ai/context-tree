@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { type CreateProjectResult, SCHEMA_VERSION, treeNameSchema } from "../schemas.js";
-import { findConnectionRecord, managedTreesRoot, resolveConnectionRecord, upsertConnection } from "./connections.js";
+import { findConnectionRecord, managedTreesRoot, upsertConnection } from "./connections.js";
 import { type CommandRunner, git } from "./internal/git.js";
 import { canonicalProjectRoot } from "./internal/project.js";
 import { parseRootNode } from "./internal/tree-state.js";
@@ -19,13 +19,7 @@ function projectName(canonicalRoot: string): string {
   return /^[a-z\d]/u.test(normalized) ? normalized : "project";
 }
 
-function existingCreateResult(destination: string, projectPath: string, runner?: CommandRunner): CreateProjectResult {
-  const connection = resolveConnectionRecord(projectPath, runner);
-  if (connection.tree.path !== destination) {
-    throw new Error(
-      `Managed Context Tree name is occupied; run context-tree connect ${projectName(projectPath)}-context-tree.`,
-    );
-  }
+function existingCreateResult(destination: string, runner?: CommandRunner): CreateProjectResult {
   const branch = git(destination, ["symbolic-ref", "--short", "HEAD"], {
     message: "Failed to resolve the managed tree branch.",
     runner,
@@ -49,14 +43,21 @@ export function createProject(projectPath: string, runner?: CommandRunner): Crea
   const canonical = canonicalProjectRoot(projectPath, runner);
   const name = treeNameSchema.parse(`${projectName(canonical)}-context-tree`);
   const destination = join(managedTreesRoot(), name);
+  const current = findConnectionRecord(canonical, runner);
+
+  // Creating must never silently repoint a project that is already connected.
+  if (current !== undefined && current.tree.path !== destination) {
+    throw new Error(
+      `This project is already connected to a Context Tree at ${current.tree.path}; run context-tree connect ${name} to switch.`,
+    );
+  }
 
   if (existsSync(destination)) {
     const entry = lstatSync(destination);
-    const current = findConnectionRecord(canonical, runner);
-    if (entry.isSymbolicLink() || !entry.isDirectory() || current?.tree.path !== destination) {
+    if (entry.isSymbolicLink() || !entry.isDirectory() || current === undefined) {
       throw new Error(`Managed Context Tree name ${name} is occupied; run context-tree connect ${name}.`);
     }
-    return existingCreateResult(destination, canonical, runner);
+    return existingCreateResult(destination, runner);
   }
 
   mkdirSync(destination, { mode: 0o700 });

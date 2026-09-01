@@ -31,8 +31,10 @@ export const VALIDATION_CODES = {
 
 export const CLI_ERROR_CODES = {
   corruptConnection: "CORRUPT_CONNECTION",
+  dirtyTree: "DIRTY_TREE",
   failed: "CONTEXT_TREE_FAILED",
   githubAuth: "GITHUB_AUTH",
+  invalidTree: "INVALID_TREE",
   noConnection: "NO_CONNECTION",
   publishIncomplete: "PUBLISH_INCOMPLETE",
   repositoryExists: "REPOSITORY_EXISTS",

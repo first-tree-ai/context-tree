@@ -6,7 +6,8 @@ import {
   githubRepositoryIdentitySchema,
   SCHEMA_VERSION,
 } from "../schemas.js";
-import { ConnectionError, resolveConnectionRecord, updateConnectionTree } from "./connections.js";
+import { resolveConnectionRecord, updateConnectionTree } from "./connections.js";
+import { ContextTreeError } from "./internal/errors.js";
 import { CommandError, type CommandRunner, gh, git, optionalGit } from "./internal/git.js";
 import { canonicalGitHubRepositoryUrl } from "./internal/github-repository.js";
 
@@ -24,30 +25,33 @@ function authenticatedAccount(runner?: CommandRunner): string {
       error instanceof CommandError &&
       /gh auth login|not logged|authentication failed|http 401|bad credentials/iu.test(error.stderr)
     ) {
-      throw new ConnectionError(
+      throw new ContextTreeError(
         CLI_ERROR_CODES.githubAuth,
         "GitHub authentication failed; run gh auth login before publishing.",
       );
     }
-    throw new ConnectionError(
+    throw new ContextTreeError(
       CLI_ERROR_CODES.publishIncomplete,
       "GitHub account lookup failed; publication did not start and must not be retried automatically.",
     );
   }
   if (login.trim().length === 0) {
-    throw new ConnectionError(CLI_ERROR_CODES.publishIncomplete, "GitHub account lookup returned no repository owner.");
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.publishIncomplete,
+      "GitHub account lookup returned no repository owner.",
+    );
   }
   return login.trim();
 }
 
-function classifyCreationFailure(stderr: string): ConnectionError {
-  if (/\b(?:repository|name|[A-Za-z\d_.-]+\/[A-Za-z\d_.-]+)\b[^\n]*\balready exists\b/iu.test(stderr)) {
-    return new ConnectionError(
+function classifyCreationFailure(stderr: string): ContextTreeError {
+  if (/already exists/iu.test(stderr)) {
+    return new ContextTreeError(
       CLI_ERROR_CODES.repositoryExists,
       "A GitHub repository with this name already exists; choose an explicit OWNER/REPO override.",
     );
   }
-  return new ConnectionError(
+  return new ContextTreeError(
     CLI_ERROR_CODES.publishIncomplete,
     "GitHub repository creation has an uncertain or partial result; do not retry automatically.",
   );
@@ -68,13 +72,13 @@ export function publishProject(
   const connection = resolveConnectionRecord(projectPath, runner);
   const root = connection.tree.path;
   if (connection.tree.kind === "github") {
-    throw new ConnectionError(
+    throw new ContextTreeError(
       CLI_ERROR_CODES.failed,
       `The Context Tree is already published as ${connection.tree.repository}; writes publish new commits automatically.`,
     );
   }
   if (optionalGit(root, ["remote", "get-url", "origin"], runner) !== undefined) {
-    throw new ConnectionError(
+    throw new ContextTreeError(
       CLI_ERROR_CODES.failed,
       "A local Context Tree must not already have an origin before publication.",
     );
@@ -98,13 +102,13 @@ export function publishProject(
     });
   } catch (error) {
     if (error instanceof CommandError) throw classifyCreationFailure(error.stderr);
-    throw new ConnectionError(CLI_ERROR_CODES.publishIncomplete, "GitHub publication ended with an uncertain result.");
+    throw new ContextTreeError(CLI_ERROR_CODES.publishIncomplete, "GitHub publication ended with an uncertain result.");
   }
 
   try {
     updateConnectionTree(connection.projectPath, { kind: "github", path: root, repository }, runner);
   } catch {
-    throw new ConnectionError(
+    throw new ContextTreeError(
       CLI_ERROR_CODES.publishIncomplete,
       "The private repository was created, but updating the local connection failed.",
     );

@@ -20,7 +20,7 @@ try {
   process.exit(0);
 }
 
-if (typeof input !== "object" || input === null || Array.isArray(input)) {
+if (typeof input !== "object" || input === null || Array.isArray(input) || typeof input.cwd !== "string") {
   process.exit(0);
 }
 if (input.hook_event_name !== "SessionStart" && input.hook_event_name !== "SubagentStart") process.exit(0);
@@ -30,18 +30,18 @@ const packagedCli = pluginRoot === undefined ? undefined : join(pluginRoot, "dis
 if (packagedCli === undefined || !existsSync(packagedCli)) {
   process.exit(0);
 }
-const resolved = spawnSync(process.execPath, [packagedCli, "resolve"], {
+const resolved = spawnSync(process.execPath, [packagedCli, "resolve", "--project-path", input.cwd], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "ignore"],
 });
+if (resolved.status !== 0) process.exit(0);
+
 let payload;
 try {
   payload = JSON.parse(resolved.stdout);
 } catch {
   process.exit(0);
 }
-
-if (resolved.status !== 0) process.exit(0);
 
 const tree = payload?.tree;
 if (typeof tree?.path !== "string") process.exit(0);

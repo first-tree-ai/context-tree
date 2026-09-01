@@ -26,6 +26,7 @@ import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
 const EXAMPLES = resolve(import.meta.dirname, "../examples");
+const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8")).version;
 const temporaryRoots = new Set<string>();
 const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
 const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
@@ -303,7 +304,7 @@ describe("scaffold and policy", () => {
     const root = validTree();
     const workflow = readFileSync(join(root, ".github/workflows/validate-context-tree.yml"), "utf8");
     expect(workflow).toContain('branches: ["trunk"]');
-    expect(workflow).toContain("@first-tree-ai/context-tree@0.1.6 verify");
+    expect(workflow).toContain(`@first-tree-ai/context-tree@${PACKAGE_VERSION} verify`);
     expect(existsSync(join(root, ".github/workflows/validate-context-tree.yml"))).toBe(true);
     expect(readFileSync(join(root, "NODE.md"), "utf8")).not.toContain("owners:");
   });
@@ -433,7 +434,7 @@ describe("publish", () => {
     throw new Error("Expected publish to fail.");
   }
 
-  function linkedProject(): { project: string; tree: string } {
+  function connectedProject(): { project: string; tree: string } {
     const project = join(tempRoot(), "service");
     mkdirSync(project, { recursive: true });
     const tree = join(process.env.HOME ?? "", ".context-tree", "trees", "publish-tree");
@@ -453,7 +454,7 @@ describe("publish", () => {
   }
 
   it("creates the default private repository for the authenticated account and managed tree name", () => {
-    const { project, tree } = linkedProject();
+    const { project, tree } = connectedProject();
     const log: string[][] = [];
     const result = publishProject(project, {}, accountRunner(log));
     expect(result).toEqual({
@@ -478,7 +479,7 @@ describe("publish", () => {
   });
 
   it("accepts an explicit OWNER/REPO override without contacting the account", () => {
-    const { project } = linkedProject();
+    const { project } = connectedProject();
     const log: string[][] = [];
     const runner = scriptedRunner(() => undefined, log);
     const result = publishProject(project, { repository: "acme/Context" }, runner);
@@ -487,7 +488,7 @@ describe("publish", () => {
   });
 
   it("rejects local state that already has an origin", () => {
-    const { project, tree } = linkedProject();
+    const { project, tree } = connectedProject();
     const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
       encoding: "utf8",
     });
@@ -504,7 +505,7 @@ describe("publish", () => {
   });
 
   it("rejects an already published tree", () => {
-    const { project, tree } = linkedProject();
+    const { project, tree } = connectedProject();
     const added = spawnSync("git", ["-C", tree, "remote", "add", "origin", "https://github.com/acme/context.git"], {
       encoding: "utf8",
     });
@@ -516,7 +517,7 @@ describe("publish", () => {
   });
 
   it("reports repository name collisions as REPOSITORY_EXISTS", () => {
-    const { project } = linkedProject();
+    const { project } = connectedProject();
     const runner = scriptedRunner((command, args) => {
       if (command === "gh" && args[0] === "repo") return { status: 1, stderr: "owner/name already exists" };
       return undefined;
@@ -526,7 +527,7 @@ describe("publish", () => {
   });
 
   it("reports missing GitHub authentication as GITHUB_AUTH", () => {
-    const { project } = linkedProject();
+    const { project } = connectedProject();
     const runner = scriptedRunner((command) =>
       command === "gh" ? { status: 1, stderr: "gh auth login required" } : undefined,
     );
@@ -537,7 +538,7 @@ describe("publish", () => {
   it.each(["network unreachable", "HTTP 403 permission denied"])(
     "reports ambiguous account lookup failure %j as PUBLISH_INCOMPLETE",
     (stderr) => {
-      const { project } = linkedProject();
+      const { project } = connectedProject();
       const runner = scriptedRunner((command, args) => {
         if (command === "gh" && args[0] === "api") return { status: 1, stderr };
         return undefined;
@@ -553,7 +554,7 @@ describe("publish", () => {
     "network unreachable",
     "repository created but push failed",
   ])("surfaces ambiguous publication failure %j as PUBLISH_INCOMPLETE", (stderr) => {
-    const { project } = linkedProject();
+    const { project } = connectedProject();
     const runner = scriptedRunner((command, args) => {
       if (command === "gh" && args[0] === "repo") return { status: 1, stderr };
       return undefined;
@@ -563,7 +564,7 @@ describe("publish", () => {
   });
 
   it("refuses to publish an invalid tree", () => {
-    const { project, tree } = linkedProject();
+    const { project, tree } = connectedProject();
     // A clean but structurally invalid tree fails verification at publish time.
     const members = join(tree, "members", "engineer");
     mkdirSync(members, { recursive: true });
@@ -575,7 +576,7 @@ describe("publish", () => {
     gitRun(["add", "."]);
     gitRun(["-c", "user.name=T", "-c", "user.email=t@example.test", "commit", "--quiet", "-m", "invalid"]);
     const failure = publishError(() => publishProject(project, {}, accountRunner([])));
-    expect(failure.code).toBe("STALE_CONNECTION");
-    expect(failure.message).toContain("invalid");
+    expect(failure.code).toBe("INVALID_TREE");
+    expect(failure.message).toContain("context-tree verify");
   });
 });

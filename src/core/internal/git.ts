@@ -80,10 +80,3 @@ export function gh(args: string[], options: CommandOptions = {}): string {
   const runner = options.runner ?? defaultRunner;
   return execute(runner, "gh", args, options.message ?? "A GitHub CLI operation failed.");
 }
-
-/** Run `gh <args>` and return trimmed stdout, or undefined on failure. */
-export function optionalGh(args: string[], runner: CommandRunner = defaultRunner): string | undefined {
-  const result = runner("gh", args);
-  if (result.status !== 0) return undefined;
-  return trimOutput(result.stdout);
-}

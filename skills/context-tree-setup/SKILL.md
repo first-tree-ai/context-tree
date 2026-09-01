@@ -30,5 +30,5 @@ Context Tree or connect an existing one:
   connect automatically switches the project's connection.
 
 Never publish a tree without explicit user confirmation. If `resolve` reports
-`CORRUPT_CONNECTION` or `STALE_CONNECTION`, report the failure and stop; do
-not repair or replace state automatically.
+`CORRUPT_CONNECTION`, `STALE_CONNECTION`, `DIRTY_TREE`, or `INVALID_TREE`,
+report the failure and stop; do not repair or replace state automatically.

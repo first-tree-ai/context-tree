@@ -8,7 +8,8 @@ import {
   type PrepareContextWriteResult,
   SCHEMA_VERSION,
 } from "../schemas.js";
-import { ConnectionError, resolveConnectionRecord } from "./connections.js";
+import { resolveConnectionRecord } from "./connections.js";
+import { ContextTreeError } from "./internal/errors.js";
 import { CommandError, type CommandRunner, git } from "./internal/git.js";
 import { realDirectoryWithoutSymlinks } from "./path.js";
 import { syncProject } from "./sync.js";
@@ -59,7 +60,10 @@ export function finishContextWrite(
   });
   if (status.length === 0) throw new Error("The prepared worktree has no pending changes.");
   if (!verifyTree(worktreePath).ok) {
-    throw new Error("Refusing to commit an invalid Context Tree; run context-tree verify.");
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.invalidTree,
+      `Refusing to commit an invalid Context Tree; run context-tree verify --tree-path ${worktreePath}.`,
+    );
   }
 
   git(worktreePath, ["add", "--all"], { message: "Staging the Context Tree changes failed.", runner });
@@ -86,7 +90,7 @@ export function finishContextWrite(
     }
   } catch (error) {
     if (isNonFastForward(error)) {
-      throw new ConnectionError(
+      throw new ContextTreeError(
         CLI_ERROR_CODES.writeOutdated,
         `The Context Tree advanced; the prepared worktree is preserved at ${worktreePath}.`,
       );

@@ -21,15 +21,15 @@ import {
   type ContextTreeConnectionResult,
   contextTreeConnectionSchema,
   contextTreeStateSchema,
-  credentialFreeRepositoryUrlSchema,
   githubRepositoryIdentitySchema,
   type ManagedTreeListingEntry,
   type ManagedTreeListingResult,
   SCHEMA_VERSION,
   treeNameSchema,
 } from "../schemas.js";
+import { ContextTreeError } from "./internal/errors.js";
 import { type CommandRunner, git, optionalGit } from "./internal/git.js";
-import { canonicalGitHubRepositoryUrl } from "./internal/github-repository.js";
+import { canonicalGitHubRepositoryUrl, gitHubRepositoryFromOriginUrl } from "./internal/github-repository.js";
 import { canonicalProjectRoot } from "./internal/project.js";
 import { validateStoredTreeState, validateTreeCheckout } from "./internal/tree-state.js";
 
@@ -38,66 +38,10 @@ const connectionsFileSchema = z
   .strict();
 type ConnectionsFile = z.infer<typeof connectionsFileSchema>;
 
-export class ConnectionError extends Error {
-  public readonly code: (typeof CLI_ERROR_CODES)[keyof typeof CLI_ERROR_CODES];
+const DUPLICATE_MESSAGE = "Duplicate Context Tree connection records exist for this project.";
+const NO_CONNECTION_MESSAGE = "No Context Tree connection exists for this project; run context-tree create or connect.";
 
-  public constructor(code: (typeof CLI_ERROR_CODES)[keyof typeof CLI_ERROR_CODES], message: string) {
-    super(message);
-    this.name = "ConnectionError";
-    this.code = code;
-  }
-}
-
-function connectionsPath(): string {
-  return join(homedir(), ".context-tree", "connections.json");
-}
-
-function loadConnections(required: boolean): ConnectionsFile {
-  const path = connectionsPath();
-  if (!existsSync(path)) {
-    if (required) {
-      throw new ConnectionError(
-        CLI_ERROR_CODES.noConnection,
-        "No Context Tree connection exists for this project; run context-tree create or connect.",
-      );
-    }
-    return { connections: [], schemaVersion: SCHEMA_VERSION };
-  }
-  try {
-    const entry = lstatSync(path);
-    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error("not a regular file");
-    return connectionsFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-  } catch {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.corruptConnection,
-      "Context Tree connections are corrupt or use the retired links format; remove connections.json and run context-tree connect again.",
-    );
-  }
-}
-
-function saveConnections(value: ConnectionsFile): void {
-  const path = connectionsPath();
-  const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const directoryEntry = lstatSync(directory);
-  if (directoryEntry.isSymbolicLink() || !directoryEntry.isDirectory()) {
-    throw new Error("Context Tree connections directory must be a real directory.");
-  }
-  const temporary = join(directory, `.connections-${process.pid}-${Date.now()}.tmp`);
-  writeFileSync(temporary, `${JSON.stringify(connectionsFileSchema.parse(value), null, 2)}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  try {
-    renameSync(temporary, path);
-    chmodSync(path, 0o600);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-function realpathHome(): string {
+function realHome(): string {
   try {
     return realpathSync(homedir());
   } catch {
@@ -107,7 +51,7 @@ function realpathHome(): string {
 
 /** Create a managed application directory below the home directory, failing closed on symlinks. */
 function ensureManagedDirectory(...segments: string[]): string {
-  let current = realpathHome();
+  let current = realHome();
   for (const segment of segments) {
     current = join(current, segment);
     const entry = lstatSync(current, { throwIfNoEntry: false });
@@ -122,13 +66,70 @@ function ensureManagedDirectory(...segments: string[]): string {
   return current;
 }
 
+/** The managed namespace without creating it; listing must not create an absent directory. */
+function managedTreesPath(): string {
+  return join(realHome(), ".context-tree", "trees");
+}
+
+function connectionsPath(): string {
+  return join(realHome(), ".context-tree", "connections.json");
+}
+
 export function managedTreesRoot(): string {
   return ensureManagedDirectory(".context-tree", "trees");
 }
 
-/** The managed tree namespace without creating it; listing must not create an absent directory. */
-function managedTreesPath(): string {
-  return join(realpathHome(), ".context-tree", "trees");
+function loadConnections(required: boolean): ConnectionsFile {
+  const path = connectionsPath();
+  if (!existsSync(path)) {
+    if (required) throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
+    return { connections: [], schemaVersion: SCHEMA_VERSION };
+  }
+  try {
+    const entry = lstatSync(path);
+    if (entry.isSymbolicLink() || !entry.isFile()) throw new Error("not a regular file");
+    return connectionsFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  } catch {
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.corruptConnection,
+      "Context Tree connections are corrupt; remove connections.json and run context-tree connect again.",
+    );
+  }
+}
+
+function saveConnections(value: ConnectionsFile): void {
+  const directory = ensureManagedDirectory(".context-tree");
+  const path = join(directory, "connections.json");
+  const temporary = join(directory, `.connections-${process.pid}-${Date.now()}.tmp`);
+  writeFileSync(temporary, `${JSON.stringify(connectionsFileSchema.parse(value), null, 2)}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  try {
+    renameSync(temporary, path);
+    chmodSync(path, 0o600);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+/** Exactly one record may exist per project; more than one is corruption. */
+function singleConnection(stored: ConnectionsFile, canonical: string): ContextTreeConnection | undefined {
+  const matches = stored.connections.filter((connection) => connection.projectPath === canonical);
+  if (matches.length > 1) throw new ContextTreeError(CLI_ERROR_CODES.corruptConnection, DUPLICATE_MESSAGE);
+  return matches[0];
+}
+
+function isManagedName(value: string): boolean {
+  return treeNameSchema.safeParse(value).success && value === value.toLowerCase();
+}
+
+function managedName(value: string): string {
+  if (!isManagedName(value)) {
+    throw new Error(`Managed Context Tree names must be safe lowercase path segments: ${value}`);
+  }
+  return value;
 }
 
 /** List valid, clean managed trees, excluding unsafe or invalid candidates without failing the listing. */
@@ -141,50 +142,19 @@ export function listManagedTrees(runner?: CommandRunner): ManagedTreeListingResu
   }
   const trees: ManagedTreeListingEntry[] = [];
   for (const candidate of readdirSync(root, { withFileTypes: true })) {
-    if (!candidate.isDirectory()) continue;
-    let name: string;
-    let tree: ContextTreeConnection["tree"];
+    if (!candidate.isDirectory() || !isManagedName(candidate.name)) continue;
     try {
-      name = managedName(candidate.name);
-      tree = classifyCheckout(join(root, candidate.name), runner);
+      trees.push({ name: candidate.name, tree: classifyCheckout(join(root, candidate.name), runner) });
     } catch {
-      continue;
+      // An unsafe or invalid candidate is skipped, never a listing failure.
     }
-    trees.push({ name, tree });
   }
   trees.sort((left, right) => left.name.localeCompare(right.name));
   return { schemaVersion: SCHEMA_VERSION, trees };
 }
 
-function matchingConnections(stored: ConnectionsFile, canonical: string): ContextTreeConnection[] {
-  return stored.connections.filter((connection) => connection.projectPath === canonical);
-}
-
 export function findConnectionRecord(projectPath: string, runner?: CommandRunner): ContextTreeConnection | undefined {
-  const canonical = canonicalProjectRoot(projectPath, runner);
-  const matches = matchingConnections(loadConnections(false), canonical);
-  if (matches.length > 1) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.corruptConnection,
-      "Duplicate Context Tree connection records exist for this project.",
-    );
-  }
-  return matches[0];
-}
-
-function validateConnectionTree(
-  connection: ContextTreeConnection,
-  runner?: CommandRunner,
-): ContextTreeConnection["tree"] {
-  try {
-    return validateManagedTreeState(connection.tree, runner);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown failure";
-    throw new ConnectionError(
-      CLI_ERROR_CODES.staleConnection,
-      `The connected Context Tree checkout is no longer a valid clean candidate; run connect when its stored path is stale. ${detail}`,
-    );
-  }
+  return singleConnection(loadConnections(false), canonicalProjectRoot(projectPath, runner));
 }
 
 function validateManagedTreeState(
@@ -195,31 +165,27 @@ function validateManagedTreeState(
   // Stored validation accepts verified external disk paths in place; the
   // managed-name discipline applies only inside the managed namespace, which
   // is also the only namespace name-based discovery consults.
-  if (dirname(validated.path) === managedTreesPath()) {
-    managedName(basename(validated.path));
+  if (dirname(validated.path) === managedTreesPath() && !isManagedName(basename(validated.path))) {
+    throw new Error(`Managed Context Tree names must be safe lowercase path segments: ${basename(validated.path)}`);
   }
   return validated;
 }
 
 export function resolveConnectionRecord(projectPath: string, runner?: CommandRunner): ContextTreeConnection {
   const canonical = canonicalProjectRoot(projectPath, runner);
-  const stored = loadConnections(true);
-  const matches = matchingConnections(stored, canonical);
-  if (matches.length === 0) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.noConnection,
-      "No Context Tree connection exists for this project; run context-tree create or connect.",
+  const connection = singleConnection(loadConnections(true), canonical);
+  if (connection === undefined) throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
+  try {
+    return { projectPath: connection.projectPath, tree: validateManagedTreeState(connection.tree, runner) };
+  } catch (error) {
+    // Dirty and invalid checkouts already carry their own specific code.
+    if (error instanceof ContextTreeError) throw error;
+    const detail = error instanceof Error ? error.message : "unknown failure";
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.staleConnection,
+      `The connected Context Tree is no longer usable at ${connection.tree.path}; run context-tree connect to point this project at its current location. ${detail}`,
     );
   }
-  if (matches.length > 1) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.corruptConnection,
-      "Duplicate Context Tree connection records exist for this project.",
-    );
-  }
-  const connection = matches[0];
-  if (connection === undefined) throw new Error("Connection lookup failed.");
-  return { projectPath: connection.projectPath, tree: validateConnectionTree(connection, runner) };
 }
 
 export function resolveConnection(projectPath: string, runner?: CommandRunner): ContextTreeConnectionResult {
@@ -236,14 +202,7 @@ export function upsertConnection(
     tree: validateManagedTreeState(contextTreeStateSchema.parse(connection.tree), runner),
   };
   const stored = loadConnections(false);
-  const existing = matchingConnections(stored, canonical);
-  if (existing.length > 1) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.corruptConnection,
-      "Duplicate Context Tree connection records exist for this project.",
-    );
-  }
-  const previous = existing[0];
+  const previous = singleConnection(stored, canonical);
   if (previous !== undefined && JSON.stringify(previous.tree) === JSON.stringify(record.tree)) {
     return { schemaVersion: SCHEMA_VERSION, tree: record.tree };
   }
@@ -261,18 +220,8 @@ export function updateConnectionTree(
 ): void {
   const canonical = canonicalProjectRoot(projectPath, runner);
   const stored = loadConnections(true);
-  const matches = matchingConnections(stored, canonical);
-  if (matches.length > 1) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.corruptConnection,
-      "Duplicate Context Tree connection records exist for this project.",
-    );
-  }
-  if (matches.length !== 1) {
-    throw new ConnectionError(
-      CLI_ERROR_CODES.noConnection,
-      "No single Context Tree connection exists for this project.",
-    );
+  if (singleConnection(stored, canonical) === undefined) {
+    throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
   }
   const validatedTree = validateManagedTreeState(contextTreeStateSchema.parse(tree), runner);
   saveConnections({
@@ -281,37 +230,6 @@ export function updateConnectionTree(
     ),
     schemaVersion: SCHEMA_VERSION,
   });
-}
-
-function githubRepositoryFromOrigin(origin: string): string {
-  try {
-    credentialFreeRepositoryUrlSchema.parse(origin);
-  } catch {
-    throw new Error("Context Tree origin must identify a credential-free GitHub repository.");
-  }
-  let owner: string | undefined;
-  let name: string | undefined;
-  const scp = /^(?:git@)?github\.com:([^/]+)\/(.+)$/iu.exec(origin);
-  if (scp !== null) {
-    [, owner, name] = scp;
-  } else {
-    let parsed: URL;
-    try {
-      parsed = new URL(origin);
-    } catch {
-      throw new Error("Context Tree origin must identify a credential-free GitHub repository.");
-    }
-    if (parsed.hostname.toLowerCase() !== "github.com") {
-      throw new Error("Context Tree origin must identify a credential-free GitHub repository.");
-    }
-    [owner, name] = parsed.pathname.replace(/^\/+|\/+$/gu, "").split("/");
-  }
-  const repository = `${owner ?? ""}/${(name ?? "").replace(/\.git$/iu, "")}`;
-  try {
-    return githubRepositoryIdentitySchema.parse(repository);
-  } catch {
-    throw new Error("Context Tree origin must identify a credential-free GitHub OWNER/REPO repository.");
-  }
 }
 
 /**
@@ -323,17 +241,19 @@ function classifyCheckout(path: string, runner?: CommandRunner): ContextTreeConn
   const root = validateTreeCheckout(path, runner);
   const origin = optionalGit(root, ["remote", "get-url", "origin"], runner);
   if (origin === undefined) return { kind: "local", path: root };
-  return { kind: "github", path: root, repository: githubRepositoryFromOrigin(origin) };
-}
-
-function managedName(value: string): string {
-  treeNameSchema.parse(value);
-  if (value !== value.toLowerCase()) throw new Error("Managed Context Tree names must be lowercase.");
-  return value;
+  return { kind: "github", path: root, repository: gitHubRepositoryFromOriginUrl(origin) };
 }
 
 function sameRepository(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+/** An existing managed directory that must be a real directory, not a symlinked alias. */
+function realManagedDirectory(name: string, destination: string): void {
+  const entry = lstatSync(destination);
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error(`Managed Context Tree name ${name} is occupied by an unsafe destination.`);
+  }
 }
 
 export type ConnectProjectOptions = { projectPath: string; target: string } | { projectPath: string; treePath: string };
@@ -353,25 +273,19 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     const name = managedName(options.target);
     const destination = join(treesRoot, name);
     if (!existsSync(destination)) throw new Error(`No managed Context Tree named ${name} exists.`);
-    const entry = lstatSync(destination);
-    if (entry.isSymbolicLink() || !entry.isDirectory()) {
-      throw new Error(`Managed Context Tree name ${name} is occupied by an unsafe destination.`);
-    }
+    realManagedDirectory(name, destination);
     const tree = classifyCheckout(destination, runner);
     return upsertConnection({ projectPath: options.projectPath, tree }, runner);
   }
 
   const repository = githubRepositoryIdentitySchema.parse(options.target);
-  const parts = repository.split("/");
-  const repositoryName = parts[1];
+  const repositoryName = repository.split("/")[1];
   if (repositoryName === undefined) throw new Error("Repository must be OWNER/REPO.");
   const name = managedName(repositoryName.toLowerCase());
   const destination = join(treesRoot, name);
+
   if (existsSync(destination)) {
-    const entry = lstatSync(destination);
-    if (entry.isSymbolicLink() || !entry.isDirectory()) {
-      throw new Error(`Managed Context Tree name ${name} is occupied by an unsafe destination.`);
-    }
+    realManagedDirectory(name, destination);
     const tree = classifyCheckout(destination, runner);
     if (tree.kind !== "github" || !sameRepository(tree.repository, repository)) {
       throw new Error(`Managed Context Tree name ${name} is already used by a different tree.`);
@@ -384,10 +298,7 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     git(
       treesRoot,
       ["clone", "--quiet", "--origin", "origin", "--", canonicalGitHubRepositoryUrl(repository), destination],
-      {
-        message: "Cloning the Context Tree repository failed.",
-        runner,
-      },
+      { message: "Cloning the Context Tree repository failed.", runner },
     );
     const tree = classifyCheckout(destination, runner);
     if (tree.kind !== "github" || !sameRepository(tree.repository, repository)) {

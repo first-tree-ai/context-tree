@@ -21,4 +21,4 @@ Never accept a repository URL.
 Publication creates one new private repository and is not atomic with the local
 connection update. If it reports `PUBLISH_INCOMPLETE`, do not inspect, adopt, repair,
 retry, or delete partial state; report the uncertain outcome. If it reports
-invalid tree content, run `verify` and report its findings.
+`INVALID_TREE`, run `verify` and report its findings.

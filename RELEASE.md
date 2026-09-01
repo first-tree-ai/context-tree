@@ -37,8 +37,8 @@ cache, Codex home, and project when they finish.
 
 Before advertising or releasing the remote marketplace flow, verify that npm
 `latest` contains the `.codex-plugin` and `.claude-plugin` current-client
-adapters, both marketplaces, `hooks`, and all six `skills`,
-and `dist/cli/index.mjs`. It must not contain a root `plugin.json`, which
+adapters, both marketplaces, `hooks`, all six `skills` and their launchers, and
+`dist/cli/index.mjs`. It must not contain a root `plugin.json`, which
 suppresses bundled-hook discovery in Codex 0.151.0. The package
 end-to-end test and `npm pack --dry-run` cover the candidate tarball; checking
 `latest` is a release verification step after production publication.

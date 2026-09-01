@@ -27,8 +27,10 @@ If `prepare-write` reports `NO_CONNECTION`, invoke `$context-tree-setup` to
 create or connect a tree, then prepare again once.
 
 Invocation of `finish-write` authorizes every pending change in that worktree.
-If an operation reports invalid tree content, run `verify` on the worktree and
-repair only when the user authorized that content change.
+If an operation reports `INVALID_TREE`, run `verify` on the named path and
+repair only when the user authorized that content change. If `prepare-write`
+reports `DIRTY_TREE`, report the connected tree's uncommitted changes and stop;
+never commit or discard the user's pending edits to resolve it.
 
 If `finish-write` reports `WRITE_OUTDATED`, preserve the first worktree, prepare
 a fresh worktree, and reapply the intended semantic change once. If the second

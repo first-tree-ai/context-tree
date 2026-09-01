@@ -23,6 +23,7 @@ import {
 } from "../src/schemas.js";
 
 const CLI = resolve(import.meta.dirname, "../dist/cli/index.mjs");
+const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8")).version;
 const workspaces = new Set<string>();
 
 type CliResult = { status: number | null; stderr: string; stdout: string };
@@ -127,7 +128,7 @@ describe("built CLI", () => {
       "verify",
     ]);
     const version = cli(workspace(), ["--version"]);
-    expect(version).toMatchObject({ status: 0, stderr: "", stdout: "0.1.6\n" });
+    expect(version).toMatchObject({ status: 0, stderr: "", stdout: `${PACKAGE_VERSION}\n` });
   });
 
   it("sets up, resolves, verifies, and reads with versioned JSON", () => {
@@ -297,7 +298,7 @@ describe("built CLI", () => {
     );
   });
 
-  it("reports missing, retired, corrupt, and stale connections with strict envelopes", () => {
+  it("reports missing, corrupt, dirty, and stale connections with strict envelopes", () => {
     const root = workspace();
     const project = join(root, "service");
     mkdirSync(project);
@@ -308,7 +309,7 @@ describe("built CLI", () => {
     const created = create(root, project);
     const connectionPath = join(root, ".context-tree", "connections.json");
     const connection = JSON.parse(readFileSync(connectionPath, "utf8")).connections[0];
-    writeFileSync(connectionPath, `${JSON.stringify({ links: [connection], schemaVersion: 1 })}\n`);
+    writeFileSync(connectionPath, `${JSON.stringify({ connections: [connection, connection], schemaVersion: 1 })}\n`);
     expectCliError(cli(project, ["resolve"], undefined, root), "CORRUPT_CONNECTION");
 
     writeFileSync(connectionPath, "{not json");
@@ -316,8 +317,16 @@ describe("built CLI", () => {
 
     rmSync(connectionPath);
     expect(cli(project, ["connect", "service-context-tree"], undefined, root).status).toBe(0);
+
+    // An uncommitted edit is the user's own work in progress, not a broken connection.
+    writeFileSync(join(created.treePath, "draft.md"), '---\ntitle: "Draft"\n---\n\n# Draft\n');
+    const dirty = expectCliError(cli(project, ["resolve"], undefined, root), "DIRTY_TREE");
+    expect(dirty.error.message).toContain("commit or discard");
+    rmSync(join(created.treePath, "draft.md"));
+
     renameSync(created.treePath, `${created.treePath}-moved`);
-    expectCliError(cli(project, ["resolve"], undefined, root), "STALE_CONNECTION");
+    const stale = expectCliError(cli(project, ["resolve"], undefined, root), "STALE_CONNECTION");
+    expect(stale.error.message).toContain("context-tree connect");
   });
 
   it("synchronizes local trees without the network and reports the exact commit", () => {
@@ -411,7 +420,7 @@ describe("built CLI", () => {
     expectCliError(cli(project, ["prepare-write"], undefined, root), "NO_CONNECTION");
   });
 
-  it("rejects invalid trees before reading and rejects unsafe connect inputs", () => {
+  it("rejects invalid trees before reading and before connecting", () => {
     const root = workspace();
     const project = join(root, "service");
     mkdirSync(project);
@@ -420,9 +429,20 @@ describe("built CLI", () => {
     git(created.treePath, ["add", "NODE.md"], root);
     git(created.treePath, ["commit", "--quiet", "-m", "break"], root);
     const read = cli(project, ["read", "--tree-path", created.treePath], undefined, root);
-    expect(read.status).toBe(1);
-    expect(JSON.parse(read.stdout).error.message).toContain("invalid Context Tree");
-    expect(cli(project, ["connect"], undefined, root).status).toBe(1);
-    expect(cli(project, ["connect", "service-context-tree"], undefined, root).status).toBe(1);
+    expect(expectCliError(read, "INVALID_TREE").error.message).toContain("context-tree verify");
+    expectCliError(cli(project, ["connect", "service-context-tree"], undefined, root), "INVALID_TREE");
+  });
+
+  it("refuses to create a second tree for an already connected project", () => {
+    const root = workspace();
+    const first = join(root, "first");
+    const second = join(root, "second");
+    mkdirSync(first);
+    mkdirSync(second);
+    const shared = create(root, first).treePath;
+    expect(cli(second, ["connect", "--tree-path", shared], undefined, root).status).toBe(0);
+    const failure = expectCliError(cli(second, ["create"], undefined, root), "CONTEXT_TREE_FAILED");
+    expect(failure.error.message).toContain("already connected");
+    expect(JSON.parse(cli(second, ["resolve"], undefined, root).stdout).tree.path).toBe(shared);
   });
 });

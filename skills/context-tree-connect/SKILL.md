@@ -20,5 +20,6 @@ Never accept a repository URL or arbitrary checkout path. An explicit connect
 automatically switches the project's connection. Report the resulting tree
 kind and canonical path.
 
-If connection reports invalid tree content, report the failure. A managed tree
-must be repaired separately before it can be selected.
+If connection reports `INVALID_TREE` or `DIRTY_TREE`, report the failure. A
+managed tree must be repaired or committed separately before it can be
+selected.

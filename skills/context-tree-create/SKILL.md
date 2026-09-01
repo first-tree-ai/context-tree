@@ -18,8 +18,9 @@ Run `node "<skill-directory>/scripts/context-tree.mjs" create`. Parse the
 versioned result and report whether the managed tree was created or already
 existed, together with its name, path, and exact commit SHA.
 
-If the derived managed name is occupied, report the named `connect` command
-from the error. Do not replace or remove the existing managed tree.
+If the derived managed name is occupied, or the project is already connected to
+a different tree, report the named `connect` command from the error. Do not
+replace or remove the existing managed tree or connection.
 
 After the tree is created or reused, run
 `node "<skill-directory>/scripts/context-tree.mjs" resolve` and inspect the

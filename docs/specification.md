@@ -3,12 +3,10 @@
 ## Scope
 
 The package exposes setup as an orchestration skill over five concrete user
-intentions: create, connect, read, write, and
-publish. Supporting commands (`resolve`, `sync`,
-`list`, `prepare-write`,
-`finish-write`, `verify`, and
-`policy`) are plugin and integration plumbing. Every JSON contract
-is strict and uses `schemaVersion: 1`.
+intentions: create, connect, read, write, and publish. Supporting commands
+(`resolve`, `sync`, `list`, `prepare-write`, `finish-write`, `verify`, and
+`policy`) are plugin and integration plumbing. Every JSON contract is strict
+and uses `schemaVersion: 1`.
 
 ## Shared invariants
 
@@ -20,7 +18,9 @@ is strict and uses `schemaVersion: 1`.
   clones and worktrees remain separate projects.
 - A non-Git project connection matches only its exact canonical directory.
 - Tree validation rejects symlink components, requires an exact clean Git root,
-  parses the root node, and requires full tree verification to succeed.
+  parses the root node, and requires full tree verification to succeed. An
+  unclean checkout is `DIRTY_TREE` and failed verification is `INVALID_TREE`;
+  neither is reported as a stale connection.
 - Stored `local` or `github` state remains that kind after connection; every
   selected managed checkout is classified from a safe origin before storage.
 - Duplicate records for one project produce `CORRUPT_CONNECTION`.
@@ -54,9 +54,10 @@ type Publish = {
 ```
 
 Errors use `{ ok: false, error: { code, message }, schemaVersion: 1 }`.
-Lifecycle-specific codes include `NO_CONNECTION`, `CORRUPT_CONNECTION`, `STALE_CONNECTION`,
-`WRITE_OUTDATED`, `GITHUB_AUTH`, `REPOSITORY_EXISTS`, and
-`PUBLISH_INCOMPLETE`. Other failures use `CONTEXT_TREE_FAILED`.
+Lifecycle-specific codes are `NO_CONNECTION`, `CORRUPT_CONNECTION`,
+`STALE_CONNECTION`, `DIRTY_TREE`, `INVALID_TREE`, `WRITE_OUTDATED`,
+`GITHUB_AUTH`, `REPOSITORY_EXISTS`, and `PUBLISH_INCOMPLETE`. Other failures
+use `CONTEXT_TREE_FAILED`.
 
 ## Creation and connection
 
@@ -64,8 +65,10 @@ Lifecycle-specific codes include `NO_CONNECTION`, `CORRUPT_CONNECTION`, `STALE_C
 canonical project root. It scaffolds and commits the tree in the flat managed
 namespace before atomically connecting it. Repetition is idempotent only when
 the project is still connected to that tree. An occupied name otherwise fails
-with guidance to use `connect <name>`. Files created by a failed create are
-removed; a destination that existed before the invocation is never removed.
+with guidance to use `connect <name>`, and a project already connected to a
+different tree fails rather than being silently repointed. Files created by a
+failed create are removed; a destination that existed before the invocation is
+never removed.
 
 `connect <name>` performs an exact managed-directory lookup. `connect
 OWNER/REPO` reuses a matching checkout or clones it under the lowercased
@@ -143,9 +146,11 @@ when they receive `NO_CONNECTION`, then retry the operation once.
 
 ## Hook and skills
 
-The session hook is silent without a valid connection, including unconnected
-sessions; setup routing happens in the read and write skills, never in the
-hook. With a connection, it reports only `Context Tree connected at <path>`.
+The session hook resolves the host-supplied `cwd` rather than its own process
+directory, and is silent without a valid connection, including unconnected
+sessions and payloads with no `cwd`; setup routing happens in the read and
+write skills, never in the hook. With a connection, it reports only
+`Context Tree connected at <path>`.
 
 Skills invoke the packaged CLI directly as
 `node "<skill-directory>/../../dist/cli/index.mjs"` after checking `--version`.

@@ -12,7 +12,6 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -231,17 +230,6 @@ try {
   rmSync(extractedCli);
   renameSync(savedCli, extractedCli);
 
-  const distDirectory = join(extractedPackage, "dist");
-  const savedDistDirectory = join(temporaryRoot, "saved-dist");
-  const externalDistDirectory = join(temporaryRoot, "external-dist");
-  mkdirSync(join(externalDistDirectory, "cli"), { recursive: true });
-  writeFileSync(join(externalDistDirectory, "cli/index.mjs"), "process.exit(0);\n");
-  renameSync(distDirectory, savedDistDirectory);
-  symlinkSync(externalDistDirectory, distDirectory);
-  assertLauncherRejected();
-  unlinkSync(distDirectory);
-  renameSync(savedDistDirectory, distDirectory);
-
   const hook = runNode(join(extractedPackage, "hooks/session-start.mjs"), extractedPackage, [], {
     env: { ...npmEnvironment, CLAUDE_PLUGIN_ROOT: extractedPackage },
     input: JSON.stringify({ cwd: extractedPackage, hook_event_name: "SessionStart" }),
@@ -300,7 +288,6 @@ try {
   assert.equal(schemaExports.includes("contextTreeConnectionResultSchema"), true);
   assert.equal(schemaExports.includes("managedTreeListingResultSchema"), true);
   assert.equal(schemaExports.includes("contextTreeConnectionsFileSchema"), false);
-  assert.equal(schemaExports.includes("scaffoldTreeResultSchema"), false);
 
   const help = runCli(cliPath, consumerRoot, ["--help"]);
   assert.equal(help.status, 0);

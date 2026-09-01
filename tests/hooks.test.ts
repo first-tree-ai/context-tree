@@ -41,7 +41,7 @@ function create(root: string): string {
 }
 
 function hook(root: string, cwd: string, event = "SessionStart"): ProcessResult {
-  return run(root, cwd, process.execPath, [HOOK], JSON.stringify({ hook_event_name: event }));
+  return run(root, cwd, process.execPath, [HOOK], JSON.stringify({ cwd, hook_event_name: event }));
 }
 
 afterEach(() => {
@@ -56,6 +56,10 @@ describe("lifecycle context injection", () => {
     mkdirSync(unconnected);
     expect(hook(root, unconnected).stdout).toBe("");
     expect(hook(root, unconnected, "UnsupportedEvent").stdout).toBe("");
+    // The host's cwd is authoritative; a payload without it resolves nothing.
+    expect(run(root, root, process.execPath, [HOOK], JSON.stringify({ hook_event_name: "SessionStart" })).stdout).toBe(
+      "",
+    );
 
     const project = create(root);
     for (const event of ["SessionStart", "SubagentStart"]) {
@@ -105,13 +109,13 @@ describe("lifecycle context injection", () => {
       cwd: project,
       encoding: "utf8",
       env,
-      input: JSON.stringify({ hook_event_name: "SessionStart" }),
+      input: JSON.stringify({ cwd: project, hook_event_name: "SessionStart" }),
     });
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toMatch(/^Context Tree connected at /u);
   });
 
-  it("stays silent for stale state and shares one script across host manifests", () => {
+  it("stays silent for corrupt state and shares one script across host manifests", () => {
     const root = workspace();
     const project = create(root);
     writeFileSync(resolve(root, ".context-tree", "connections.json"), "{broken");

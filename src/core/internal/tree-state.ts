@@ -1,9 +1,10 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { ContextTreeState } from "../../schemas.js";
-import { parseContextTreeRootNode } from "../../schemas.js";
+import { CLI_ERROR_CODES, parseContextTreeRootNode } from "../../schemas.js";
 import { realDirectoryWithoutSymlinks } from "../path.js";
 import { verifyTree } from "../verify.js";
+import { ContextTreeError } from "./errors.js";
 import { readUtf8File } from "./filesystem.js";
 import { type CommandRunner, git, optionalGit } from "./git.js";
 
@@ -27,15 +28,6 @@ function exactGitRoot(treePath: string, runner?: CommandRunner): string {
   return root;
 }
 
-/** Require a clean working tree, including untracked files. */
-function requireCleanTree(root: string, runner?: CommandRunner): void {
-  const status = git(root, ["status", "--porcelain", "--untracked-files=all"], {
-    message: "Failed to inspect Context Tree cleanliness.",
-    runner,
-  });
-  if (status.trim().length !== 0) throw new Error("Context Tree checkout must be clean.");
-}
-
 /** Parse the root NODE.md, refusing symlinked or irregular files. */
 export function parseRootNode(root: string): ReturnType<typeof parseContextTreeRootNode> {
   const path = join(root, "NODE.md");
@@ -46,13 +38,28 @@ export function parseRootNode(root: string): ReturnType<typeof parseContextTreeR
   return parseContextTreeRootNode(readUtf8File(path));
 }
 
-/** Validate a clean checkout without inferring state from mutable Git remotes. */
+/**
+ * Validate a clean checkout without inferring state from mutable Git remotes.
+ * Uncommitted changes and invalid content each get their own code so callers
+ * can tell "commit your edits" apart from "this path is gone".
+ */
 export function validateTreeCheckout(treePath: string, runner?: CommandRunner): string {
   const root = exactGitRoot(treePath, runner);
-  requireCleanTree(root, runner);
-  const verification = verifyTree(root);
-  if (!verification.ok) {
-    throw new Error("Context Tree checkout is invalid; run context-tree verify.");
+  const status = git(root, ["status", "--porcelain", "--untracked-files=all"], {
+    message: "Failed to inspect Context Tree cleanliness.",
+    runner,
+  });
+  if (status.trim().length !== 0) {
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.dirtyTree,
+      `The Context Tree at ${root} has uncommitted changes; commit or discard them.`,
+    );
+  }
+  if (!verifyTree(root).ok) {
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.invalidTree,
+      `The Context Tree at ${root} is invalid; run context-tree verify --tree-path ${root}.`,
+    );
   }
   return root;
 }
@@ -61,9 +68,4 @@ export function validateTreeCheckout(treePath: string, runner?: CommandRunner): 
 export function validateStoredTreeState(state: ContextTreeState, runner?: CommandRunner): ContextTreeState {
   const path = validateTreeCheckout(state.path, runner);
   return state.kind === "local" ? { kind: "local", path } : { kind: "github", path, repository: state.repository };
-}
-
-/** An explicitly attached checkout is always local state, regardless of its remotes. */
-export function resolveTreeState(treePath: string, runner?: CommandRunner): ContextTreeState {
-  return { kind: "local", path: validateTreeCheckout(treePath, runner) };
 }

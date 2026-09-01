@@ -17,6 +17,46 @@ and credentials.
 Git and GitHub authentication remain owned by the host tools. Repository inputs
 are credential-free `OWNER/REPO` identities, never URLs containing credentials.
 
+## Install
+
+### Codex or Claude Code plugin (recommended)
+
+Install the marketplace and plugin, then start a new session so the host can
+discover the skills and lifecycle hook.
+
+For Codex:
+
+```bash
+codex plugin marketplace add first-tree-ai/context-tree
+codex plugin add context-tree@context-tree
+```
+
+For Claude Code:
+
+```bash
+claude plugin marketplace add first-tree-ai/context-tree
+claude plugin install context-tree@context-tree
+```
+
+Both marketplaces install the same npm package, and every plugin component uses
+its private packaged CLI rather than a global `PATH` command — so plugin users
+need no separate CLI installation. Review and trust the session-start hook if
+your host asks. Then try asking:
+
+> Set up a Context Tree for this project, then read the relevant context.
+
+> Write this architectural decision to the Context Tree.
+
+### Global CLI (optional)
+
+Install globally only when scripts or terminal workflows need a `context-tree`
+command on `PATH`:
+
+```bash
+npm install --global @first-tree-ai/context-tree
+context-tree --help
+```
+
 ## Six skills
 
 ### Setup
@@ -101,6 +141,11 @@ If the destination advanced, `finish-write` returns `WRITE_OUTDATED` and
 preserves the worktree. Prepare again and reapply the intended semantic change
 once; there is no automatic rebase, retry loop, or pull-request fallback.
 
+A preserved or abandoned write leaves its temporary worktree on disk and a
+`context-tree/write/<name>` branch in the tree. Nothing removes these for you:
+clear them with `git worktree remove <path>` and `git branch -D <branch>` in the
+connected tree once you no longer need the pending edits.
+
 ### Publish
 
 ```bash
@@ -124,6 +169,12 @@ do not inherit the connection.
 Connection data is written atomically with mode `0600` at
 `~/.context-tree/connections.json`. Duplicate project records are corruption.
 Stored local/GitHub state is not reclassified from mutable remotes.
+
+Every command that touches a connected tree reports why it refused:
+`NO_CONNECTION` (nothing connected), `DIRTY_TREE` (your uncommitted edits —
+commit or discard them), `INVALID_TREE` (structure fails `verify`),
+`STALE_CONNECTION` (the stored path is gone; connect again), and
+`CORRUPT_CONNECTION` (unreadable or duplicated records).
 
 ## CLI plumbing
 

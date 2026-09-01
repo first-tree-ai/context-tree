@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 
 import { Command, CommanderError } from "commander";
-import { ConnectionError, connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
+import { connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
 import { createProject } from "../core/create.js";
+import { ContextTreeError } from "../core/internal/errors.js";
 import { sanitizeCommandOutput } from "../core/internal/git.js";
 import { readPackageVersion } from "../core/internal/packaged-resource.js";
 import { publishProject } from "../core/publish.js";
@@ -129,10 +130,14 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .argument("[path]", "tree-relative path", ".")
     .option("--tree-path <path>", "Context Tree root", ".")
     .action((path: string, options: { treePath: string }) => {
-      const verification = verifyTree(resolve(io.cwd(), options.treePath));
-      if (!verification.ok) throw new Error("Refusing to read an invalid Context Tree; run context-tree verify.");
-      const result = readTree(resolve(io.cwd(), options.treePath), path);
-      line(io, JSON.stringify(result));
+      const treePath = resolve(io.cwd(), options.treePath);
+      if (!verifyTree(treePath).ok) {
+        throw new ContextTreeError(
+          CLI_ERROR_CODES.invalidTree,
+          `Refusing to read an invalid Context Tree; run context-tree verify --tree-path ${treePath}.`,
+        );
+      }
+      line(io, JSON.stringify(readTree(treePath, path)));
     });
 
   program
@@ -155,10 +160,6 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   return program;
 }
 
-function sanitizeError(message: string): string {
-  return sanitizeCommandOutput(message);
-}
-
 export async function runContextTreeCli(
   argv: string[] = process.argv,
   io: ContextTreeCliIo = defaultIo,
@@ -169,8 +170,8 @@ export async function runContextTreeCli(
     return typeof process.exitCode === "number" && process.exitCode !== 0 ? process.exitCode : 0;
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
-    const code = error instanceof ConnectionError ? error.code : CLI_ERROR_CODES.failed;
-    const message = sanitizeError(error instanceof Error ? error.message : String(error));
+    const code = error instanceof ContextTreeError ? error.code : CLI_ERROR_CODES.failed;
+    const message = sanitizeCommandOutput(error instanceof Error ? error.message : String(error));
     const envelope: ContextTreeCliErrorEnvelope = {
       error: { code, message },
       ok: false,

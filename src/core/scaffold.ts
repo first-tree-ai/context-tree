@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { SCHEMA_VERSION, treeNameSchema, type VerifyTreeReport } from "../schemas.js";
+import { treeNameSchema } from "../schemas.js";
 import { type CommandRunner, git, gitCommand } from "./internal/git.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 import { verifyTree } from "./verify.js";
@@ -23,11 +23,15 @@ export type ScaffoldTreeOptions = {
 type ScaffoldTreeResult = {
   branch: string;
   commit: string;
-  files: string[];
   root: string;
-  schemaVersion: typeof SCHEMA_VERSION;
-  verification: VerifyTreeReport;
 };
+
+/** Templated regular files, written before the CLAUDE.md -> AGENTS.md symlink. */
+const TEMPLATED_FILES: Array<readonly [string, string]> = [
+  ["NODE.md", "root-node.md"],
+  ["AGENTS.md", "AGENTS.md"],
+  [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
+];
 
 const SCAFFOLD_FILES = ["NODE.md", "AGENTS.md", "CLAUDE.md", ".github/workflows/validate-context-tree.yml"];
 
@@ -81,34 +85,13 @@ export function scaffoldTree(options: ScaffoldTreeOptions): ScaffoldTreeResult {
     title: name,
     titleJson: JSON.stringify(name),
   };
-  const regularFiles: Array<readonly [string, string]> = [
-    ["NODE.md", "root-node.md"],
-    ["AGENTS.md", "AGENTS.md"],
-    [".github/workflows/validate-context-tree.yml", "validate-context-tree.yml"],
-  ];
-
-  for (const [relativePath, source] of regularFiles.slice(0, 2)) {
+  for (const [relativePath, source] of TEMPLATED_FILES) {
     const path = join(root, relativePath);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
   }
   symlinkSync("AGENTS.md", join(root, "CLAUDE.md"), "file");
-  for (const [relativePath, source] of regularFiles.slice(2)) {
-    const path = join(root, relativePath);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, template(source, values), { encoding: "utf8", flag: "wx", mode: 0o644 });
-  }
 
-  const verification = verifyTree(root);
-  if (!verification.ok) throw new Error("Refusing to commit an invalid Context Tree scaffold.");
-  const commit = commitScaffold(root, options.runner);
-
-  return {
-    branch: initialBranch,
-    commit,
-    files: SCAFFOLD_FILES,
-    root,
-    schemaVersion: SCHEMA_VERSION,
-    verification,
-  };
+  if (!verifyTree(root).ok) throw new Error("Refusing to commit an invalid Context Tree scaffold.");
+  return { branch: initialBranch, commit: commitScaffold(root, options.runner), root };
 }
