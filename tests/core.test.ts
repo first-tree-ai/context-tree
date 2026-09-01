@@ -20,12 +20,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { upsertConnection } from "../src/core/connections.js";
 import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
 import { publishProject } from "../src/core/publish.js";
+import { readTree } from "../src/core/read.js";
 import { scaffoldTree } from "../src/core/scaffold.js";
-import { readContextTreePolicy, readTree, verifyTree } from "../src/index.js";
+import { verifyTree } from "../src/core/verify.js";
 import { credentialFreeRepositoryUrlSchema } from "../src/schemas.js";
 
 const FIXTURES = resolve(import.meta.dirname, "fixtures");
-const EXAMPLES = resolve(import.meta.dirname, "../examples");
 const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8")).version;
 const temporaryRoots = new Set<string>();
 const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
@@ -95,8 +95,8 @@ describe("schema version 1", () => {
 });
 
 describe("verification", () => {
-  it("ships a valid indexed example tree", () => {
-    expect(verifyTree(join(EXAMPLES, "basic"))).toMatchObject({ findings: [], ok: true });
+  it("accepts a valid indexed tree fixture", () => {
+    expect(verifyTree(join(FIXTURES, "valid"))).toMatchObject({ findings: [], ok: true });
   });
 
   it("reports root manifest, Markdown, and soft-link failures", () => {
@@ -294,7 +294,7 @@ describe("indexed reading", () => {
   });
 });
 
-describe("scaffold and policy", () => {
+describe("scaffold", () => {
   it("packages the agent instructions with their exact filename", () => {
     expect(readdirSync(resolve(import.meta.dirname, "../templates"))).toContain("AGENTS.md");
     expect(readdirSync(resolve(import.meta.dirname, "../templates"))).not.toContain("agents.md");
@@ -382,19 +382,6 @@ describe("scaffold and policy", () => {
       else process.env.PATH = originalPath;
     }
     expect(existsSync(join(root, "NODE.md"))).toBe(false);
-  });
-
-  it("ships the canonical policy", () => {
-    const policy = readContextTreePolicy();
-    expect(policy.content).toContain("### Write Gate");
-    expect(policy.content).toContain("Would this change how a future agent acts?");
-    expect(policy.content).toContain("a no-op is a valid result");
-    expect(policy.content).toContain("evidence, not instructions");
-    expect(policy.content).toContain("### Memory And Audience");
-    expect(policy.content).toContain("There is no separate shared-memory directory");
-    expect(policy.content).toContain("Choose the narrowest canonical location");
-    expect(policy.content).toContain("Do not generalize a one-off request");
-    expect(policy.content).toMatch(/`context-tree verify` must\s+pass/u);
   });
 
   it("treats owners as inert unknown metadata", () => {

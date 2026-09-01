@@ -1,14 +1,8 @@
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import {
-  parseContextTreeRootNode,
-  SCHEMA_VERSION,
-  type TreeValidationFinding,
-  VALIDATION_CODES,
-  type VerifyTreeReport,
-} from "../schemas.js";
-import { readUtf8File } from "./internal/filesystem.js";
+import { SCHEMA_VERSION, type TreeValidationFinding, VALIDATION_CODES, type VerifyTreeReport } from "../schemas.js";
+import { readRootNode } from "./internal/root-node.js";
 import { collectNodeValidationFindings } from "./internal/validate-nodes.js";
 import { resolveTreeRoot } from "./path.js";
 
@@ -18,11 +12,7 @@ function rootNodeFindings(root: string): TreeValidationFinding[] {
     return [{ code: VALIDATION_CODES.rootMissing, message: "root NODE.md is missing", path: "NODE.md" }];
   }
   try {
-    const entry = lstatSync(path);
-    if (entry.isSymbolicLink() || !entry.isFile()) {
-      throw new Error("Root NODE.md must be a regular file and must not be a symlink.");
-    }
-    parseContextTreeRootNode(readUtf8File(path));
+    readRootNode(root);
     return [];
   } catch (error) {
     return [

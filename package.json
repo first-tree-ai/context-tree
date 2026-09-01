@@ -1,7 +1,7 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.6",
-  "description": "Context Tree plugin for Codex and Claude Code, with a CLI for shell automation.",
+  "version": "0.1.7",
+  "description": "Durable, structured project context for coding agents: a CLI plus framework-neutral skills.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -25,46 +25,27 @@
   "publishConfig": {
     "access": "public"
   },
-  "sideEffects": false,
   "bin": {
     "context-tree": "./dist/cli/index.mjs"
   },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
-    },
-    "./schemas": {
-      "types": "./dist/schemas.d.mts",
-      "import": "./dist/schemas.mjs"
-    }
-  },
   "files": [
-    ".agents/plugins/marketplace.json",
-    ".claude-plugin",
-    ".codex-plugin",
     "dist",
-    "docs",
-    "examples",
-    "hooks",
+    "scripts/postinstall.mjs",
     "skills",
-    "policy",
     "templates",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown src/index.ts src/schemas.ts --format esm --dts && tsdown src/cli/index.ts --format esm --dts --out-dir dist/cli --no-clean --deps.alwaysBundle '/.*/'",
+    "build": "tsdown src/cli/index.ts --format esm --out-dir dist/cli --deps.alwaysBundle '/.*/'",
     "check": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && vitest run",
-    "test:codex-plugin": "bash scripts/test-codex-plugin-local.sh",
-    "validate:skills": "vitest run tests/skills.test.ts tests/plugin.test.ts",
-    "check:package": "pnpm build && publint && attw --pack . --profile esm-only && pnpm package:e2e",
+    "check:package": "pnpm build && pnpm package:e2e",
     "package:e2e": "node scripts/package-e2e.mjs",
-    "check:names": "vitest run tests/names.test.ts",
-    "prepack": "pnpm build && pnpm validate:skills"
+    "postinstall": "node ./scripts/postinstall.mjs",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "commander": "^15.0.0",
@@ -74,9 +55,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
-    "@arethetypeswrong/cli": "^0.18.2",
     "@types/node": "^22.16.0",
-    "publint": "^0.3.16",
     "tsdown": "^0.21.4",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

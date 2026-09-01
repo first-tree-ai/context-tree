@@ -3,14 +3,16 @@ import { resolve } from "node:path";
 import { Command, CommanderError } from "commander";
 import { connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
 import { createProject } from "../core/create.js";
+import { type InstallSkillsOptions, installSkills } from "../core/install.js";
 import { ContextTreeError } from "../core/internal/errors.js";
 import { sanitizeCommandOutput } from "../core/internal/git.js";
 import { readPackageVersion } from "../core/internal/packaged-resource.js";
 import { publishProject } from "../core/publish.js";
+import { readTree } from "../core/read.js";
 import { syncProject } from "../core/sync.js";
+import { verifyTree } from "../core/verify.js";
 import { finishContextWrite, prepareContextWrite } from "../core/write.js";
-import { readContextTreePolicy, readTree, verifyTree } from "../index.js";
-import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION } from "../schemas.js";
+import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION, skillHostSchema } from "../schemas.js";
 
 type ContextTreeCliIo = {
   cwd: () => string;
@@ -151,10 +153,15 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     });
 
   program
-    .command("policy")
-    .description("Print the canonical packaged Context Tree policy.")
-    .action(() => {
-      line(io, JSON.stringify(readContextTreePolicy()));
+    .command("install")
+    .description("Install the packaged Context Tree skills into each agent's skill directory.")
+    .option("--host <host>", "restrict to one host: claude, codex, or all", "all")
+    .option("--project <path>", "install below this project root instead of the home directory")
+    .action((options: { host: string; project?: string }) => {
+      const request: InstallSkillsOptions = {};
+      if (options.host !== "all") request.hosts = [skillHostSchema.parse(options.host)];
+      if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
+      line(io, JSON.stringify(installSkills(request)));
     });
 
   return program;

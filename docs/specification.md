@@ -3,10 +3,10 @@
 ## Scope
 
 The package exposes setup as an orchestration skill over five concrete user
-intentions: create, connect, read, write, and publish. Supporting commands
-(`resolve`, `sync`, `list`, `prepare-write`, `finish-write`, `verify`, and
-`policy`) are plugin and integration plumbing. Every JSON contract is strict
-and uses `schemaVersion: 1`.
+intentions: create, connect, read, write, and publish. `install` is the
+distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
+`prepare-write`, `finish-write`, and `verify`) are integration plumbing. Every
+JSON contract is strict and uses `schemaVersion: 1`.
 
 ## Shared invariants
 
@@ -114,7 +114,18 @@ For local state it attempts one fast-forward merge into the connected checkout's
 current branch. For GitHub state it attempts one non-force push to that branch.
 Success removes the worktree and task branch. A non-fast-forward failure emits
 `WRITE_OUTDATED` and preserves both. There is no rebase, race loop, semantic
-conflict result, pull-request fallback, or abandoned-worktree cleanup.
+conflict result, or pull-request fallback.
+
+Before creating its worktree, `prepare-write` reclaims earlier preparations that
+were never finished. Every reclamation step is best effort and no failure among
+them blocks the write. A reserved branch is removed, with its worktree when one
+is still registered, only when it holds no commit the connected checkout lacks,
+its worktree reports no pending change, and that worktree has gone untouched for
+twenty-four hours. Any unknown answer preserves the worktree. Because
+`finish-write` commits before it merges or pushes, a `WRITE_OUTDATED` worktree
+holds an unmerged commit and is never reclaimed, so the documented retry keeps
+its preserved edits. Reclamation is silent: `prepare-write` still returns only
+the worktree path and schema version.
 
 The write skill may prepare fresh and reapply the intended semantic change
 once after `WRITE_OUTDATED`. A second outdated result is reported to the user.
@@ -144,17 +155,37 @@ GitHub and disk-path targets are offered. It never publishes without explicit
 user confirmation. `context-tree-read` and `context-tree-write` invoke setup
 when they receive `NO_CONNECTION`, then retry the operation once.
 
-## Hook and skills
+## Distribution and skills
 
-The session hook resolves the host-supplied `cwd` rather than its own process
-directory, and is silent without a valid connection, including unconnected
-sessions and payloads with no `cwd`; setup routing happens in the read and
-write skills, never in the hook. With a connection, it reports only
-`Context Tree connected at <path>`.
+`install` copies the packaged `skills/` directory into each host's skill
+directory: `~/.claude/skills` and `~/.codex/skills`, or the same paths below a
+project root with `--project`. A global `npm install` runs it through
+`postinstall`, so the skills always ship from the same tarball as the CLI that
+installs them and cannot drift from it.
 
-Skills invoke the packaged CLI directly as
-`node "<skill-directory>/scripts/context-tree.mjs"` after checking `--version`.
-They rely on the packaged CLI and do not prescribe raw Git/GitHub operations.
+`postinstall` writes only for a global install (`npm_config_global`). Adding the
+package as a local dependency prints the `context-tree install` command instead,
+so neither a consumer's project install nor this repository's own `pnpm install`
+silently modifies a developer's agent configuration. It always exits `0`, so a
+failure to place skills never fails an install.
+
+A home install only targets hosts whose configuration directory already exists,
+and reports the rest under `skipped`; it never creates a directory for an absent
+agent. Installation refuses symlinked or non-directory path segments, writes
+skill files with mode `0644`, replaces only `context-tree-*` directories, and
+never modifies skills the package does not own.
+
+`create` and `connect` record the connected tree in the *project's* `AGENTS.md`
+inside markers, replacing an existing block rather than appending a second one,
+and creating `CLAUDE.md` as a symlink only when the project has none. All other
+file content is preserved, and a symlinked or non-regular `AGENTS.md` is
+refused. The commands report `written`, `updated`, or `skipped` as `pointer`.
+
+Skills invoke `context-tree` on `PATH` and do not prescribe raw Git/GitHub
+operations. Setup routing happens in the read and write skills. The editorial
+policy travels with the skills that need it: the write skill carries the write
+gate, source boundary, memory routing, content model, add-vs-edit rules, and
+node shape; the read skill carries content classes and drift authority.
 
 The skill inventory is setup, create, connect, read, write, and publish;
 setup orchestrates the five concrete workflows.

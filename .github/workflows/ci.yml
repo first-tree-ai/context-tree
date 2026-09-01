@@ -32,9 +32,9 @@ jobs:
       - run: pnpm check
       - run: pnpm typecheck
       - run: pnpm test
-      - run: node dist/cli/index.mjs verify --tree-path examples/basic
+      # Packs the real tarball and asserts its contents file by file, which is
+      # strictly more than `npm pack --dry-run` checked.
       - run: pnpm check:package
-      - run: npm pack --dry-run
 
   # Every push to main publishes a staging build under the `staging` dist-tag.
   # `npm i @first-tree-ai/context-tree@staging` therefore always resolves to the
@@ -74,7 +74,7 @@ jobs:
         run: npm install --global "npm@${TRUSTED_PUBLISHING_NPM_VERSION}"
 
       # devDependencies must stay installed: `npm publish` re-runs the `prepack`
-      # script (`pnpm build && pnpm validate:skills`) against this tree.
+      # script (`pnpm build`) against this tree.
       - run: pnpm install --frozen-lockfile
 
       - name: Resolve staging version
@@ -115,11 +115,7 @@ jobs:
       # version into the tarball that `context-tree --version` reports.
       - name: Apply staging version
         if: steps.guard.outputs.publish == 'true'
-        run: |
-          npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
-          # Package tests assert every skill and plugin manifest declares the
-          # package version, so all published metadata has to move with it.
-          node scripts/sync-skill-versions.mjs
+        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
 
       # Trusted publishing turns provenance on by default, but sigstore rejects
       # attestations from private source repositories, so it must be opted out
@@ -211,9 +207,7 @@ jobs:
 
       - name: Apply release version
         if: steps.guard.outputs.publish == 'true'
-        run: |
-          npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
-          node scripts/sync-skill-versions.mjs
+        run: npm version "${{ steps.resolve.outputs.version }}" --no-git-tag-version --allow-same-version
 
       # See the staging job: provenance is unavailable from a private repo.
       - name: Publish to npm

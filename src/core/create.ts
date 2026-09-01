@@ -5,7 +5,8 @@ import { type CreateProjectResult, SCHEMA_VERSION, treeNameSchema } from "../sch
 import { findConnectionRecord, managedTreesRoot, upsertConnection } from "./connections.js";
 import { type CommandRunner, git } from "./internal/git.js";
 import { canonicalProjectRoot } from "./internal/project.js";
-import { parseRootNode } from "./internal/tree-state.js";
+import { writeProjectPointer } from "./internal/project-pointer.js";
+import { readRootNode } from "./internal/root-node.js";
 import { scaffoldTree } from "./scaffold.js";
 
 function projectName(canonicalRoot: string): string {
@@ -19,7 +20,7 @@ function projectName(canonicalRoot: string): string {
   return /^[a-z\d]/u.test(normalized) ? normalized : "project";
 }
 
-function existingCreateResult(destination: string, runner?: CommandRunner): CreateProjectResult {
+function existingCreateResult(canonical: string, destination: string, runner?: CommandRunner): CreateProjectResult {
   const branch = git(destination, ["symbolic-ref", "--short", "HEAD"], {
     message: "Failed to resolve the managed tree branch.",
     runner,
@@ -32,8 +33,9 @@ function existingCreateResult(destination: string, runner?: CommandRunner): Crea
     branch,
     commitSha,
     created: false,
+    pointer: writeProjectPointer(canonical, destination),
     schemaVersion: SCHEMA_VERSION,
-    title: parseRootNode(destination).frontmatter.title,
+    title: readRootNode(destination).frontmatter.title,
     treePath: destination,
   };
 }
@@ -57,7 +59,7 @@ export function createProject(projectPath: string, runner?: CommandRunner): Crea
     if (entry.isSymbolicLink() || !entry.isDirectory() || current === undefined) {
       throw new Error(`Managed Context Tree name ${name} is occupied; run context-tree connect ${name}.`);
     }
-    return existingCreateResult(destination, runner);
+    return existingCreateResult(canonical, destination, runner);
   }
 
   mkdirSync(destination, { mode: 0o700 });
@@ -68,6 +70,7 @@ export function createProject(projectPath: string, runner?: CommandRunner): Crea
       branch: scaffold.branch,
       commitSha: scaffold.commit,
       created: true,
+      pointer: writeProjectPointer(canonical, scaffold.root),
       schemaVersion: SCHEMA_VERSION,
       title: name,
       treePath: scaffold.root,
