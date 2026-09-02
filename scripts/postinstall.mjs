@@ -5,20 +5,32 @@
 // A failure must never fail `npm install`: the CLI is still usable, and
 // `context-tree install` can be run by hand afterwards.
 //
-// Only a global install writes to the home directory. Adding this package as a local
-// dependency — including this repository's own `pnpm install` — must not silently
-// modify the developer's agent configuration, so it just prints the command.
+// Only a direct global install writes to the home directory; anything else just prints the
+// command, so installing this package as a dependency never touches a developer's own agents.
 
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (process.env.npm_config_global !== "true") {
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// npm sets npm_config_global for a global install's dependencies too, so the flag alone does not
+// identify the install target. A dependency copy sits inside the owning package's node_modules; a
+// directly installed one sits in npm's own prefix, which is not a package.
+function ownedByAnotherPackage(directory) {
+  const parent = dirname(directory);
+  if (parent === directory) return false;
+  if (basename(directory) === "node_modules") return existsSync(join(parent, "package.json"));
+  return ownedByAnotherPackage(parent);
+}
+
+if (process.env.npm_config_global !== "true" || ownedByAnotherPackage(packageRoot)) {
   process.stdout.write("Context Tree: run `context-tree install` to add the skills to your agent.\n");
   process.exit(0);
 }
 
-const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..", "dist", "cli", "index.mjs");
+const cli = join(packageRoot, "dist", "cli", "index.mjs");
 const result = spawnSync(process.execPath, [cli, "install"], { encoding: "utf8" });
 
 if (result.error !== undefined || result.status !== 0) {

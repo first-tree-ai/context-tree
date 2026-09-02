@@ -136,9 +136,32 @@ try {
     "a local install must not write skills to the home directory",
   );
 
-  // A global install does, which is the documented path.
-  const globalPostinstall = spawnSync(process.execPath, [join(installedPackage, "scripts/postinstall.mjs")], {
+  // Nor does a global install of a package that depends on this one: npm sets npm_config_global
+  // for its dependencies too, and this copy is nested inside the consumer, which is that layout.
+  const nestedPostinstall = spawnSync(process.execPath, [join(installedPackage, "scripts/postinstall.mjs")], {
     cwd: consumerRoot,
+    encoding: "utf8",
+    env: { ...npmEnvironment, npm_config_global: "true" },
+  });
+  assert.equal(nestedPostinstall.status, 0, "postinstall must never fail an install");
+  assert.match(nestedPostinstall.stdout, /run `context-tree install`/u);
+  assert.equal(
+    existsSync(join(temporaryRoot, ".claude", "skills")),
+    false,
+    "a global install of a dependent package must not write skills to the home directory",
+  );
+
+  // A direct global install does. Installing for real is what proves it, because the layout npm
+  // produces is the whole basis of the distinction.
+  const globalPrefix = join(temporaryRoot, "global-prefix");
+  execFileSync("npm", ["install", "-g", "--prefix", globalPrefix, "--no-audit", "--no-fund", tarball], {
+    cwd: temporaryRoot,
+    env: npmEnvironment,
+    stdio: "pipe",
+  });
+  const globallyInstalled = join(globalPrefix, "lib/node_modules/@first-tree-ai/context-tree");
+  const globalPostinstall = spawnSync(process.execPath, [join(globallyInstalled, "scripts/postinstall.mjs")], {
+    cwd: temporaryRoot,
     encoding: "utf8",
     env: { ...npmEnvironment, npm_config_global: "true" },
   });
