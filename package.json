@@ -1,6 +1,6 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Durable, structured project context for coding agents: a CLI plus framework-neutral skills.",
   "type": "module",
   "license": "Apache-2.0",
