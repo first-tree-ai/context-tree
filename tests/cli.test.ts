@@ -152,10 +152,14 @@ describe("built CLI", () => {
     const resolved = JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout);
     expect(resolved).toEqual({ schemaVersion: 1, tree: { kind: "local", path: created.treePath } });
 
-    const verify = JSON.parse(cli(project, ["verify", "--tree-path", created.treePath, "--json"], undefined, root).stdout);
+    const verify = JSON.parse(
+      cli(project, ["verify", "--tree-path", created.treePath, "--json"], undefined, root).stdout,
+    );
     expect(verifyTreeReportSchema.parse(verify)).toMatchObject({ ok: true });
 
-    const read = JSON.parse(cli(project, ["read", "--tree-path", created.treePath, "--json"], undefined, root).stdout);
+    const read = JSON.parse(
+      cli(project, ["read", "--tree-path", created.treePath, "--json"], undefined, root).stdout,
+    );
     expect(contextTreeReadResultSchema.parse(read)).toMatchObject({ target: "." });
   });
 
@@ -173,7 +177,9 @@ describe("built CLI", () => {
     expect(instructions).toContain("<!-- context-tree:end -->");
 
     // Reconnecting the same tree rewrites the single block rather than appending another.
-    const reconnected = JSON.parse(cli(project, ["connect", "service-context-tree", "--json"], undefined, root).stdout) as {
+    const reconnected = JSON.parse(
+      cli(project, ["connect", "service-context-tree", "--json"], undefined, root).stdout,
+    ) as {
       pointer: string;
     };
     expect(reconnected.pointer).toBe("skipped");
@@ -445,7 +451,9 @@ describe("built CLI", () => {
       tree: { kind: "local", path: created.treePath },
     });
 
-    const verify = JSON.parse(cli(project, ["verify", "--tree-path", created.treePath, "--json"], undefined, root).stdout);
+    const verify = JSON.parse(
+      cli(project, ["verify", "--tree-path", created.treePath, "--json"], undefined, root).stdout,
+    );
     expect(verify).toMatchObject({ ok: true });
     expect(existsSync(join(created.treePath, "members", "engineer", "memory.md"))).toBe(true);
 
@@ -480,7 +488,12 @@ describe("built CLI", () => {
     mkdirSync(bin);
     writeFileSync(join(bin, "gh"), "#!/bin/sh\necho 'gh auth login required' >&2\nexit 1\n");
     chmodSync(join(bin, "gh"), 0o755);
-    const publish = cli(project, ["publish", "--json"], { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` }, root);
+    const publish = cli(
+      project,
+      ["publish", "--json"],
+      { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+      root,
+    );
     expectCliError(publish, "GITHUB_AUTH");
   });
 
