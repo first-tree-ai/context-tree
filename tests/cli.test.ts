@@ -157,9 +157,7 @@ describe("built CLI", () => {
     );
     expect(verifyTreeReportSchema.parse(verify)).toMatchObject({ ok: true });
 
-    const read = JSON.parse(
-      cli(project, ["read", "--tree-path", created.treePath, "--json"], undefined, root).stdout,
-    );
+    const read = JSON.parse(cli(project, ["read", "--tree-path", created.treePath, "--json"], undefined, root).stdout);
     expect(contextTreeReadResultSchema.parse(read)).toMatchObject({ target: "." });
   });
 
