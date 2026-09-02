@@ -12,14 +12,14 @@ metadata:
 If `context-tree` is not found, stop and ask the user to run
 `npm install --global @first-tree-ai/context-tree`.
 
-Run `context-tree resolve`. If it succeeds, report whether the tree is local or
+Run `context-tree resolve --json`. If it succeeds, report whether the tree is local or
 GitHub-backed, with its canonical path, and stop; the project is already set up.
 
 If `resolve` reports `NO_CONNECTION`, ask the user whether to create a new
 Context Tree or connect an existing one:
 
 - To create, delegate to `$context-tree-create`.
-- To connect, run `context-tree list` and offer every listed managed name, a
+- To connect, run `context-tree list --json` and offer every listed managed name, a
   GitHub `OWNER/REPO`, and an exact disk path. Delegate the chosen target to
   `$context-tree-connect`, which owns the rules for accepting it.
 
