@@ -13,20 +13,44 @@ import { syncProject } from "../core/sync.js";
 import { verifyTree } from "../core/verify.js";
 import { finishContextWrite, prepareContextWrite } from "../core/write.js";
 import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION, skillHostSchema } from "../schemas.js";
+import {
+  formatConnect,
+  formatCreate,
+  formatList,
+  formatPublish,
+  formatRead,
+  formatResolve,
+  formatVerify,
+} from "./format.js";
 
 type ContextTreeCliIo = {
   cwd: () => string;
   stdout: (value: string) => void;
+  stderr?: (value: string) => void;
 };
 
 const defaultIo: ContextTreeCliIo = {
   cwd: () => process.cwd(),
+  stderr: (value) => process.stderr.write(value),
   stdout: (value) => process.stdout.write(value),
 };
+
+/** Commands that default to human-readable text and accept --json to restore JSON. */
+const TEXT_DEFAULT_COMMANDS = new Set(["create", "connect", "list", "resolve", "publish", "read", "verify"]);
 
 function line(io: ContextTreeCliIo, value: string): void {
   io.stdout(`${value}\n`);
 }
+
+function errline(io: ContextTreeCliIo, value: string): void {
+  (io.stderr ?? ((text) => process.stderr.write(text)))(`${value}\n`);
+}
+
+function emit<T>(io: ContextTreeCliIo, json: boolean, result: T, format: (value: T) => string): void {
+  line(io, json ? JSON.stringify(result) : format(result));
+}
+
+const jsonOption = ["--json", "print machine-readable JSON (schema version 1) instead of text"] as const;
 
 function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   const program = new Command()
@@ -41,8 +65,9 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .command("create")
     .description("Create and connect one uniquely named managed Context Tree for the current project.")
     .option("--project-path <path>", "project directory", ".")
-    .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(createProject(resolve(io.cwd(), options.projectPath))));
+    .option(...jsonOption)
+    .action((options: { json: boolean; projectPath: string }) => {
+      emit(io, options.json, createProject(resolve(io.cwd(), options.projectPath)), formatCreate);
     });
 
   program
@@ -51,17 +76,23 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .argument("[name-or-repository]", "managed tree name or GitHub OWNER/REPO")
     .option("--project-path <path>", "project directory", ".")
     .option("--tree-path <path>", "exact Context Tree Git root to connect in place")
-    .action((target: string | undefined, options: { projectPath: string; treePath?: string }) => {
+    .option(...jsonOption)
+    .action((target: string | undefined, options: { json: boolean; projectPath: string; treePath?: string }) => {
       const projectPath = resolve(io.cwd(), options.projectPath);
       if (target !== undefined && options.treePath !== undefined) {
         throw new Error("Connect requires exactly one of a name/repository or --tree-path.");
       }
       if (target !== undefined) {
-        line(io, JSON.stringify(connectProject({ projectPath, target })));
+        emit(io, options.json, connectProject({ projectPath, target }), formatConnect);
         return;
       }
       if (options.treePath !== undefined) {
-        line(io, JSON.stringify(connectProject({ projectPath, treePath: resolve(io.cwd(), options.treePath) })));
+        emit(
+          io,
+          options.json,
+          connectProject({ projectPath, treePath: resolve(io.cwd(), options.treePath) }),
+          formatConnect,
+        );
         return;
       }
       throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
@@ -70,16 +101,18 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   program
     .command("list")
     .description("List valid clean managed Context Trees.")
-    .action(() => {
-      line(io, JSON.stringify(listManagedTrees()));
+    .option(...jsonOption)
+    .action((options: { json: boolean }) => {
+      emit(io, options.json, listManagedTrees(), formatList);
     });
 
   program
     .command("resolve")
     .description("Resolve the connected Context Tree for a project.")
     .option("--project-path <path>", "project directory", ".")
-    .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(resolveConnection(resolve(io.cwd(), options.projectPath))));
+    .option(...jsonOption)
+    .action((options: { json: boolean; projectPath: string }) => {
+      emit(io, options.json, resolveConnection(resolve(io.cwd(), options.projectPath)), formatResolve);
     });
 
   program
@@ -122,8 +155,9 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .description("Publish the local tree as a new private GitHub repository.")
     .argument("[repository]", "GitHub OWNER/REPO override; defaults to the authenticated account and tree name")
     .option("--project-path <path>", "project directory", ".")
-    .action((repository: string | undefined, options: { projectPath: string }) => {
-      line(io, JSON.stringify(publishProject(resolve(io.cwd(), options.projectPath), { repository })));
+    .option(...jsonOption)
+    .action((repository: string | undefined, options: { json: boolean; projectPath: string }) => {
+      emit(io, options.json, publishProject(resolve(io.cwd(), options.projectPath), { repository }), formatPublish);
     });
 
   program
@@ -131,7 +165,8 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .description("Read an indexed Context Tree directory or Markdown leaf.")
     .argument("[path]", "tree-relative path", ".")
     .option("--tree-path <path>", "Context Tree root", ".")
-    .action((path: string, options: { treePath: string }) => {
+    .option(...jsonOption)
+    .action((path: string, options: { json: boolean; treePath: string }) => {
       const treePath = resolve(io.cwd(), options.treePath);
       if (!verifyTree(treePath).ok) {
         throw new ContextTreeError(
@@ -139,16 +174,17 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
           `Refusing to read an invalid Context Tree; run context-tree verify --tree-path ${treePath}.`,
         );
       }
-      line(io, JSON.stringify(readTree(treePath, path)));
+      emit(io, options.json, readTree(treePath, path), formatRead);
     });
 
   program
     .command("verify")
     .description("Validate Context Tree structure and safety.")
     .option("--tree-path <path>", "Context Tree root", ".")
-    .action((options: { treePath: string }) => {
+    .option(...jsonOption)
+    .action((options: { json: boolean; treePath: string }) => {
       const result = verifyTree(resolve(io.cwd(), options.treePath));
-      line(io, JSON.stringify(result));
+      emit(io, options.json, result, formatVerify);
       if (!result.ok) process.exitCode = 1;
     });
 
@@ -179,13 +215,24 @@ export async function runContextTreeCli(
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
     const code = error instanceof ContextTreeError ? error.code : CLI_ERROR_CODES.failed;
     const message = sanitizeCommandOutput(error instanceof Error ? error.message : String(error));
-    const envelope: ContextTreeCliErrorEnvelope = {
-      error: { code, message },
-      ok: false,
-      schemaVersion: SCHEMA_VERSION,
-    };
-    line(io, JSON.stringify(envelope));
+    if (usesTextErrors(argv)) {
+      errline(io, `context-tree: ${message}`);
+    } else {
+      const envelope: ContextTreeCliErrorEnvelope = {
+        error: { code, message },
+        ok: false,
+        schemaVersion: SCHEMA_VERSION,
+      };
+      line(io, JSON.stringify(envelope));
+    }
     process.exitCode = 1;
     return 1;
   }
+}
+
+/** A text-default command failing without --json reports a human-readable line on stderr. */
+function usesTextErrors(argv: string[]): boolean {
+  if (argv.includes("--json")) return false;
+  const subcommand = argv.slice(2).find((token) => !token.startsWith("-"));
+  return subcommand !== undefined && TEXT_DEFAULT_COMMANDS.has(subcommand);
 }

@@ -104,9 +104,9 @@ An identical connection is idempotent. An explicit connect automatically
 switches the project. GitHub checkouts use the repository's lowercase name in
 the same flat managed namespace as created trees.
 
-`context-tree list` reports valid, clean managed trees as
-`{ schemaVersion: 1, trees: [{ name, tree }] }`; a missing managed directory
-is an empty list.
+`context-tree list` reports valid, clean managed trees; `context-tree list --json`
+returns them as `{ schemaVersion: 1, trees: [{ name, tree }] }`, and a missing
+managed directory is an empty list.
 
 ### Read
 
@@ -190,7 +190,21 @@ orchestrates the five concrete workflows. `install` is the distribution
 entry point, run for you by `npm install`. `resolve`, `sync`, `prepare-write`,
 `finish-write`, and `verify` are plumbing or diagnostic commands rather than
 separate user intentions; `list` backs setup's connect-target discovery.
-All machine-readable responses use strict schema version `1`.
+
+### Output
+
+`create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` print
+human-readable text by default and accept `--json` to emit their strict schema
+version `1` payload for scripts and agents; in text mode a failure prints a
+sanitized message to stderr with a non-zero exit code. The six skills always
+pass `--json`. `sync`, `prepare-write`, `finish-write`, and `install` are
+low-level plumbing and always emit that JSON (with the error envelope on stdout).
+`--help` and `--version` are always plain text.
+
+```bash
+context-tree verify                 # human-readable report
+context-tree verify --json          # { "ok": true, "schemaVersion": 1, ... }
+```
 
 `verify` is intended for CI and diagnostics. Normal skills invoke it only after
 an operation reports invalid tree content.

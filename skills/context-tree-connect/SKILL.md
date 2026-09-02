@@ -15,9 +15,9 @@ If `context-tree` is not found, stop and ask the user to run
 Connect exactly one target supplied by the user:
 
 - A managed tree name or GitHub `OWNER/REPO`:
-  `context-tree connect "<name-or-OWNER/REPO>"`.
+  `context-tree connect "<name-or-OWNER/REPO>" --json`.
 - An exact path to an existing Context Tree checkout:
-  `context-tree connect --tree-path "<path>"`.
+  `context-tree connect --tree-path "<path>" --json`.
   That checkout is attached where it already lives and is never copied, moved,
   or deleted.
 

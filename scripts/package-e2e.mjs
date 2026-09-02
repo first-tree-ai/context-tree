@@ -189,7 +189,7 @@ try {
   assert.equal(version.status, 0);
   assert.equal(version.stdout, `${manifest.version}\n`);
 
-  const created = runCli(cliPath, consumerRoot, ["create", "--project-path", "."]);
+  const created = runCli(cliPath, consumerRoot, ["create", "--project-path", ".", "--json"]);
   assert.equal(created.status, 0);
   const createdResult = parseOneLineJson(created.stdout);
   const treePath = createdResult.treePath;
@@ -213,7 +213,7 @@ try {
     /branches: \["trunk"\]/u,
   );
 
-  const resolved = runCli(cliPath, consumerRoot, ["resolve"]);
+  const resolved = runCli(cliPath, consumerRoot, ["resolve", "--json"]);
   assert.equal(resolved.status, 0);
   assert.equal(parseOneLineJson(resolved.stdout).tree.path, treePath);
 
@@ -228,16 +228,16 @@ try {
   );
   requirePackagedFile(consumerRoot, ".codex/skills/context-tree-write/SKILL.md");
 
-  const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath]);
+  const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(validVerify.status, 0);
   assert.equal(parseOneLineJson(validVerify.stdout).ok, true);
 
-  const read = runCli(cliPath, consumerRoot, ["read", "--tree-path", treePath]);
+  const read = runCli(cliPath, consumerRoot, ["read", "--tree-path", treePath, "--json"]);
   assert.equal(read.status, 0);
   assert.equal(parseOneLineJson(read.stdout).target, ".");
 
   rmSync(join(treePath, "NODE.md"));
-  const invalidVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath]);
+  const invalidVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(invalidVerify.status, 1);
   assert.equal(parseOneLineJson(invalidVerify.stdout).ok, false);
 } finally {

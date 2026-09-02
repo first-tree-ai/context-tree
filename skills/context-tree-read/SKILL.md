@@ -15,7 +15,7 @@ run `npm install --global @first-tree-ai/context-tree`. If it reports
 run `sync` again once.
 
 Use the returned `tree.path` for narrow, task-relevant reads with
-`context-tree read [path] --tree-path "<tree-path>"`. Start at the root index,
+`context-tree read [path] --tree-path "<tree-path>" --json`. Start at the root index,
 then open only the immediate children that bear on the task. Do not scan the
 whole tree.
 

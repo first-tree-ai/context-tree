@@ -12,7 +12,7 @@ metadata:
 If `context-tree` is not found, stop and ask the user to run
 `npm install --global @first-tree-ai/context-tree`.
 
-Run `context-tree publish`. When the user explicitly supplies an alternative,
+Run `context-tree publish --json`. When the user explicitly supplies an alternative,
 append the validated `OWNER/REPO` argument. Never accept a repository URL.
 
 Publication creates one new private repository, and the local connection update
