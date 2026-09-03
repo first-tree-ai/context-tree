@@ -131,6 +131,7 @@ describe("built CLI", () => {
       "read",
       "resolve",
       "sync",
+      "uninstall",
       "verify",
     ]);
     const version = cli(workspace(), ["--version"]);

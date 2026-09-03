@@ -9,6 +9,7 @@ import {
   type SkillHost,
   type SkillInstallation,
   type SkillInstallSkip,
+  type UninstallSkillsResult,
 } from "../schemas.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 
@@ -28,6 +29,13 @@ export type InstallSkillsOptions = {
   /** Restrict installation to these hosts; defaults to every known host. */
   hosts?: readonly SkillHost[];
   /** Install below this project root instead of the home directory. */
+  projectPath?: string;
+};
+
+export type UninstallSkillsOptions = {
+  /** Restrict removal to these hosts; defaults to every known host. */
+  hosts?: readonly SkillHost[];
+  /** Remove below this project root instead of the home directory. */
   projectPath?: string;
 };
 
@@ -98,6 +106,22 @@ function hostDestination(
   return { destination: ensureRealDirectory(root, [configDirectory, SKILLS_DIRECTORY]) };
 }
 
+/** Resolve one host's existing skills root without creating or following anything. */
+function hostSkillsRoot(host: SkillHost, root: string): { destination: string } | { reason: string } {
+  const hostRoot = join(root, HOST_CONFIG_DIRECTORY[host]);
+  const hostEntry = lstatSync(hostRoot, { throwIfNoEntry: false });
+  if (hostEntry === undefined) return { reason: `${hostRoot} does not exist; nothing to remove.` };
+  if (hostEntry.isSymbolicLink() || !hostEntry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
+
+  const skillsRoot = join(hostRoot, SKILLS_DIRECTORY);
+  const skillsEntry = lstatSync(skillsRoot, { throwIfNoEntry: false });
+  if (skillsEntry === undefined) return { reason: `${skillsRoot} does not exist; nothing to remove.` };
+  if (skillsEntry.isSymbolicLink() || !skillsEntry.isDirectory()) {
+    return { reason: `${skillsRoot} is not a real directory.` };
+  }
+  return { destination: skillsRoot };
+}
+
 /**
  * Copy the packaged skills into each requested host's skill directory.
  *
@@ -134,4 +158,37 @@ export function installSkills(options: InstallSkillsOptions = {}): InstallSkills
   }
 
   return { installed, schemaVersion: SCHEMA_VERSION, skipped, version: readPackageVersion() };
+}
+
+/** Remove every skill owned by the `context-tree-` prefix from each requested host. */
+export function uninstallSkills(options: UninstallSkillsOptions = {}): UninstallSkillsResult {
+  const hosts = options.hosts === undefined || options.hosts.length === 0 ? SKILL_HOSTS : options.hosts;
+  const root = options.projectPath === undefined ? realHome() : resolve(options.projectPath);
+  const removed: SkillInstallation[] = [];
+  const skipped: SkillInstallSkip[] = [];
+
+  for (const host of hosts) {
+    const resolved = hostSkillsRoot(host, root);
+    if ("reason" in resolved) {
+      skipped.push({ host, reason: resolved.reason });
+      continue;
+    }
+
+    const skills: string[] = [];
+    for (const entry of readdirSync(resolved.destination, { withFileTypes: true })) {
+      if (!entry.name.startsWith(OWNED_SKILL_PREFIX)) continue;
+      const target = join(resolved.destination, entry.name);
+      const targetEntry = lstatSync(target, { throwIfNoEntry: false });
+      if (targetEntry === undefined) continue;
+      if (targetEntry.isSymbolicLink() || !targetEntry.isDirectory()) {
+        skipped.push({ host, reason: `${target} is not a real directory.` });
+        continue;
+      }
+      rmSync(target, { force: true, recursive: true });
+      skills.push(entry.name);
+    }
+    removed.push({ host, path: resolved.destination, skills: skills.sort() });
+  }
+
+  return { removed, schemaVersion: SCHEMA_VERSION, skipped, version: readPackageVersion() };
 }

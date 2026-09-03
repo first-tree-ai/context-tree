@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { installSkills } from "../src/core/install.js";
+import { installSkills, uninstallSkills } from "../src/core/install.js";
 
 const SKILLS = [
   "context-tree-connect",
@@ -103,5 +103,82 @@ describe("skill installation", () => {
     mkdirSync(join(root, ".claude"));
     symlinkSync(outside, join(root, ".claude", "skills"), "dir");
     expect(() => installSkills({ hosts: ["claude"], projectPath: root })).toThrow(/real directory/u);
+  });
+});
+
+describe("skill removal", () => {
+  it("removes every packaged skill it installed for a named host", () => {
+    const root = workspace();
+    installSkills({ hosts: ["claude"], projectPath: root });
+
+    const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(result.removed).toEqual([{ host: "claude", path: join(root, ".claude", "skills"), skills: SKILLS }]);
+    expect(result.skipped).toEqual([]);
+    for (const skill of SKILLS) expect(existsSync(join(root, ".claude", "skills", skill))).toBe(false);
+  });
+
+  it("removes a context-tree- skill it did not install", () => {
+    const root = workspace();
+    const owned = join(root, ".claude", "skills", "context-tree-custom");
+    mkdirSync(owned, { recursive: true });
+
+    const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(result.removed[0]?.skills).toEqual(["context-tree-custom"]);
+    expect(existsSync(owned)).toBe(false);
+  });
+
+  it("never touches a skill directory the package does not own", () => {
+    const root = workspace();
+    const foreign = join(root, ".claude", "skills", "someone-elses-skill");
+    mkdirSync(foreign, { recursive: true });
+    writeFileSync(join(foreign, "SKILL.md"), "mine\n");
+
+    uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(readFileSync(join(foreign, "SKILL.md"), "utf8")).toBe("mine\n");
+  });
+
+  it("reports nothing to remove for a host that is not installed", () => {
+    const root = workspace();
+    const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0]?.reason).toBe(`${join(root, ".claude")} does not exist; nothing to remove.`);
+  });
+
+  it("is idempotent", () => {
+    const root = workspace();
+    installSkills({ hosts: ["claude"], projectPath: root });
+    uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(() => uninstallSkills({ hosts: ["claude"], projectPath: root })).not.toThrow();
+    expect(uninstallSkills({ hosts: ["claude"], projectPath: root }).removed[0]?.skills).toEqual([]);
+  });
+
+  it("leaves everything outside the host skills directory alone", () => {
+    const root = workspace();
+    const state = join(root, ".context-tree", "trees", "mine");
+    mkdirSync(state, { recursive: true });
+    installSkills({ hosts: ["claude"], projectPath: root });
+
+    uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(existsSync(state)).toBe(true);
+  });
+
+  it("refuses to remove through a symlinked skills directory", () => {
+    const root = workspace();
+    const outside = join(root, "outside");
+    const owned = join(outside, "context-tree-read");
+    mkdirSync(owned, { recursive: true });
+    mkdirSync(join(root, ".claude"));
+    symlinkSync(outside, join(root, ".claude", "skills"), "dir");
+
+    const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
+
+    expect(result.removed).toEqual([]);
+    expect(result.skipped[0]?.reason).toContain("is not a real directory");
+    expect(existsSync(owned)).toBe(true);
   });
 });
