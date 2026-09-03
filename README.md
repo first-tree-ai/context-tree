@@ -44,12 +44,14 @@ new agent, or scope it to one project:
 context-tree install                       # every agent you have
 context-tree install --host codex          # one agent
 context-tree install --project .           # ./.claude/skills and ./.codex/skills
+context-tree uninstall                     # remove context-tree-* skills
 ```
 
-Installing only ever writes `context-tree-*` skill directories, never touches
-skills it does not own, and never creates a configuration directory for an agent
-that is not present. Adding support for another agent is one entry in the host
-table in `src/core/install.ts`.
+Install and uninstall own exactly the `context-tree-*` skill directories.
+Install never touches skills it does not own or creates a configuration directory
+for an agent that is not present; uninstall removes every owned-prefix directory
+and nothing else. Adding support for another agent is one entry in the host table
+in `src/core/install.ts`.
 
 Once a project is connected, `create` and `connect` record the tree in the
 project's own `AGENTS.md`, so any agent that reads instruction files knows the
@@ -181,13 +183,14 @@ commit or discard them), `INVALID_TREE` (structure fails `verify`),
 The public command inventory is:
 
 ```text
-install  create  connect  list  resolve  sync  prepare-write
+install  uninstall  create  connect  list  resolve  sync  prepare-write
 finish-write  publish  read  verify
 ```
 
 Setup, create, connect, read, write, and publish ship as six skills; setup
 orchestrates the five concrete workflows. `install` is the distribution
-entry point, run for you by `npm install`. `resolve`, `sync`, `prepare-write`,
+entry point, run for you by `npm install`; `uninstall` is its supported reverse.
+`resolve`, `sync`, `prepare-write`,
 `finish-write`, and `verify` are plumbing or diagnostic commands rather than
 separate user intentions; `list` backs setup's connect-target discovery.
 
@@ -197,7 +200,7 @@ separate user intentions; `list` backs setup's connect-target discovery.
 human-readable text by default and accept `--json` to emit their strict schema
 version `1` payload for scripts and agents; in text mode a failure prints a
 sanitized message to stderr with a non-zero exit code. The six skills always
-pass `--json`. `sync`, `prepare-write`, `finish-write`, and `install` are
+pass `--json`. `sync`, `prepare-write`, `finish-write`, `install`, and `uninstall` are
 low-level plumbing and always emit that JSON (with the error envelope on stdout).
 `--help` and `--version` are always plain text.
 

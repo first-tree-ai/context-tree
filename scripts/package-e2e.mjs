@@ -179,6 +179,22 @@ try {
     "postinstall must not create an absent host directory",
   );
 
+  const foreignSkill = join(temporaryRoot, ".claude", "skills", "foreign-skill");
+  mkdirSync(foreignSkill);
+  const contextTreeState = join(temporaryRoot, ".context-tree", "trees", "preserved");
+  mkdirSync(contextTreeState, { recursive: true });
+  const uninstall = runCli(join(globalPrefix, "bin/context-tree"), temporaryRoot, ["uninstall"]);
+  assert.equal(uninstall.status, 0);
+  assert.equal(uninstall.stdout.trim().split("\n").length, 1, "uninstall must print one JSON line");
+  const uninstallResult = parseOneLineJson(uninstall.stdout);
+  assert.deepEqual(uninstallResult.removed[0].skills, SKILLS);
+  for (const skill of SKILLS) {
+    assert.equal(existsSync(join(temporaryRoot, ".claude", "skills", skill)), false);
+  }
+  assert.equal(existsSync(foreignSkill), true, "uninstall must preserve foreign skills");
+  assert.equal(existsSync(contextTreeState), true, "uninstall must preserve Context Tree state");
+  assert.equal(existsSync(join(temporaryRoot, ".codex")), false, "uninstall must not create absent hosts");
+
   const cliPath = join(consumerRoot, "node_modules/.bin/context-tree");
 
   const help = runCli(cliPath, consumerRoot, ["--help"]);

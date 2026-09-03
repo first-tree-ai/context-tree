@@ -3,7 +3,12 @@ import { resolve } from "node:path";
 import { Command, CommanderError } from "commander";
 import { connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
 import { createProject } from "../core/create.js";
-import { type InstallSkillsOptions, installSkills } from "../core/install.js";
+import {
+  type InstallSkillsOptions,
+  installSkills,
+  type UninstallSkillsOptions,
+  uninstallSkills,
+} from "../core/install.js";
 import { ContextTreeError } from "../core/internal/errors.js";
 import { sanitizeCommandOutput } from "../core/internal/git.js";
 import { readPackageVersion } from "../core/internal/packaged-resource.js";
@@ -198,6 +203,18 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       if (options.host !== "all") request.hosts = [skillHostSchema.parse(options.host)];
       if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
       line(io, JSON.stringify(installSkills(request)));
+    });
+
+  program
+    .command("uninstall")
+    .description("Remove packaged Context Tree skills from each agent's skill directory.")
+    .option("--host <host>", "restrict to one host: claude, codex, or all", "all")
+    .option("--project <path>", "remove below this project root instead of the home directory")
+    .action((options: { host: string; project?: string }) => {
+      const request: UninstallSkillsOptions = {};
+      if (options.host !== "all") request.hosts = [skillHostSchema.parse(options.host)];
+      if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
+      line(io, JSON.stringify(uninstallSkills(request)));
     });
 
   return program;

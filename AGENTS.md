@@ -8,7 +8,8 @@ Distribution is npm only: the package exposes a `bin`, and `postinstall` runs `c
 
 - Host Git and GitHub CLI tools own private-repository authentication.
 - Zod schemas are the source of truth for public wire contracts.
-- `create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` default to human-readable text and print one line of JSON to stdout only with `--json`; their text-mode failures print a sanitized line to stderr. `sync`, `prepare-write`, `finish-write`, and `install` always print exactly one line of JSON to stdout and nothing to stderr. Skills pass `--json` so their parsing is unchanged.
+- `create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` default to human-readable text and print one line of JSON to stdout only with `--json`; their text-mode failures print a sanitized line to stderr. `sync`, `prepare-write`, `finish-write`, `install`, and `uninstall` always print exactly one line of JSON to stdout and nothing to stderr. Skills pass `--json` so their parsing is unchanged.
+- Install and uninstall own exactly the `context-tree-` prefix in each host's skills directory; nothing else is ever replaced or removed.
 - Use `unknown` plus narrowing; avoid `any`, enums, and unjustified type assertions.
 - Keep public functions explicitly typed and use `import type`.
 - Preserve path-containment and symlink fail-closed behavior.

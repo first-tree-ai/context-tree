@@ -175,6 +175,16 @@ export const installSkillsResultSchema = z
   .strict();
 export type InstallSkillsResult = z.infer<typeof installSkillsResultSchema>;
 
+export const uninstallSkillsResultSchema = z
+  .object({
+    removed: z.array(skillInstallationSchema),
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    skipped: z.array(skillInstallSkipSchema),
+    version: z.string().trim().min(1),
+  })
+  .strict();
+export type UninstallSkillsResult = z.infer<typeof uninstallSkillsResultSchema>;
+
 const contextTreeReadKindSchema = z.enum(["directory", "file"]);
 const contextTreeReadCommonFields = {
   contentClass: contextContentClassSchema,
