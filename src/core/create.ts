@@ -5,7 +5,7 @@ import { type CreateProjectResult, SCHEMA_VERSION, treeNameSchema } from "../sch
 import { findConnectionRecord, managedTreesRoot, upsertConnection } from "./connections.js";
 import { type CommandRunner, git } from "./internal/git.js";
 import { canonicalProjectRoot } from "./internal/project.js";
-import { writeProjectPointer } from "./internal/project-pointer.js";
+import { linkProjectInstructions } from "./internal/project-instructions.js";
 import { readRootNode } from "./internal/root-node.js";
 import { scaffoldTree } from "./scaffold.js";
 
@@ -29,11 +29,11 @@ function existingCreateResult(canonical: string, destination: string, runner?: C
     message: "Failed to resolve the managed tree commit.",
     runner,
   });
+  linkProjectInstructions(canonical);
   return {
     branch,
     commitSha,
     created: false,
-    pointer: writeProjectPointer(canonical, destination),
     schemaVersion: SCHEMA_VERSION,
     title: readRootNode(destination).frontmatter.title,
     treePath: destination,
@@ -66,11 +66,11 @@ export function createProject(projectPath: string, runner?: CommandRunner): Crea
   try {
     const scaffold = scaffoldTree({ name, path: destination, runner });
     upsertConnection({ projectPath: canonical, tree: { kind: "local", path: scaffold.root } }, runner);
+    linkProjectInstructions(canonical);
     return {
       branch: scaffold.branch,
       commitSha: scaffold.commit,
       created: true,
-      pointer: writeProjectPointer(canonical, scaffold.root),
       schemaVersion: SCHEMA_VERSION,
       title: name,
       treePath: scaffold.root,

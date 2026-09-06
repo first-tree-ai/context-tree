@@ -9,12 +9,6 @@ import type {
   VerifyTreeReport,
 } from "../schemas.js";
 
-const POINTER_NOTE: Record<CreateProjectResult["pointer"], string> = {
-  skipped: "left unchanged",
-  updated: "updated",
-  written: "written",
-};
-
 function treeLines(tree: ContextTreeState, indent = "  "): string[] {
   const lines = [`${indent}Path:       ${tree.path}`];
   if (tree.kind === "github") lines.push(`${indent}Repository: ${tree.repository}`);
@@ -28,16 +22,11 @@ export function formatCreate(result: CreateProjectResult): string {
     `  Path:     ${result.treePath}`,
     `  Branch:   ${result.branch}`,
     `  Commit:   ${result.commitSha}`,
-    `  AGENTS.md: ${POINTER_NOTE[result.pointer]}`,
   ].join("\n");
 }
 
 export function formatConnect(result: ConnectProjectResult): string {
-  return [
-    `Connected ${result.tree.kind} Context Tree.`,
-    ...treeLines(result.tree),
-    `  AGENTS.md:  ${POINTER_NOTE[result.pointer]}`,
-  ].join("\n");
+  return [`Connected ${result.tree.kind} Context Tree.`, ...treeLines(result.tree)].join("\n");
 }
 
 export function formatResolve(result: ContextTreeConnectionResult): string {

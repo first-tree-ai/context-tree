@@ -175,11 +175,13 @@ agent. Installation refuses symlinked or non-directory path segments, writes
 skill files with mode `0644`, replaces only `context-tree-*` directories, and
 never modifies skills the package does not own.
 
-`create` and `connect` record the connected tree in the *project's* `AGENTS.md`
-inside markers, replacing an existing block rather than appending a second one,
-and creating `CLAUDE.md` as a symlink only when the project has none. All other
-file content is preserved, and a symlinked or non-regular `AGENTS.md` is
-refused. The commands report `written`, `updated`, or `skipped` as `pointer`.
+`create` (including reuse) and `connect` never write the project's `AGENTS.md`.
+If it is a regular file and there is no `CLAUDE.md` entry, they best-effort create
+`CLAUDE.md` as a relative symlink to `AGENTS.md`. Missing or non-regular
+`AGENTS.md` and all existing `CLAUDE.md` entries, including dangling symlinks,
+are preserved. Connection storage is independent of these instruction files.
+Previously written blocks are left untouched. Tree repository scaffolding
+retains its own instructions and symlink.
 
 Skills invoke `context-tree` on `PATH` and do not prescribe raw Git/GitHub
 operations. Setup routing happens in the read and write skills. The editorial

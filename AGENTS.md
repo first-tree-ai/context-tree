@@ -16,7 +16,7 @@ Distribution is npm only: the package exposes a `bin`, and `postinstall` runs `c
 - Never accept or log credential-bearing repository URLs.
 - Skills contain only reusable agent instructions and required resources, and invoke `context-tree` on `PATH`.
 - The editorial policy lives in the skills that need it, not in a separate command or file.
-- Writes into a user's own project are limited to the marker-delimited `AGENTS.md` pointer.
+- Never write project `AGENTS.md`. Only create a best-effort `CLAUDE.md` symlink when `AGENTS.md` is regular and no `CLAUDE.md` entry exists.
 
 ## Commands
 

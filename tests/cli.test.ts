@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -162,29 +163,32 @@ describe("built CLI", () => {
     expect(contextTreeReadResultSchema.parse(read)).toMatchObject({ target: "." });
   });
 
-  it("records the tree in the project's own AGENTS.md", () => {
-    const root = workspace();
-    const project = join(root, "service");
-    mkdirSync(project);
-    const created = JSON.parse(cli(project, ["create", "--json"], undefined, root).stdout) as CreateResult & {
-      pointer: string;
-    };
-    expect(created.pointer).toBe("written");
-    const instructions = readFileSync(join(project, "AGENTS.md"), "utf8");
-    expect(instructions).toContain("<!-- context-tree:begin -->");
-    expect(instructions).toContain(created.treePath);
-    expect(instructions).toContain("<!-- context-tree:end -->");
-
-    // Reconnecting the same tree rewrites the single block rather than appending another.
-    const reconnected = JSON.parse(
-      cli(project, ["connect", "service-context-tree", "--json"], undefined, root).stdout,
-    ) as {
-      pointer: string;
-    };
-    expect(reconnected.pointer).toBe("skipped");
-    const after = readFileSync(join(project, "AGENTS.md"), "utf8");
-    expect(after.match(/context-tree:begin/gu)).toHaveLength(1);
-  });
+  it.each([false, true])(
+    "preserves project instructions through create, reuse and reconnect (existing: %s)",
+    (existing) => {
+      const root = workspace();
+      const project = join(root, "service");
+      mkdirSync(project);
+      const instructions = "# Rules\r\n<!-- context-tree:begin -->\nlegacy content\n<!-- context-tree:end -->\n";
+      if (existing) writeFileSync(join(project, "AGENTS.md"), instructions);
+      for (const args of [
+        ["create", "--json"],
+        ["create", "--json"],
+        ["connect", "service-context-tree", "--json"],
+      ]) {
+        const result = JSON.parse(cli(project, args, undefined, root).stdout);
+        expect(result).not.toHaveProperty("pointer");
+        if (existing) {
+          expect(readFileSync(join(project, "AGENTS.md"), "utf8")).toBe(instructions);
+          expect(readlinkSync(join(project, "CLAUDE.md"))).toBe("AGENTS.md");
+          rmSync(join(project, "CLAUDE.md"));
+        } else {
+          expect(existsSync(join(project, "AGENTS.md"))).toBe(false);
+          expect(existsSync(join(project, "CLAUDE.md"))).toBe(false);
+        }
+      }
+    },
+  );
 
   it("installs the packaged skills into a named project directory", () => {
     const root = workspace();
@@ -301,7 +305,6 @@ describe("built CLI", () => {
     mkdirSync(second);
     const connected = JSON.parse(cli(second, ["connect", "first-context-tree", "--json"], undefined, root).stdout);
     expect(connected).toEqual({
-      pointer: "written",
       schemaVersion: 1,
       tree: { kind: "local", path: created.treePath },
     });
@@ -331,7 +334,7 @@ describe("built CLI", () => {
     mkdirSync(second);
     const tree = create(root, first).treePath;
     const connected = JSON.parse(cli(second, ["connect", "--tree-path", tree, "--json"], undefined, root).stdout);
-    expect(connected).toEqual({ pointer: "written", schemaVersion: 1, tree: { kind: "local", path: tree } });
+    expect(connected).toEqual({ schemaVersion: 1, tree: { kind: "local", path: tree } });
     expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).tree.path).toBe(tree);
   });
 
