@@ -53,9 +53,9 @@ for an agent that is not present; uninstall removes every owned-prefix directory
 and nothing else. Adding support for another agent is one entry in the host table
 in `src/core/install.ts`.
 
-Once a project is connected, `create` and `connect` record the tree in the
-project's own `AGENTS.md`, so any agent that reads instruction files knows the
-tree exists without host-specific configuration.
+`create` and `connect` leave project instructions unchanged. When a project has
+a regular `AGENTS.md` and no `CLAUDE.md` entry, they best-effort create a
+`CLAUDE.md` symlink to `AGENTS.md`. Connections are stored separately.
 
 ## Six skills
 

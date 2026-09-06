@@ -210,13 +210,10 @@ try {
   const createdResult = parseOneLineJson(created.stdout);
   const treePath = createdResult.treePath;
   assert.match(createdResult.commitSha, /^[0-9a-f]{40}$/u, "create must report the scaffold commit");
-  assert.equal(createdResult.pointer, "written", "create must record the tree in the project");
-
-  // The project pointer replaces the retired session hook.
-  const projectInstructions = readFileSync(join(consumerRoot, "AGENTS.md"), "utf8");
-  assert.match(projectInstructions, /<!-- context-tree:begin -->/u);
-  assert.equal(projectInstructions.includes(treePath), true, "the pointer must name the connected tree");
-  assert.equal(readlinkSync(join(consumerRoot, "CLAUDE.md")), "AGENTS.md");
+  assert.equal("pointer" in createdResult, false);
+  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+    assert.equal(lstatSync(join(consumerRoot, name), { throwIfNoEntry: false }), undefined);
+  }
 
   const packagedTemplates = readdirSync(join(extractedPackage, "templates"));
   assert.equal(packagedTemplates.includes("AGENTS.md"), true);

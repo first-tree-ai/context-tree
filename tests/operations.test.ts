@@ -284,11 +284,9 @@ describe("GitHub lifecycle", () => {
     const runner = githubRunner(remote, log);
     const connected = connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
     expect(connected.tree).toMatchObject({ kind: "github", repository: "acme/context" });
-    expect(connected.pointer).toBe("written");
-    // An identical reconnect is idempotent, including the project pointer it already wrote.
+    // An identical reconnect is idempotent, without changing project instructions.
     expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner)).toEqual({
       ...connected,
-      pointer: "skipped",
     });
     expect(syncProject(currentProject, runner).branch).toBe("trunk");
     const prepared = prepareContextWrite(currentProject, runner);

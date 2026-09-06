@@ -260,16 +260,11 @@ export const contextTreeConnectionResultSchema = z
   .strict();
 export type ContextTreeConnectionResult = z.infer<typeof contextTreeConnectionResultSchema>;
 
-/** Whether the project's AGENTS.md pointer was created, rewritten, or left alone. */
-export const projectPointerOutcomeSchema = z.enum(["written", "updated", "skipped"]);
-export type ProjectPointerOutcome = z.infer<typeof projectPointerOutcomeSchema>;
-
 export const createProjectResultSchema = z
   .object({
     branch: z.string().trim().min(1),
     commitSha: z.string(),
     created: z.boolean(),
-    pointer: projectPointerOutcomeSchema,
     schemaVersion: z.literal(SCHEMA_VERSION),
     title: z.string().trim().min(1),
     treePath: absoluteSingleLinePathSchema,
@@ -279,7 +274,6 @@ export type CreateProjectResult = z.infer<typeof createProjectResultSchema>;
 
 export const connectProjectResultSchema = z
   .object({
-    pointer: projectPointerOutcomeSchema,
     schemaVersion: z.literal(SCHEMA_VERSION),
     tree: contextTreeStateSchema,
   })

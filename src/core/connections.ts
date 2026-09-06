@@ -31,7 +31,7 @@ import { ContextTreeError } from "./internal/errors.js";
 import { type CommandRunner, git, optionalGit } from "./internal/git.js";
 import { canonicalGitHubRepositoryUrl, gitHubRepositoryFromOriginUrl } from "./internal/github-repository.js";
 import { canonicalProjectRoot } from "./internal/project.js";
-import { writeProjectPointer } from "./internal/project-pointer.js";
+import { linkProjectInstructions } from "./internal/project-instructions.js";
 import { validateStoredTreeState, validateTreeCheckout } from "./internal/tree-state.js";
 
 const connectionsFileSchema = z
@@ -264,12 +264,12 @@ export type ConnectProjectOptions = { projectPath: string; target: string } | { 
  * clean, fully valid Git checkout at an explicit disk path in place.
  */
 export function connectProject(options: ConnectProjectOptions, runner?: CommandRunner): ConnectProjectResult {
-  /** Store the connection, then record it in the project so any agent can find it. */
+  /** Store the connection and offer instruction discovery for existing project instructions. */
   const connect = (tree: ContextTreeConnection["tree"]): ConnectProjectResult => {
     const result = upsertConnection({ projectPath: options.projectPath, tree }, runner);
     const canonical = canonicalProjectRoot(options.projectPath, runner);
+    linkProjectInstructions(canonical);
     return {
-      pointer: writeProjectPointer(canonical, result.tree.path),
       schemaVersion: SCHEMA_VERSION,
       tree: result.tree,
     };

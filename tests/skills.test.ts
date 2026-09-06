@@ -81,10 +81,10 @@ describe("MVP skill inventory", () => {
     expect(source("context-tree-setup")).toContain("$context-tree-connect");
   });
 
-  it("tells create and connect to surface the project pointer", () => {
+  it("does not instruct create and connect to write project pointers", () => {
     for (const name of ["context-tree-create", "context-tree-connect"]) {
-      expect(source(name)).toContain("AGENTS.md");
-      expect(source(name)).toContain("pointer");
+      expect(source(name)).not.toContain("records the tree in");
+      expect(source(name)).not.toContain("pointer");
     }
   });
 

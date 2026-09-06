@@ -26,11 +26,6 @@ for a target yourself; pass through only what the user typed or confirmed. An
 explicit connect switches the project's connection. Report whether the
 connected tree is local or GitHub-backed, with its canonical path.
 
-`connect` also records the tree in the project's own `AGENTS.md`, replacing any
-previous Context Tree pointer rather than adding a second one. The result's
-`pointer` field reports `written`, `updated`, or `skipped`; when it is not
-`skipped`, tell the user that `AGENTS.md` in their project changed.
-
 If connection reports `INVALID_TREE` or `DIRTY_TREE`, report the failure and
 stop. The tree must be repaired or committed at its own location before it can
 be connected.
