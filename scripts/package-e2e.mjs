@@ -27,6 +27,7 @@ const npmEnvironment = {
 };
 
 const SKILLS = [
+  "context-tree-cleanup",
   "context-tree-connect",
   "context-tree-create",
   "context-tree-publish",
@@ -166,7 +167,7 @@ try {
     env: { ...npmEnvironment, npm_config_global: "true" },
   });
   assert.equal(globalPostinstall.status, 0, "postinstall must never fail an install");
-  assert.match(globalPostinstall.stdout, /installed 6 skills for claude/u);
+  assert.match(globalPostinstall.stdout, /installed 7 skills for claude/u);
   for (const skill of SKILLS) {
     const installedSkill = join(temporaryRoot, ".claude", "skills", skill, "SKILL.md");
     assert.equal(lstatSync(installedSkill).isFile(), true, `postinstall must install ${skill}`);
@@ -239,7 +240,10 @@ try {
     projectInstallResult.installed.map((entry) => entry.host),
     ["codex"],
   );
-  requirePackagedFile(consumerRoot, ".codex/skills/context-tree-write/SKILL.md");
+  for (const skill of SKILLS) {
+    requirePackagedFile(consumerRoot, `.codex/skills/${skill}/SKILL.md`);
+    requirePackagedFile(consumerRoot, `.codex/skills/${skill}/agents/openai.yaml`);
+  }
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(validVerify.status, 0);

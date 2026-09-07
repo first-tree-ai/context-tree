@@ -6,6 +6,7 @@ import { parse } from "yaml";
 
 const ROOT = resolve(import.meta.dirname, "../skills");
 const NAMES = [
+  "context-tree-cleanup",
   "context-tree-connect",
   "context-tree-create",
   "context-tree-publish",
@@ -26,7 +27,7 @@ function frontmatter(markdown: string): Record<string, unknown> {
 }
 
 describe("MVP skill inventory", () => {
-  it("ships exactly setup, create, connect, read, write, and publish", () => {
+  it("ships exactly setup, create, connect, read, write, publish, and cleanup", () => {
     const directories = readdirSync(ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && existsSync(join(ROOT, entry.name, "SKILL.md")))
       .map((entry) => basename(entry.name))
@@ -134,14 +135,15 @@ describe("editorial policy reaches the skills that need it", () => {
     const read = source("context-tree-read");
     expect(read).toContain("## Content Classes And Authority");
     expect(read).toContain("## Code vs Tree Drift Authority");
-    expect(read).toContain("decisionLocksCode");
+    expect(read).toContain("override for observed source reality");
     expect(read).toContain("code is the ground truth");
   });
 
   it("keeps drift authority consistent between read and write", () => {
     for (const name of ["context-tree-read", "context-tree-write"]) {
       expect(source(name)).toContain("code is the ground truth");
-      expect(source(name)).toContain("decisionLocksCode");
+      expect(source(name)).toContain("source-backed evidence");
+      expect(source(name)).toContain("treat the tree as drifted");
     }
   });
 });

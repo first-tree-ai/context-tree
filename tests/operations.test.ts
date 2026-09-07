@@ -392,3 +392,57 @@ describe("GitHub lifecycle", () => {
     expect(existsSync(marker)).toBe(true);
   });
 });
+
+// Cleanup uses the ordinary lifecycle. Exercise both publication routes with
+// real Git divergence; the GitHub runner substitutes an isolated bare remote.
+describe.each(["local", "github"] as const)("%s cleanup concurrency", (kind) => {
+  it.each(["ordinary write", "cleanup"])("preserves an intervening %s and the rejected cleanup", (winner) => {
+    const currentProject = project();
+    const remote = kind === "github" ? bareTree().remote : undefined;
+    const runner = remote === undefined ? defaultRunner : githubRunner(remote);
+    const treePath =
+      remote === undefined
+        ? createProject(currentProject).treePath
+        : connectProject({ projectPath: currentProject, target: "acme/context" }, runner).tree.path;
+    const cleanup = prepareContextWrite(currentProject, runner);
+    const peer = prepareContextWrite(currentProject, runner);
+    addLeaf(cleanup.worktreePath, "cleanup-attempt");
+    addLeaf(peer.worktreePath, "winner");
+    const finished = finishContextWrite(
+      {
+        projectPath: currentProject,
+        worktreePath: peer.worktreePath,
+        message: winner,
+      },
+      runner,
+    );
+    expect(existsSync(peer.worktreePath)).toBe(false);
+    expect(() =>
+      finishContextWrite(
+        {
+          projectPath: currentProject,
+          worktreePath: cleanup.worktreePath,
+          message: "Cleanup rejected snapshot",
+        },
+        runner,
+      ),
+    ).toThrow(expect.objectContaining({ code: "WRITE_OUTDATED" }));
+    expect(git(remote ?? treePath, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
+    expect(git(remote ?? treePath, ["show", "trunk:winner.md"])).toContain("# winner");
+    expect(git(cleanup.worktreePath, ["show", "HEAD:cleanup-attempt.md"])).toContain("# cleanup-attempt");
+    expect(git(cleanup.worktreePath, ["status", "--porcelain"])).toBe("");
+
+    backdate(cleanup.worktreePath);
+    const fresh = prepareContextWrite(currentProject, runner);
+    expect(existsSync(cleanup.worktreePath)).toBe(true);
+    expect(readTree(fresh.worktreePath, "winner.md").node.body).toContain("# winner");
+    expect(existsSync(join(fresh.worktreePath, "cleanup-attempt.md"))).toBe(false);
+    // A no-op cleanup leaves this preparation unfinished and creates no commit.
+    expect(git(fresh.worktreePath, ["rev-parse", "HEAD"])).toBe(finished.sha);
+    backdate(fresh.worktreePath);
+    prepareContextWrite(currentProject, runner);
+    expect(existsSync(fresh.worktreePath)).toBe(false);
+    expect(existsSync(cleanup.worktreePath)).toBe(true);
+    expect(git(remote ?? treePath, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
+  });
+});

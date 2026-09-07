@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Cleanup"
+  short_description: "Clean shared context and all member memory"
+  default_prompt: "Use $context-tree-cleanup to clean the entire tree, including all member directories, and publish the changes."

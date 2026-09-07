@@ -3,8 +3,9 @@
 ## Scope
 
 The package exposes setup as an orchestration skill over five concrete user
-intentions: create, connect, read, write, and publish. `install` is the
-distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
+intentions: create, connect, read, write, and publish. A separate cleanup skill
+performs editorial maintenance through the same write lifecycle.
+`install` is the distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
 `prepare-write`, `finish-write`, and `verify`) are integration plumbing. Every
 JSON contract is strict and uses `schemaVersion: 1`.
 
@@ -94,8 +95,9 @@ and exact `HEAD`. GitHub synchronization performs exactly one
 exact SHA. It does not discover or enforce the remote default branch and does
 not report an `updated` flag.
 
-`read` returns a selected node and only its immediate indexed children. Callers
-navigate narrowly from indexes rather than scanning the semantic tree.
+`read` returns a selected node and only its immediate indexed children. Ordinary
+readers navigate narrowly from indexes; cleanup recursively visits all normal
+and member children.
 
 ## Writing
 
@@ -128,7 +130,48 @@ its preserved edits. Reclamation is silent: `prepare-write` still returns only
 the worktree path and schema version.
 
 The write skill may prepare fresh and reapply the intended semantic change
-once after `WRITE_OUTDATED`. A second outdated result is reported to the user.
+once after `WRITE_OUTDATED`, after rereading affected nodes and their placement
+in the fresh worktree. It adapts to moved or consolidated content rather than
+replaying a rejected patch. A second outdated result is reported to the user.
+
+## Cleanup
+
+`context-tree-cleanup` resolves a stable absolute project path, prepares a fresh
+worktree, and completes recursive `read --json` inspection of all shared and
+member content before editing, including other agents' directories. Repository
+infrastructure is excluded from editorial inspection and edits. Cleanup preserves
+useful member working memory, active work, personal context, audience, and
+ownership; it does not turn personal preferences into shared policy. It removes noise,
+consolidates duplicates without losing unique rationale or qualifications, and
+moves misplaced content to the narrowest suitable existing domain. It updates
+indexes and incoming and outgoing links, retaining the original location if
+infrastructure would need edits. It avoids cosmetic changes, invented
+choices, new top-level domains, and structure without retrieval benefit.
+Uncertain claims survive; contradictions are reported without source-repository
+investigation.
+
+An invocation authorizes that bounded pass and publication, including subsequent
+host-scheduled invocations without per-run approval. Edits stay exclusively in
+the prepared worktree. An empty pass stops without `finish-write`. Otherwise the
+skill runs `verify --json`, corrects only problems it introduced, and calls
+`finish-write` once. It reports the SHA or failure and preserved worktree path
+outside the tree. On `WRITE_OUTDATED`, it stops until a later invocation, which
+reassesses from scratch instead of replaying the patch. Other failures stop
+without automatic setup, repair, or credential changes.
+
+Existing fast-forward/non-force publication protects intervening writes but
+cannot guarantee progress during sustained activity. One designated cleaner per
+tree avoids wasted competing passes. Existing worktree retention applies:
+successes are removed, empty preparations are eligible after 24 hours, and
+rejected commits stay recoverable and may need manual housekeeping.
+
+Scheduling is entirely host-owned; start daily with the reusable prompt in
+[README](../README.md#cleanup-and-scheduling). Claude Code supports skill invocation
+through session-limited `/loop` and persistent scheduling options; Codex supports
+skill invocation in scheduled tasks. OpenTag uses one already-connected agent
+workspace and its existing packaged-skill discovery after upgrading its pinned
+dependency. Automatic OpenTag scheduling is outside v1. Cleanup adds no CLI
+commands, wire schemas, locks, scheduler, or runtime changes.
 
 ## Publication
 
@@ -146,14 +189,30 @@ atomic.
 
 ## Setup orchestration
 
-`context-tree-setup` is an orchestration skill over the five concrete
-workflows. It stops when the project is already connected; otherwise it asks
-whether to create a new tree or connect an existing one and delegates to the
-chosen workflow. Connect targets include listed managed names when any exist,
-plus GitHub `OWNER/REPO` and exact disk paths; without managed trees only
-GitHub and disk-path targets are offered. It never publishes without explicit
-user confirmation. `context-tree-read` and `context-tree-write` invoke setup
-when they receive `NO_CONNECTION`, then retry the operation once.
+`context-tree-setup` runs when requested or when an ordinary read/write returns
+`NO_CONNECTION`. It retains the original stable project path. Successful resolve
+returns ready without replacing the existing connection. Otherwise it reuses
+prior user choices or offers an existing tree, a new local tree, a new private
+GitHub tree, or skipping for the session. Existing targets include listed
+managed names with local/GitHub kind, GitHub `OWNER/REPO`, and exact checkout
+paths. An explicit switch without a target asks for that target rather than
+silently retaining or replacing the current connection.
+
+Create defaults to local-only and does not prompt for publication afterward.
+Choosing a new private GitHub tree authorizes create followed by publish; it
+does not require repeated approval. A publication failure reports the remaining
+local connection and any uncertain remote state, and does not count as completed
+GitHub setup. Other errors also stop setup without repair or fallback.
+
+Setup returns a prose ready, skipped, or failed outcome; public wire contracts
+are unchanged. Read/write resume their pending operation once only after ready.
+A writer reads the connected tree's relevant nodes and placement before
+finalizing a delegated brief. A skipped, deferred, or failed setup does not
+retry the operation or claim context was read or saved. The original user task
+continues where possible. A session opt-out suppresses further read/write and
+setup attempts for that project until the user reopens them; it lives only in
+conversation context and does not alter files or stored connections. Cleanup
+remains a separately authorized workflow and does not invoke setup.
 
 ## Distribution and skills
 
@@ -189,5 +248,5 @@ policy travels with the skills that need it: the write skill carries the write
 gate, source boundary, memory routing, content model, add-vs-edit rules, and
 node shape; the read skill carries content classes and drift authority.
 
-The skill inventory is setup, create, connect, read, write, and publish;
+The seven-skill inventory is setup, create, connect, read, write, publish, and cleanup;
 setup orchestrates the five concrete workflows.

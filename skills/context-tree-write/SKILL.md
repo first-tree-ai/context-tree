@@ -1,6 +1,6 @@
 ---
 name: context-tree-write
-description: Record a durable decision, constraint, or rationale in the project's Context Tree. Use once a decision is settled and should outlive the current task.
+description: Record a settled, durable decision, constraint, or rationale in the project's Context Tree when authorized. Offer setup once if unconnected; skip when the user has opted out for this session.
 license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
@@ -66,12 +66,9 @@ provenance, PR references, or implementation detail.
 ## Code vs Tree Drift Authority
 
 Normal tree content is authoritative for durable context, but not a blind
-override for observed source reality. By default, **code is the ground truth**
+override for observed source reality. Observed **code is the ground truth**
 when the tree and code disagree: treat the tree as drifted and update the tree
-from source-backed evidence. `decisionLocksCode: true` reverses that default for
-one node: the tree wins, and code drift escalates to the user or host instead of
-being silently fixed or ignored. Set or rely on that flag only on explicit user
-or host-framework authorization.
+only from source-backed evidence.
 
 ## Memory And Audience
 
@@ -147,10 +144,8 @@ title: "Short noun phrase"
 
 Only the root `NODE.md` must also include `schemaVersion`.
 
-Useful optional frontmatter: `description`, `soft_links`, `lastReviewed`, and
-`decisionLocksCode`. `lastReviewed` records an actual human review; update it
-only when that review is the concrete source for a source-backed write. Metadata
-supports scanning and routing.
+Useful optional frontmatter: `description` and `soft_links`. Metadata supports
+scanning and routing.
 
 Prefer body sections in this order, omitting any that do not apply: `Decision`,
 `Rationale`, `Constraints`, `Cross-Domain`. There is no `Source`, `Provenance`,
@@ -159,22 +154,34 @@ history and pull request descriptions, not node prose.
 
 ## Workflow
 
-If `context-tree` is not found, stop and ask the user to run
-`npm install --global @first-tree-ai/context-tree`.
+If the user has declined Context Tree use for this project in this session,
+skip commands and setup prompts unless they explicitly reopen it. Continue the
+original task without claiming the decision was saved. The Write Gate alone
+does not override that preference or authorize shared-memory edits.
+
+Retain the original project's stable absolute path and pass it to setup and any
+delegated executor. Use it for every `--project-path`, including after preparation
+changes the working directory. Do not offer setup for a Write Gate no-op.
+
+If `context-tree` is not found, report once that installation requires
+`npm install --global @first-tree-ai/context-tree`. Defer the write and continue
+the original task where possible; do not repeatedly prompt about installation.
 
 Decide first, then execute. Apply the Write Gate, choose the destination, and
-settle the exact prose before any command runs: only the thread holding the
-evidence can judge what is durable. Everything after that is mechanical.
+settle the intended prose before preparing a write: only the thread holding the
+evidence can judge what is durable. If setup connects an unfamiliar tree, the
+calling thread reads its relevant indexes and nodes before finalizing placement
+and any delegated brief. The executor then applies that complete brief.
 
 If your host can run work in a background subagent, delegate the mechanical
 steps to one and continue the user's task; otherwise perform them inline. Either
 way the steps and the gates are identical.
 
-1. Run `context-tree prepare-write`.
+1. Run `context-tree prepare-write --project-path "<project>"`.
 2. Edit only the returned `worktreePath`, preserving Context Tree structure and
    making the narrow change the evidence supports.
 3. Run
-   `context-tree finish-write --worktree-path "<worktree-path>" --message "<message>"`.
+   `context-tree finish-write --project-path "<project>" --worktree-path "<worktree-path>" --message "<message>"`.
 
 Keep each source-backed write and commit scoped to one source artifact.
 `finish-write` commits every change present in that worktree, so leave nothing
@@ -182,19 +189,19 @@ unrelated there. It also runs `verify`, so an invalid base blocks semantic
 changes; only an explicit repair request may produce a repair-only write limited
 to validator findings.
 
-Run one write at a time. Concurrent writes to one tree only earn
+Run one write at a time. Another writer advancing the tree can cause
 `WRITE_OUTDATED`.
 
 ## Delegating The Mechanical Steps
 
 The brief must be complete enough that the executor needs no judgment of its
-own: the destination node paths, the exact prose to record, and the commit
-message.
+own: the original project path, destination node paths, exact prose to record,
+and commit message.
 
 The executor applies that brief and nothing else. It does not widen scope, add a
 leaf or directory the brief did not name, create a top-level domain, promote
-member memory, set `decisionLocksCode`, or reword the decision. Anything that
-would need user authorization stops and returns to the thread that can ask.
+member memory, or reword the decision. Anything that would need user
+authorization stops and returns to the thread that can ask.
 
 Report the outcome when it lands: the branch and SHA on success, or the failure
 and any preserved worktree path. Do not interrupt the user when the Write Gate
@@ -202,17 +209,26 @@ produced no durable change; a silent no-op is the correct result.
 
 ## Failures
 
-`NO_CONNECTION` and `DIRTY_TREE` both need the user, so a delegated executor
-returns them instead of resolving them. On `NO_CONNECTION`, invoke
-`$context-tree-setup` on the thread that can ask the user to create or connect a
-tree, then write again once. On `DIRTY_TREE`, report the tree's uncommitted
-changes and stop; never commit or discard the user's pending edits to resolve
-it.
+A delegated executor returns `NO_CONNECTION` and `DIRTY_TREE` to the calling
+thread; it returns them instead of resolving them. On `NO_CONNECTION`, the
+calling thread invokes `$context-tree-setup` once with the original project path
+and prior choices. Only if setup returns ready, prepare again once, read the
+intended destination and its index in the returned worktree, and adapt placement
+to the connected tree before resuming the authorized write. If setup is skipped,
+deferred, or fails, do not retry or claim the decision was saved; continue the
+original task where possible. Do not offer setup again after a session opt-out.
+A second preparation failure ends this write attempt without another setup loop.
+
+On `DIRTY_TREE`, report the tree's uncommitted changes and stop; never commit or
+discard the user's pending edits to resolve it.
 
 If an operation reports `INVALID_TREE`, run `verify` on the named path and
 repair only the content change the user authorized.
 
 If `finish-write` reports `WRITE_OUTDATED`, preserve the first worktree, prepare
-a fresh worktree, and reapply the intended change once. If the second finish is
+a fresh worktree, and reread the affected nodes and their placement there before
+reapplying the intended semantic change once. Adapt to content that was moved or
+consolidated; never blindly restore the old paths or replay the rejected patch.
+If the intent is already satisfied, stop without finishing an empty write. If the second finish is
 also outdated, stop and report both preserved worktree paths. Do not rebase,
 loop, push manually, or open a pull request.
