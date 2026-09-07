@@ -61,11 +61,20 @@ a regular `AGENTS.md` and no `CLAUDE.md` entry, they best-effort create a
 
 ### Setup
 
-`context-tree-setup` orchestrates lifecycle setup for projects with no
-connection. It asks whether to create a new tree or connect an existing one,
-then delegates to the create or connect workflow rather than duplicating
-lifecycle policy. Read and write invoke setup when the current project has no
-connection. Setup never publishes without explicit confirmation.
+Read and write try their operation first. On `NO_CONNECTION`, they invoke
+`context-tree-setup` once, which offers an existing tree, a new local tree, a new
+private GitHub tree, or skipping Context Tree for this session. Existing targets
+can be managed names, GitHub `OWNER/REPO`, or exact checkout paths. Choices
+already supplied are reused without asking again. New private GitHub trees are
+created locally and then published; local-only creation needs no GitHub prompt.
+
+After successful setup, the pending read/write resumes once for the original
+project. Skipping continues the user's task without Context Tree and suppresses
+further read/write and setup attempts for that project during the session,
+unless the user reopens them. The preference stays in the conversation, not
+project configuration. Failure or an unanswered setup question defers the
+Context Tree operation without silently choosing a fallback or claiming success.
+An installed skill does not require the user to adopt Context Tree.
 
 ### Create
 

@@ -1,6 +1,6 @@
 ---
 name: context-tree-read
-description: Load durable decisions and constraints from the project's Context Tree. Use before planning or changing code, so existing decisions are known and not contradicted.
+description: Read relevant decisions and constraints from the project's Context Tree before planning or changing code. If unconnected, offer setup once; skip when the user has opted out for this session.
 license: Apache-2.0
 compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
 metadata:
@@ -9,10 +9,21 @@ metadata:
 
 # Context Tree Read
 
-Run `context-tree sync`. If the command is not found, stop and ask the user to
-run `npm install --global @first-tree-ai/context-tree`. If it reports
-`NO_CONNECTION`, invoke `$context-tree-setup` to create or connect a tree, then
-run `sync` again once.
+If the user has declined Context Tree use for this project in this session,
+skip this workflow, including commands and setup prompts, unless they explicitly
+reopen it. Continue their task without claiming to have read tree context.
+
+Retain the original project's stable absolute path. Run
+`context-tree sync --project-path "<project>"`. If the command is not found,
+report once that installation requires
+`npm install --global @first-tree-ai/context-tree`, then continue the original
+task where possible without repeatedly prompting about Context Tree.
+
+On `NO_CONNECTION`, invoke `$context-tree-setup` once with the same project path
+and any choices already supplied. Only if setup returns ready, run `sync` again
+once and continue the read below. If setup is skipped, deferred, or fails, do not
+retry; continue the original task where possible. A second failure ends the
+Context Tree read, not the unrelated user task.
 
 Use the returned `tree.path` for narrow, task-relevant reads with
 `context-tree read [path] --tree-path "<tree-path>" --json`. Start at the root index,

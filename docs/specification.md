@@ -188,14 +188,30 @@ atomic.
 
 ## Setup orchestration
 
-`context-tree-setup` is an orchestration skill over the five concrete
-workflows. It stops when the project is already connected; otherwise it asks
-whether to create a new tree or connect an existing one and delegates to the
-chosen workflow. Connect targets include listed managed names when any exist,
-plus GitHub `OWNER/REPO` and exact disk paths; without managed trees only
-GitHub and disk-path targets are offered. It never publishes without explicit
-user confirmation. `context-tree-read` and `context-tree-write` invoke setup
-when they receive `NO_CONNECTION`, then retry the operation once.
+`context-tree-setup` runs when requested or when an ordinary read/write returns
+`NO_CONNECTION`. It retains the original stable project path. Successful resolve
+returns ready without replacing the existing connection. Otherwise it reuses
+prior user choices or offers an existing tree, a new local tree, a new private
+GitHub tree, or skipping for the session. Existing targets include listed
+managed names with local/GitHub kind, GitHub `OWNER/REPO`, and exact checkout
+paths. An explicit switch without a target asks for that target rather than
+silently retaining or replacing the current connection.
+
+Create defaults to local-only and does not prompt for publication afterward.
+Choosing a new private GitHub tree authorizes create followed by publish; it
+does not require repeated approval. A publication failure reports the remaining
+local connection and any uncertain remote state, and does not count as completed
+GitHub setup. Other errors also stop setup without repair or fallback.
+
+Setup returns a prose ready, skipped, or failed outcome; public wire contracts
+are unchanged. Read/write resume their pending operation once only after ready.
+A writer reads the connected tree's relevant nodes and placement before
+finalizing a delegated brief. A skipped, deferred, or failed setup does not
+retry the operation or claim context was read or saved. The original user task
+continues where possible. A session opt-out suppresses further read/write and
+setup attempts for that project until the user reopens them; it lives only in
+conversation context and does not alter files or stored connections. Cleanup
+remains a separately authorized workflow and does not invoke setup.
 
 ## Distribution and skills
 
