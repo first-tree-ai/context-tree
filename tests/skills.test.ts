@@ -6,6 +6,7 @@ import { parse } from "yaml";
 
 const ROOT = resolve(import.meta.dirname, "../skills");
 const NAMES = [
+  "context-tree-cleanup",
   "context-tree-connect",
   "context-tree-create",
   "context-tree-publish",
@@ -26,7 +27,7 @@ function frontmatter(markdown: string): Record<string, unknown> {
 }
 
 describe("MVP skill inventory", () => {
-  it("ships exactly setup, create, connect, read, write, and publish", () => {
+  it("ships exactly setup, create, connect, read, write, publish, and cleanup", () => {
     const directories = readdirSync(ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && existsSync(join(ROOT, entry.name, "SKILL.md")))
       .map((entry) => basename(entry.name))

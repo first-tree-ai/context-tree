@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { installSkills, uninstallSkills } from "../src/core/install.js";
 
 const SKILLS = [
+  "context-tree-cleanup",
   "context-tree-connect",
   "context-tree-create",
   "context-tree-publish",

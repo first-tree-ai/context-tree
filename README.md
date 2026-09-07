@@ -1,7 +1,7 @@
 # Context Tree
 
 `@first-tree-ai/context-tree` provides durable, structured project context for
-coding agents. It ships a portable core, CLI, templates, and six
+coding agents. It ships a portable core, CLI, templates, and seven
 framework-neutral skills.
 
 A Context Tree records current decisions, constraints, relationships, and their
@@ -23,12 +23,12 @@ are credential-free `OWNER/REPO` identities, never URLs containing credentials.
 npm install --global @first-tree-ai/context-tree
 ```
 
-That installs the `context-tree` command and copies the six skills into the
+That installs the `context-tree` command and copies the seven skills into the
 skill directory of every agent you already have:
 
 ```text
-✓ claude  → ~/.claude/skills/   (6 skills)
-✓ codex   → ~/.codex/skills/    (6 skills)
+✓ claude  → ~/.claude/skills/   (7 skills)
+✓ codex   → ~/.codex/skills/    (7 skills)
 ```
 
 Restart your agent so it discovers them, then try asking:
@@ -57,7 +57,7 @@ in `src/core/install.ts`.
 a regular `AGENTS.md` and no `CLAUDE.md` entry, they best-effort create a
 `CLAUDE.md` symlink to `AGENTS.md`. Connections are stored separately.
 
-## Six skills
+## Seven skills
 
 ### Setup
 
@@ -137,8 +137,9 @@ creates one unsigned commit using the host identity, and attempts one
 fast-forward merge for local trees or one non-force push for GitHub trees.
 
 If the destination advanced, `finish-write` returns `WRITE_OUTDATED` and
-preserves the worktree. Prepare again and reapply the intended semantic change
-once; there is no automatic rebase, retry loop, or pull-request fallback.
+preserves the worktree. Prepare again, reread affected nodes and their current
+placement, and adapt the intended semantic change once to any moved or
+consolidated content; there is no automatic rebase, retry loop, or pull-request fallback.
 
 A preserved or abandoned write leaves its temporary worktree on disk and a
 `context-tree/write/<name>` branch in the tree. The next `prepare-write` reclaims
@@ -160,6 +161,49 @@ new private GitHub repository, pushes the checkout, and then changes the stored
 connection to GitHub state. Those external and local changes are not atomic;
 uncertain or partial outcomes are reported as `PUBLISH_INCOMPLETE` and are not
 automatically inspected or repaired.
+
+### Cleanup and scheduling
+
+`context-tree-cleanup` reads a fresh snapshot of all normal shared content,
+removes clearly non-durable noise, consolidates duplicates while preserving
+unique rationale, and improves placement in existing domains. It excludes
+member content and repository infrastructure, preserves uncertain claims and
+protected decisions, and never updates human-review dates. Each invocation
+publishes at most one commit through the existing write lifecycle; an empty
+pass produces no commit. It does not inspect source repositories.
+
+Use this reusable host prompt with the already-connected project's stable path:
+
+> Run `$context-tree-cleanup` for the project at `<absolute-project-path>`.
+> Perform one conservative cleanup pass and publish it. If another writer
+> advances the tree, defer until the next scheduled run.
+
+Start with daily execution and adjust cadence in the host. Invoking cleanup
+authorizes these bounded edits and publication; scheduling that invocation
+carries the authorization forward without approval each run. Choose one
+designated cleaner per shared tree. Divergent writes are rejected by the existing
+fast-forward merge/non-force push, but sustained activity can prevent progress.
+On `WRITE_OUTDATED`, cleanup stops; the next run reassesses a fresh snapshot
+instead of replaying the rejected patch. Other failures also stop without setup,
+structural repair, or credential changes. Reports stay outside the tree.
+
+Claude Code can invoke a skill through `/loop`, but loops have session and expiry
+constraints. Use its persistent scheduling options for durable unattended work.
+See [Claude Code scheduling](https://code.claude.com/docs/en/scheduled-tasks).
+
+For Codex, put the same prompt in a desktop scheduled task with access to the
+connected project and CLI. Scheduled tasks support skill invocation; `/loop`
+syntax is not a package dependency. See the
+[official scheduling documentation](https://learn.chatgpt.com/docs/automations?surface=app).
+
+For OpenTag, run the skill from one designated, already-connected agent workspace.
+Its existing installation flow discovers packaged skills once its pinned Context
+Tree dependency includes the new release. Automatic OpenTag scheduling is outside
+v1. No scheduler, new CLI command, schema, lock, or runtime integration is added.
+
+Successful writes remove their worktrees. Empty preparations become eligible for
+existing reclamation after 24 hours. Rejected committed attempts remain preserved
+and may require manual housekeeping.
 
 ## Project identity
 
@@ -187,7 +231,7 @@ install  uninstall  create  connect  list  resolve  sync  prepare-write
 finish-write  publish  read  verify
 ```
 
-Setup, create, connect, read, write, and publish ship as six skills; setup
+Setup, create, connect, read, write, publish, and cleanup ship as seven skills; setup
 orchestrates the five concrete workflows. `install` is the distribution
 entry point, run for you by `npm install`; `uninstall` is its supported reverse.
 `resolve`, `sync`, `prepare-write`,
@@ -199,7 +243,7 @@ separate user intentions; `list` backs setup's connect-target discovery.
 `create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` print
 human-readable text by default and accept `--json` to emit their strict schema
 version `1` payload for scripts and agents; in text mode a failure prints a
-sanitized message to stderr with a non-zero exit code. The six skills always
+sanitized message to stderr with a non-zero exit code. The seven skills always
 pass `--json`. `sync`, `prepare-write`, `finish-write`, `install`, and `uninstall` are
 low-level plumbing and always emit that JSON (with the error envelope on stdout).
 `--help` and `--version` are always plain text.

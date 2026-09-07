@@ -202,6 +202,7 @@ describe("built CLI", () => {
     expect(result.installed).toHaveLength(1);
     expect(result.installed[0].host).toBe("claude");
     expect(result.installed[0].skills).toEqual([
+      "context-tree-cleanup",
       "context-tree-connect",
       "context-tree-create",
       "context-tree-publish",

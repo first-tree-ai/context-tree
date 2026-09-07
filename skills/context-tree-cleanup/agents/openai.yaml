@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Cleanup"
+  short_description: "Conservatively clean shared context"
+  default_prompt: "Use $context-tree-cleanup for one conservative cleanup pass and publish it."

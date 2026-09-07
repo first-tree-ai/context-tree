@@ -213,6 +213,9 @@ If an operation reports `INVALID_TREE`, run `verify` on the named path and
 repair only the content change the user authorized.
 
 If `finish-write` reports `WRITE_OUTDATED`, preserve the first worktree, prepare
-a fresh worktree, and reapply the intended change once. If the second finish is
+a fresh worktree, and reread the affected nodes and their placement there before
+reapplying the intended semantic change once. Adapt to content that was moved or
+consolidated; never blindly restore the old paths or replay the rejected patch.
+If the intent is already satisfied, stop without finishing an empty write. If the second finish is
 also outdated, stop and report both preserved worktree paths. Do not rebase,
 loop, push manually, or open a pull request.

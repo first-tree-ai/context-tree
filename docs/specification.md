@@ -3,8 +3,9 @@
 ## Scope
 
 The package exposes setup as an orchestration skill over five concrete user
-intentions: create, connect, read, write, and publish. `install` is the
-distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
+intentions: create, connect, read, write, and publish. A separate cleanup skill
+performs conservative editorial maintenance through the same write lifecycle.
+`install` is the distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
 `prepare-write`, `finish-write`, and `verify`) are integration plumbing. Every
 JSON contract is strict and uses `schemaVersion: 1`.
 
@@ -94,8 +95,9 @@ and exact `HEAD`. GitHub synchronization performs exactly one
 exact SHA. It does not discover or enforce the remote default branch and does
 not report an `updated` flag.
 
-`read` returns a selected node and only its immediate indexed children. Callers
-navigate narrowly from indexes rather than scanning the semantic tree.
+`read` returns a selected node and only its immediate indexed children. Ordinary
+readers navigate narrowly from indexes; cleanup recursively visits all normal
+children.
 
 ## Writing
 
@@ -128,7 +130,47 @@ its preserved edits. Reclamation is silent: `prepare-write` still returns only
 the worktree path and schema version.
 
 The write skill may prepare fresh and reapply the intended semantic change
-once after `WRITE_OUTDATED`. A second outdated result is reported to the user.
+once after `WRITE_OUTDATED`, after rereading affected nodes and their placement
+in the fresh worktree. It adapts to moved or consolidated content rather than
+replaying a rejected patch. A second outdated result is reported to the user.
+
+## Cleanup
+
+`context-tree-cleanup` resolves a stable absolute project path, prepares a fresh
+worktree, and completes recursive `read --json` inspection of all normal indexed
+content before editing. Member content and infrastructure are excluded from
+editorial inspection and edits. It removes clearly non-durable noise,
+consolidates duplicates without losing unique rationale or qualifications, and
+moves misplaced content to the narrowest suitable existing domain. It updates
+indexes and incoming and outgoing links, retaining the original location if
+excluded content would need edits. It avoids cosmetic changes, invented
+choices, new top-level domains, and structure without retrieval benefit.
+Uncertain claims survive; contradictions are reported without source-repository
+investigation. `decisionLocksCode` meaning and scope and human `lastReviewed`
+metadata are preserved.
+
+An invocation authorizes that bounded pass and publication, including subsequent
+host-scheduled invocations without per-run approval. Edits stay exclusively in
+the prepared worktree. An empty pass stops without `finish-write`. Otherwise the
+skill runs `verify --json`, corrects only problems it introduced, and calls
+`finish-write` once. It reports the SHA or failure and preserved worktree path
+outside the tree. On `WRITE_OUTDATED`, it stops until a later invocation, which
+reassesses from scratch instead of replaying the patch. Other failures stop
+without automatic setup, repair, or credential changes.
+
+Existing fast-forward/non-force publication protects intervening writes but
+cannot guarantee progress during sustained activity. One designated cleaner per
+tree avoids wasted competing passes. Existing worktree retention applies:
+successes are removed, empty preparations are eligible after 24 hours, and
+rejected commits stay recoverable and may need manual housekeeping.
+
+Scheduling is entirely host-owned; start daily with the reusable prompt in
+[README](../README.md#cleanup-and-scheduling). Claude Code supports skill invocation
+through session-limited `/loop` and persistent scheduling options; Codex supports
+skill invocation in scheduled tasks. OpenTag uses one already-connected agent
+workspace and its existing packaged-skill discovery after upgrading its pinned
+dependency. Automatic OpenTag scheduling is outside v1. Cleanup adds no CLI
+commands, wire schemas, locks, scheduler, or runtime changes.
 
 ## Publication
 
@@ -189,5 +231,5 @@ policy travels with the skills that need it: the write skill carries the write
 gate, source boundary, memory routing, content model, add-vs-edit rules, and
 node shape; the read skill carries content classes and drift authority.
 
-The skill inventory is setup, create, connect, read, write, and publish;
+The seven-skill inventory is setup, create, connect, read, write, publish, and cleanup;
 setup orchestrates the five concrete workflows.
