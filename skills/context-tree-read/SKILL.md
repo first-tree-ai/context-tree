@@ -47,13 +47,9 @@ inside it.
 ## Code vs Tree Drift Authority
 
 Normal tree content is authoritative for durable context, but not a blind
-override for observed source reality. By default, **code is the ground truth**
+override for observed source reality. Observed **code is the ground truth**
 when the tree and code disagree: treat the tree as drifted and report it, or
 update it from source-backed evidence through `$context-tree-write`.
-
-`decisionLocksCode: true` reverses that default for one node: the tree wins, and
-code drift escalates to the user or host instead of being silently fixed or
-ignored. Rely on that flag only on explicit user or host authorization.
 
 ## Failures
 

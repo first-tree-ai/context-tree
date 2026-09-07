@@ -30,10 +30,7 @@ Read the root node first, then only the domains relevant to the task. Follow
 
 Normal tree content is authoritative for durable context, but code is the
 ground truth when the tree and observed source reality disagree. In that case,
-treat the tree as drifted and update it only from source-backed evidence. A node
-with `decisionLocksCode: true` reverses that default: escalate code drift rather
-than silently fixing or ignoring it. Set or rely on that flag only with explicit
-user or host authorization.
+treat the tree as drifted and update it only from source-backed evidence.
 
 ## Writing
 

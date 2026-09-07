@@ -66,12 +66,9 @@ provenance, PR references, or implementation detail.
 ## Code vs Tree Drift Authority
 
 Normal tree content is authoritative for durable context, but not a blind
-override for observed source reality. By default, **code is the ground truth**
+override for observed source reality. Observed **code is the ground truth**
 when the tree and code disagree: treat the tree as drifted and update the tree
-from source-backed evidence. `decisionLocksCode: true` reverses that default for
-one node: the tree wins, and code drift escalates to the user or host instead of
-being silently fixed or ignored. Set or rely on that flag only on explicit user
-or host-framework authorization.
+only from source-backed evidence.
 
 ## Memory And Audience
 
@@ -147,10 +144,8 @@ title: "Short noun phrase"
 
 Only the root `NODE.md` must also include `schemaVersion`.
 
-Useful optional frontmatter: `description`, `soft_links`, `lastReviewed`, and
-`decisionLocksCode`. `lastReviewed` records an actual human review; update it
-only when that review is the concrete source for a source-backed write. Metadata
-supports scanning and routing.
+Useful optional frontmatter: `description` and `soft_links`. Metadata supports
+scanning and routing.
 
 Prefer body sections in this order, omitting any that do not apply: `Decision`,
 `Rationale`, `Constraints`, `Cross-Domain`. There is no `Source`, `Provenance`,
@@ -205,8 +200,8 @@ and commit message.
 
 The executor applies that brief and nothing else. It does not widen scope, add a
 leaf or directory the brief did not name, create a top-level domain, promote
-member memory, set `decisionLocksCode`, or reword the decision. Anything that
-would need user authorization stops and returns to the thread that can ask.
+member memory, or reword the decision. Anything that would need user
+authorization stops and returns to the thread that can ask.
 
 Report the outcome when it lands: the branch and SHA on success, or the failure
 and any preserved worktree path. Do not interrupt the user when the Write Gate

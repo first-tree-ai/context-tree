@@ -148,8 +148,7 @@ indexes and incoming and outgoing links, retaining the original location if
 infrastructure would need edits. It avoids cosmetic changes, invented
 choices, new top-level domains, and structure without retrieval benefit.
 Uncertain claims survive; contradictions are reported without source-repository
-investigation. `decisionLocksCode` meaning and scope and human `lastReviewed`
-metadata are preserved.
+investigation.
 
 An invocation authorizes that bounded pass and publication, including subsequent
 host-scheduled invocations without per-run approval. Edits stay exclusively in
