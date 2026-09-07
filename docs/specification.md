@@ -4,7 +4,7 @@
 
 The package exposes setup as an orchestration skill over five concrete user
 intentions: create, connect, read, write, and publish. A separate cleanup skill
-performs conservative editorial maintenance through the same write lifecycle.
+performs editorial maintenance through the same write lifecycle.
 `install` is the distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
 `prepare-write`, `finish-write`, and `verify`) are integration plumbing. Every
 JSON contract is strict and uses `schemaVersion: 1`.
@@ -97,7 +97,7 @@ not report an `updated` flag.
 
 `read` returns a selected node and only its immediate indexed children. Ordinary
 readers navigate narrowly from indexes; cleanup recursively visits all normal
-children.
+and member children.
 
 ## Writing
 
@@ -137,13 +137,15 @@ replaying a rejected patch. A second outdated result is reported to the user.
 ## Cleanup
 
 `context-tree-cleanup` resolves a stable absolute project path, prepares a fresh
-worktree, and completes recursive `read --json` inspection of all normal indexed
-content before editing. Member content and infrastructure are excluded from
-editorial inspection and edits. It removes clearly non-durable noise,
+worktree, and completes recursive `read --json` inspection of all shared and
+member content before editing, including other agents' directories. Repository
+infrastructure is excluded from editorial inspection and edits. Cleanup preserves
+useful member working memory, active work, personal context, audience, and
+ownership; it does not turn personal preferences into shared policy. It removes noise,
 consolidates duplicates without losing unique rationale or qualifications, and
 moves misplaced content to the narrowest suitable existing domain. It updates
 indexes and incoming and outgoing links, retaining the original location if
-excluded content would need edits. It avoids cosmetic changes, invented
+infrastructure would need edits. It avoids cosmetic changes, invented
 choices, new top-level domains, and structure without retrieval benefit.
 Uncertain claims survive; contradictions are reported without source-repository
 investigation. `decisionLocksCode` meaning and scope and human `lastReviewed`

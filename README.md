@@ -173,46 +173,17 @@ automatically inspected or repaired.
 
 ### Cleanup and scheduling
 
-`context-tree-cleanup` reads a fresh snapshot of all normal shared content,
-removes clearly non-durable noise, consolidates duplicates while preserving
-unique rationale, and improves placement in existing domains. It excludes
-member content and repository infrastructure, preserves uncertain claims and
-protected decisions, and never updates human-review dates. Each invocation
-publishes at most one commit through the existing write lifecycle; an empty
-pass produces no commit. It does not inspect source repositories.
-
-Use this reusable host prompt with the already-connected project's stable path:
+`context-tree-cleanup` removes noise, consolidates duplicates, and improves
+placement across shared content and all member directories, then publishes one
+commit if anything changed. It preserves useful context and protected decisions.
 
 > Run `$context-tree-cleanup` for the project at `<absolute-project-path>`.
-> Perform one conservative cleanup pass and publish it. If another writer
-> advances the tree, defer until the next scheduled run.
+> Clean the entire tree and publish the changes. If another writer advances it,
+> defer until the next run.
 
-Start with daily execution and adjust cadence in the host. Invoking cleanup
-authorizes these bounded edits and publication; scheduling that invocation
-carries the authorization forward without approval each run. Choose one
-designated cleaner per shared tree. Divergent writes are rejected by the existing
-fast-forward merge/non-force push, but sustained activity can prevent progress.
-On `WRITE_OUTDATED`, cleanup stops; the next run reassesses a fresh snapshot
-instead of replaying the rejected patch. Other failures also stop without setup,
-structural repair, or credential changes. Reports stay outside the tree.
-
-Claude Code can invoke a skill through `/loop`, but loops have session and expiry
-constraints. Use its persistent scheduling options for durable unattended work.
-See [Claude Code scheduling](https://code.claude.com/docs/en/scheduled-tasks).
-
-For Codex, put the same prompt in a desktop scheduled task with access to the
-connected project and CLI. Scheduled tasks support skill invocation; `/loop`
-syntax is not a package dependency. See the
-[official scheduling documentation](https://learn.chatgpt.com/docs/automations?surface=app).
-
-For OpenTag, run the skill from one designated, already-connected agent workspace.
-Its existing installation flow discovers packaged skills once its pinned Context
-Tree dependency includes the new release. Automatic OpenTag scheduling is outside
-v1. No scheduler, new CLI command, schema, lock, or runtime integration is added.
-
-Successful writes remove their worktrees. Empty preparations become eligible for
-existing reclamation after 24 hours. Rejected committed attempts remain preserved
-and may require manual housekeeping.
+Schedule this prompt in your host; start daily with one cleaner per tree.
+See [Claude Code scheduling](https://code.claude.com/docs/en/scheduled-tasks) or
+[Codex scheduled tasks](https://learn.chatgpt.com/docs/automations?surface=app).
 
 ## Project identity
 
