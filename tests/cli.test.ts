@@ -122,6 +122,7 @@ describe("built CLI", () => {
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("Create, connect, list, read, write, and publish Context Trees.");
     expect([...help.stdout.matchAll(/^ {2}([a-z][\w-]*)\s+/gmu)].map((match) => match[1]).sort()).toEqual([
+      "cleanup",
       "connect",
       "create",
       "finish-write",
@@ -207,6 +208,7 @@ describe("built CLI", () => {
       "context-tree-create",
       "context-tree-publish",
       "context-tree-read",
+      "context-tree-schedule-cleanup",
       "context-tree-setup",
       "context-tree-write",
     ]);

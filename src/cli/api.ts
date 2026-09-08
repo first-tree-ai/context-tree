@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
-
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
+import {
+  cleanupStatus,
+  recordCleanupActivity,
+  removeCleanup,
+  runCleanup,
+  scheduleCleanup,
+} from "../core/cleanup/index.js";
 import { connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
 import { createProject } from "../core/create.js";
 import {
@@ -17,7 +23,13 @@ import { readTree } from "../core/read.js";
 import { syncProject } from "../core/sync.js";
 import { verifyTree } from "../core/verify.js";
 import { finishContextWrite, prepareContextWrite } from "../core/write.js";
-import { CLI_ERROR_CODES, type ContextTreeCliErrorEnvelope, SCHEMA_VERSION, skillHostSchema } from "../schemas.js";
+import {
+  CLI_ERROR_CODES,
+  type ContextTreeCliErrorEnvelope,
+  cleanupRunResultSchema,
+  SCHEMA_VERSION,
+  skillHostSchema,
+} from "../schemas.js";
 import {
   formatConnect,
   formatCreate,
@@ -41,7 +53,7 @@ const defaultIo: ContextTreeCliIo = {
 };
 
 /** Commands that default to human-readable text and accept --json to restore JSON. */
-const TEXT_DEFAULT_COMMANDS = new Set(["create", "connect", "list", "resolve", "publish", "read", "verify"]);
+const TEXT_DEFAULT_COMMANDS = new Set(["create", "connect", "list", "resolve", "publish", "read", "verify", "cleanup"]);
 
 function line(io: ContextTreeCliIo, value: string): void {
   io.stdout(`${value}\n`);
@@ -216,6 +228,75 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
       line(io, JSON.stringify(uninstallSkills(request)));
     });
+
+  const cleanup = program.command("cleanup").description("Schedule and manage CLI-based Context Tree cleanup.");
+  for (const operation of ["schedule", "status", "remove", "run"]) {
+    const command = cleanup
+      .command(operation)
+      .option("--project-path <path>", "project directory", ".")
+      .option(...jsonOption);
+    if (operation === "schedule")
+      command
+        .requiredOption("--agent <agent>", "codex or claude")
+        .option("--model <model>", "explicit model override")
+        .option("--every <duration>", "positive whole-minute interval, e.g. 30m or 1h", "1h");
+    if (operation === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
+    command.action(
+      async (options: {
+        projectPath: string;
+        json: boolean;
+        agent?: string;
+        model?: string;
+        every?: string;
+        scheduleId?: string;
+      }) => {
+        const projectPath = resolve(io.cwd(), options.projectPath);
+        if (operation === "run") {
+          const result = await runCleanup(projectPath, options.scheduleId);
+          const wireResult = cleanupRunResultSchema.parse({ schemaVersion: SCHEMA_VERSION, ...result });
+          emit(
+            io,
+            options.json,
+            wireResult,
+            (value) =>
+              `Cleanup: ${value.outcome}.${value.message ? ` ${value.message}` : ""}${value.worktreePath ? `\n  Worktree: ${value.worktreePath}` : ""}${value.sha ? `\n  Commit: ${value.sha}` : ""}`,
+          );
+          if (["failed", "cancelled", "publication-uncertain"].includes(result.outcome)) process.exitCode = 1;
+          return;
+        }
+        const result =
+          operation === "schedule"
+            ? scheduleCleanup({ ...options, projectPath, agent: options.agent ?? "" })
+            : operation === "remove"
+              ? removeCleanup(projectPath)
+              : cleanupStatus(projectPath);
+        emit(io, options.json, result, (value) => {
+          const config = value.schedule;
+          if (!config) return "No cleanup schedule.";
+          return [
+            `Cleanup ${config.enabled ? "scheduled" : "removed"}.`,
+            `  Registered: ${value.registered}; running: ${value.running}`,
+            `  Project: ${config.projectPath}`,
+            `  Every: ${config.everyMinutes} minutes`,
+            `  Agent: ${config.agent}; model: ${config.model}`,
+            `  Last activity: ${value.lastActivity === null ? "missing" : new Date(value.lastActivity).toISOString()}`,
+            `  Inactivity: ${value.inactive ? "cleanup prevented (no activity within 24 hours)" : "cleanup permitted"}`,
+            `  Latest: ${value.latest?.outcome ?? "none"}${value.latest?.message ? ` — ${value.latest.message}` : ""}`,
+            ...(value.latest?.worktreePath ? [`  Worktree: ${value.latest.worktreePath}`] : []),
+          ].join("\n");
+        });
+      },
+    );
+  }
+  program.hook("postAction", (_command, action) => {
+    if (!["create", "connect", "sync", "read", "prepare-write", "finish-write"].includes(action.name())) return;
+    const options: { projectPath?: string; treePath?: string } = action.opts();
+    recordCleanupActivity(
+      action.name() === "read"
+        ? { treePath: resolve(io.cwd(), options.treePath ?? ".") }
+        : { projectPath: resolve(io.cwd(), options.projectPath ?? ".") },
+    );
+  });
 
   return program;
 }

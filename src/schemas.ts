@@ -353,3 +353,56 @@ export const contextTreeCliErrorEnvelopeSchema = z
   })
   .strict();
 export type ContextTreeCliErrorEnvelope = z.infer<typeof contextTreeCliErrorEnvelopeSchema>;
+
+export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude")]);
+export const cleanupScheduleSchema = z
+  .object({
+    id: z.string().regex(/^[a-f0-9]{64}$/u),
+    projectPath: z.string().refine(isAbsolute),
+    identity: z.string(),
+    agent: cleanupAgentSchema,
+    model: z.string().min(1),
+    everyMinutes: z.number().int().positive().max(525600),
+    nodePath: z.string().refine(isAbsolute),
+    cliPath: z.string().refine(isAbsolute),
+    agentPath: z.string().refine(isAbsolute),
+    searchPath: z.string(),
+    enabled: z.boolean(),
+  })
+  .strict();
+export type CleanupSchedule = z.infer<typeof cleanupScheduleSchema>;
+export const cleanupOutcomeSchema = z
+  .object({
+    at: z.number(),
+    outcome: z.union([
+      z.literal("inactive"),
+      z.literal("unchanged"),
+      z.literal("noop"),
+      z.literal("published"),
+      z.literal("running"),
+      z.literal("failed"),
+      z.literal("cancelled"),
+      z.literal("publication-uncertain"),
+    ]),
+    worktreePath: z.string().optional(),
+    sha: z.string().optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+export type CleanupOutcome = z.infer<typeof cleanupOutcomeSchema>;
+export const cleanupResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    schedule: cleanupScheduleSchema.nullable(),
+    registered: z.boolean(),
+    running: z.boolean(),
+    inactive: z.boolean(),
+    lastActivity: z.number().nullable(),
+    latest: cleanupOutcomeSchema.nullable(),
+  })
+  .strict();
+export type CleanupResult = z.infer<typeof cleanupResultSchema>;
+
+export const cleanupRunResultSchema = cleanupOutcomeSchema
+  .extend({ schemaVersion: z.literal(SCHEMA_VERSION) })
+  .strict();

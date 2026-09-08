@@ -23,12 +23,12 @@ are credential-free `OWNER/REPO` identities, never URLs containing credentials.
 npm install --global @first-tree-ai/context-tree
 ```
 
-That installs the `context-tree` command and copies the seven skills into the
+That installs the `context-tree` command and copies the eight skills into the
 skill directory of every agent you already have:
 
 ```text
-✓ claude  → ~/.claude/skills/   (7 skills)
-✓ codex   → ~/.codex/skills/    (7 skills)
+✓ claude  → ~/.claude/skills/   (8 skills)
+✓ codex   → ~/.codex/skills/    (8 skills)
 ```
 
 Restart your agent so it discovers them, then try asking:
@@ -181,9 +181,61 @@ commit if anything changed. It preserves useful context and protected decisions.
 > Clean the entire tree and publish the changes. If another writer advances it,
 > defer until the next run.
 
-Schedule this prompt in your host; start daily with one cleaner per tree.
-See [Claude Code scheduling](https://code.claude.com/docs/en/scheduled-tasks) or
-[Codex scheduled tasks](https://learn.chatgpt.com/docs/automations?surface=app).
+Use `context-tree-schedule-cleanup` to create or update a persistent local
+cleanup task:
+
+```text
+# Codex
+$context-tree-schedule-cleanup every 2 hours
+
+# Claude Code
+/context-tree-schedule-cleanup every 2 hours
+```
+
+The CLI manages one schedule per tree on this machine:
+
+```bash
+context-tree cleanup schedule --project-path /absolute/project --agent codex
+context-tree cleanup schedule --project-path /absolute/project --agent claude --every 2h
+context-tree cleanup status --project-path /absolute/project
+context-tree cleanup run --project-path /absolute/project
+context-tree cleanup remove --project-path /absolute/project
+```
+
+All four operations accept `--json`. Scheduling starts no immediate cleanup.
+Cadence defaults to one hour and accepts positive whole-minute durations (`30m`,
+`2h`, `1d`, up to `365d`). Repeating schedule updates the same tree's entry.
+Remove an active schedule before changing it. Local identity is the resolved
+path; GitHub identity is the repository, case-insensitively. Connection changes
+require explicit removal and rescheduling.
+
+macOS uses user LaunchAgents; Linux uses systemd user timers and services. The
+machine must be awake and the user scheduler available. No desktop app, root
+installation, daemon, or Linux lingering is needed. Cancel any previously created
+Codex desktop task or Claude Desktop routine before replacing it: the CLI cannot
+inspect or remove those tasks. Keep one designated cleaner per tree across machines.
+
+Agents use existing CLI authentication. Defaults are `gpt-5.6-luna` with low
+reasoning effort and `claude-haiku-4-5`; `--model` selects an explicit override.
+Codex uses workspace-write sandboxing and Claude uses file-editing permissions
+with a restricted tool list. Permission and authentication failures stop the run;
+models are never silently substituted. See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
+and the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
+
+Scheduling opens a 24-hour activity window. Successful ordinary `create`,
+`connect`, `sync`, `read`, `prepare-write`, and `finish-write` use refreshes it.
+Cleanup and status never do. Missing or older activity skips before network or
+model work; successfully inspected unchanged commits skip the model. Each run
+uses a fresh isolated worktree, one agent with a 15-minute timeout, shared
+editorial instructions, verification, and at most one publication attempt.
+
+Private atomic state in `~/.context-tree/cleanup` holds configuration, activity,
+the last successful commit, and only the latest outcome. `status` reports native
+registration/running state and whether inactivity prevents cleanup. `remove`
+disables future runs and stops the native scheduled process and its children,
+preserving unfinished worktrees. Publication already underway may have completed;
+uncertain outcomes are reported without rollback or retries. Failures and
+`WRITE_OUTDATED` never advance the successful-inspection checkpoint.
 
 ## Project identity
 
@@ -211,7 +263,8 @@ install  uninstall  create  connect  list  resolve  sync  prepare-write
 finish-write  publish  read  verify
 ```
 
-Setup, create, connect, read, write, publish, and cleanup ship as seven skills; setup
+Setup, create, connect, read, write, publish, cleanup, and schedule-cleanup ship as
+eight skills; setup
 orchestrates the five concrete workflows. `install` is the distribution
 entry point, run for you by `npm install`; `uninstall` is its supported reverse.
 `resolve`, `sync`, `prepare-write`,
@@ -223,7 +276,7 @@ separate user intentions; `list` backs setup's connect-target discovery.
 `create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` print
 human-readable text by default and accept `--json` to emit their strict schema
 version `1` payload for scripts and agents; in text mode a failure prints a
-sanitized message to stderr with a non-zero exit code. The seven skills always
+sanitized message to stderr with a non-zero exit code. The eight skills always
 pass `--json`. `sync`, `prepare-write`, `finish-write`, `install`, and `uninstall` are
 low-level plumbing and always emit that JSON (with the error envelope on stdout).
 `--help` and `--version` are always plain text.

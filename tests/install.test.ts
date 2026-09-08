@@ -20,6 +20,7 @@ const SKILLS = [
   "context-tree-create",
   "context-tree-publish",
   "context-tree-read",
+  "context-tree-schedule-cleanup",
   "context-tree-setup",
   "context-tree-write",
 ];
