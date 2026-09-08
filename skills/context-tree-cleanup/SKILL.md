@@ -20,6 +20,21 @@ Read and follow [the shared editorial instructions](references/editorial.md)
 before inspecting or editing content. Both manual cleanup and the CLI runner
 use this required resource.
 
+## Manual Background Delegation
+
+For manual cleanup, if the host supports background subagents and the calling
+thread has other work to continue, it may delegate the entire pass to one agent.
+Pass the original project's stable absolute path, the user's cleanup constraints,
+and this skill with its required editorial resource. The delegated agent owns
+the complete workflow below, from preparation and reading the entire snapshot
+through editing, verification, and publication. Do not split the pass among
+writers or start another cleanup of the same tree while it runs.
+
+The calling thread reports the outcome when the agent returns: changes,
+unresolved issues, and the SHA, or the failure and preserved worktree path.
+Otherwise perform the pass inline. Scheduled cleanup already runs in a fresh
+agent and does not use this delegation path.
+
 ## Workflow
 
 If the CLI is missing, report `npm install --global @first-tree-ai/context-tree`
