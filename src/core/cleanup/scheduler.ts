@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { lstatSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CleanupSchedule } from "../../schemas.js";
@@ -18,6 +18,10 @@ function xml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;");
+}
+function shellQuote(value: string): string {
+  if (value.includes("\0")) throw new Error("Unsupported control character in scheduler argument.");
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 function unitQuote(value: string): string {
   if (/[\n\r\0]/u.test(value)) throw new Error("Unsupported control character in scheduler argument.");
@@ -52,6 +56,10 @@ export function nativeScheduler(
     privateDirectory(
       platform === "darwin" ? join(home, "Library", "LaunchAgents") : join(home, ".config", "systemd", "user"),
     );
+  const launcherDirectory = (config: CleanupSchedule): string => {
+    if (!/^[a-f0-9]{64}$/u.test(config.id)) throw new Error("Invalid cleanup state key.");
+    return privateDirectory(join(home, ".context-tree", "cleanup", "launchers", config.id));
+  };
   const status = (config: CleanupSchedule): NativeStatus => {
     if (platform === "darwin") {
       const output = command(["print", `${domain}/${label(config)}`], true);
@@ -81,10 +89,12 @@ export function nativeScheduler(
       const name = label(config);
       if (platform === "darwin") {
         const file = join(directory(), `${name}.plist`);
+        const launcher = join(launcherDirectory(config), "context-tree-cleanup");
+        atomicFile(launcher, `#!/bin/sh\nexec ${args.map(shellQuote).join(" ")}\n`, 0o700);
         if (status(config).registered) command(["bootout", `${domain}/${name}`]);
         atomicFile(
           file,
-          `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>${name}</string><key>ProgramArguments</key><array>${args.map((arg) => `<string>${xml(arg)}</string>`).join("")}</array><key>StartInterval</key><integer>${config.everyMinutes * 60}</integer><key>RunAtLoad</key><false/><key>AbandonProcessGroup</key><false/><key>WorkingDirectory</key><string>${xml(config.projectPath)}</string><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(config.searchPath)}</string></dict></dict></plist>`,
+          `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>${name}</string><key>ProgramArguments</key><array><string>${xml(launcher)}</string></array><key>StartInterval</key><integer>${config.everyMinutes * 60}</integer><key>RunAtLoad</key><false/><key>AbandonProcessGroup</key><false/><key>WorkingDirectory</key><string>${xml(config.projectPath)}</string><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(config.searchPath)}</string></dict></dict></plist>`,
         );
         command(["bootstrap", domain, file]);
       } else {
@@ -105,7 +115,13 @@ export function nativeScheduler(
       const name = label(config);
       if (platform === "darwin") {
         command(["bootout", `${domain}/${name}`], true);
+        const launcherDir = launcherDirectory(config);
+        const launcher = join(launcherDir, "context-tree-cleanup");
+        const entry = lstatSync(launcher, { throwIfNoEntry: false });
+        if (entry && (!entry.isFile() || entry.isSymbolicLink())) throw new Error("Unsafe cleanup file.");
         rmSync(join(directory(), `${name}.plist`), { force: true });
+        rmSync(launcher, { force: true });
+        if (readdirSync(launcherDir).length === 0) rmdirSync(launcherDir);
       } else {
         command(["disable", "--now", `${name}.timer`], true);
         command(["stop", `${name}.service`], true);

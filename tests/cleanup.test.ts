@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -254,7 +255,13 @@ for (const platform of ["darwin", "linux"]) {
         ? join(home, "Library", "LaunchAgents", `${name}.plist`)
         : join(home, ".config", "systemd", "user", `${name}.service`);
     const content = readFileSync(file, "utf8");
-    expect(content).toContain(config.cliPath);
+    expect(content).toContain(platform === "darwin" ? "context-tree-cleanup" : config.cliPath);
+    if (platform === "darwin") {
+      expect(content).toContain("<key>RunAtLoad</key><false/>");
+      expect(content).toContain(`<key>StartInterval</key><integer>${config.everyMinutes * 60}</integer>`);
+      expect(content).toContain(`<key>WorkingDirectory</key><string>${config.projectPath}</string>`);
+      expect(content).toContain(`<key>PATH</key><string>${config.searchPath}</string>`);
+    }
     expect(content).not.toContain("dangerously");
     expect(calls.flat()).not.toContain("kickstart");
     expect(calls.some((args) => args.includes("start") && args.includes(`${name}.service`))).toBe(false);
@@ -264,3 +271,66 @@ for (const platform of ["darwin", "linux"]) {
     expect(loadSchedule(config.id).id).toBe(config.id);
   });
 }
+
+describe("macOS cleanup launcher", () => {
+  const launcherPath = (): string =>
+    join(home, ".context-tree", "cleanup", "launchers", config.id, "context-tree-cleanup");
+  const native = (): CleanupScheduler => nativeScheduler("darwin", home, () => ({ status: 0, stdout: "", stderr: "" }));
+
+  it("executes exact quoted arguments and preserves exit status across reinstall and removal", () => {
+    const special = "spaces ' $HOME $(exit 99) ; & < > \"";
+    const bin = join(home, special);
+    mkdirSync(bin);
+    const command = join(bin, "fake node");
+    writeFileSync(command, '#!/bin/sh\nprintf "%s\\0" "$@"\nexit 37\n', { mode: 0o700 });
+    const updated = { ...config, nodePath: command, cliPath: join(bin, "cli"), projectPath: join(bin, "project") };
+    const adapter = native();
+    for (let i = 0; i < 2; i++) {
+      adapter.install(updated);
+      const launcher = launcherPath();
+      expect(statSync(launcher).mode & 0o777).toBe(0o700);
+      const result = spawnSync(launcher, [], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(37);
+      expect(result.stdout.split("\0")).toEqual([
+        updated.cliPath,
+        "cleanup",
+        "run",
+        "--schedule-id",
+        config.id,
+        "--project-path",
+        updated.projectPath,
+        "--json",
+        "",
+      ]);
+    }
+    adapter.remove(updated);
+    expect(existsSync(join(launcherPath(), ".."))).toBe(false);
+    adapter.remove(updated);
+  });
+
+  it.each(["launchers", "schedule", "file"])("rejects a symlinked %s on install and removal", (kind) => {
+    const parent = join(home, ".context-tree", "cleanup", "launchers");
+    const schedule = join(parent, config.id);
+    const target = join(home, "outside");
+    if (kind === "file") writeFileSync(target, "untouched");
+    else mkdirSync(target);
+    if (kind !== "launchers") mkdirSync(parent);
+    if (kind === "file") mkdirSync(schedule);
+    symlinkSync(target, kind === "launchers" ? parent : kind === "schedule" ? schedule : launcherPath());
+    const adapter = native();
+    expect(() => adapter.install(config)).toThrow(/symlink|Unsafe/u);
+    expect(() => adapter.remove(config)).toThrow(/symlink|Unsafe/u);
+    if (kind === "file") expect(readFileSync(target, "utf8")).toBe("untouched");
+  });
+
+  it("preserves unrelated files in a launcher directory on removal", () => {
+    const adapter = native();
+    adapter.install(config);
+    const other = join(launcherPath(), "..", "other");
+    writeFileSync(other, "keep");
+    adapter.remove(config);
+    expect(existsSync(launcherPath())).toBe(false);
+    expect(readFileSync(other, "utf8")).toBe("keep");
+  });
+});

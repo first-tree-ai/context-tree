@@ -43,11 +43,11 @@ export function readState(path: string): unknown {
 export function atomicState(path: string, value: unknown): void {
   atomicFile(path, `${JSON.stringify(value)}\n`);
 }
-export function atomicFile(path: string, value: string): void {
+export function atomicFile(path: string, value: string, mode: 0o600 | 0o700 = 0o600): void {
   const entry = lstatSync(path, { throwIfNoEntry: false });
   if (entry && (!entry.isFile() || entry.isSymbolicLink())) throw new Error("Unsafe cleanup file.");
   const temporary = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, value, { mode: 0o600, flag: "wx" });
+  writeFileSync(temporary, value, { mode, flag: "wx" });
   try {
     renameSync(temporary, path);
   } finally {

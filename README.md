@@ -209,7 +209,10 @@ Remove an active schedule before changing it. Local identity is the resolved
 path; GitHub identity is the repository, case-insensitively. Connection changes
 require explicit removal and rescheduling.
 
-macOS uses user LaunchAgents; Linux uses systemd user timers and services. The
+macOS uses user LaunchAgents, each invoking an executable named
+`context-tree-cleanup` at `~/.context-tree/cleanup/launchers/<schedule-id>/`.
+This private launcher executes the configured Node cleanup command and is removed
+with the schedule. Linux uses systemd user timers and services. The
 machine must be awake and the user scheduler available. No desktop app, root
 installation, daemon, or Linux lingering is needed. Cancel any previously created
 Codex desktop task or Claude Desktop routine before replacing it: the CLI cannot
