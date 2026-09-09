@@ -32,6 +32,7 @@ const SKILLS = [
   "context-tree-create",
   "context-tree-publish",
   "context-tree-read",
+  "context-tree-schedule-cleanup",
   "context-tree-setup",
   "context-tree-write",
 ];
@@ -79,7 +80,12 @@ try {
   assert.equal(existsSync(join(extractedRoot, "node_modules")), false);
   assert.equal(existsSync(join(temporaryRoot, "node_modules")), false);
 
-  for (const relativePath of ["dist/cli/index.mjs", "scripts/postinstall.mjs", "templates/AGENTS.md"]) {
+  for (const relativePath of [
+    "dist/cli/index.mjs",
+    "scripts/postinstall.mjs",
+    "templates/AGENTS.md",
+    "skills/context-tree-cleanup/references/editorial.md",
+  ]) {
     requirePackagedFile(extractedPackage, relativePath);
   }
   for (const skill of SKILLS) {
@@ -167,7 +173,8 @@ try {
     env: { ...npmEnvironment, npm_config_global: "true" },
   });
   assert.equal(globalPostinstall.status, 0, "postinstall must never fail an install");
-  assert.match(globalPostinstall.stdout, /installed 7 skills for claude/u);
+  assert.match(globalPostinstall.stdout, new RegExp(`installed ${SKILLS.length} skills for claude`, "u"));
+  requirePackagedFile(temporaryRoot, ".claude/skills/context-tree-cleanup/references/editorial.md");
   for (const skill of SKILLS) {
     const installedSkill = join(temporaryRoot, ".claude", "skills", skill, "SKILL.md");
     assert.equal(lstatSync(installedSkill).isFile(), true, `postinstall must install ${skill}`);
@@ -244,6 +251,11 @@ try {
     requirePackagedFile(consumerRoot, `.codex/skills/${skill}/SKILL.md`);
     requirePackagedFile(consumerRoot, `.codex/skills/${skill}/agents/openai.yaml`);
   }
+
+  requirePackagedFile(consumerRoot, ".codex/skills/context-tree-cleanup/references/editorial.md");
+  const cleanupHelp = runCli(cliPath, consumerRoot, ["cleanup", "--help"]);
+  assert.equal(cleanupHelp.status, 0);
+  for (const operation of ["schedule", "run", "status", "remove"]) assert.ok(cleanupHelp.stdout.includes(operation));
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(validVerify.status, 0);

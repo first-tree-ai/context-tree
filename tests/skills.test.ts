@@ -11,6 +11,7 @@ const NAMES = [
   "context-tree-create",
   "context-tree-publish",
   "context-tree-read",
+  "context-tree-schedule-cleanup",
   "context-tree-setup",
   "context-tree-write",
 ];
@@ -27,7 +28,7 @@ function frontmatter(markdown: string): Record<string, unknown> {
 }
 
 describe("MVP skill inventory", () => {
-  it("ships exactly setup, create, connect, read, write, publish, and cleanup", () => {
+  it("ships exactly setup, create, connect, read, write, publish, cleanup, and schedule-cleanup", () => {
     const directories = readdirSync(ROOT, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && existsSync(join(ROOT, entry.name, "SKILL.md")))
       .map((entry) => basename(entry.name))
