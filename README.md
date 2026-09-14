@@ -1,336 +1,126 @@
 # Context Tree
 
-`@first-tree-ai/context-tree` provides durable, structured project context for
-coding agents. It ships a portable core, CLI, templates, and seven
-framework-neutral skills.
-
-A Context Tree records current decisions, constraints, relationships, and their
-rationale. Source repositories still own implementation detail, task history,
-and credentials.
-
-## Requirements
-
-- Node.js 22.13 or newer
-- Git
-- GitHub CLI (`gh`) only for connecting a GitHub tree or publishing
-
-Git and GitHub authentication remain owned by the host tools. Repository inputs
-are credential-free `OWNER/REPO` identities, never URLs containing credentials.
+Context Tree gives coding agents lasting project memory: decisions, constraints,
+and the reasons behind them. Use it to avoid repeating context in new sessions,
+keep different agents aligned, or share knowledge across related repositories.
+Context lives in a separate Git repository. Keep it local or share it through
+private GitHub storage.
 
 ## Install
+
+Requires **Node.js 22.13+** and **Git**. For GitHub sharing, also install and
+sign in to the GitHub CLI (`gh auth login`).
 
 ```bash
 npm install --global @first-tree-ai/context-tree
 ```
 
-That installs the `context-tree` command and copies the eight skills into the
-skill directory of every agent you already have:
+This installs the CLI and skills for installed **Codex, Claude Code, and Pi**
+agents. Restart your agent to discover the skills.
 
-```text
-✓ claude  → ~/.claude/skills/   (8 skills)
-✓ codex   → ~/.agents/skills/   (8 skills)
-✓ pi      → ~/.agents/skills/   (8 skills)
-```
+## Get started
 
-Restart your agent so it discovers them, then try asking:
+Open your project in your agent and ask:
 
-> Set up a Context Tree for this project, then read the relevant context.
+> Set up a local Context Tree for this project, then read the relevant context.
 
-> Write this architectural decision to the Context Tree.
-
-Skill installation is a normal command, so you can re-run it after installing a
-new agent, or scope it to one project:
+You can also ask to connect an existing tree or create a private GitHub tree.
+To create a local tree yourself, run this from your project directory:
 
 ```bash
-context-tree install                       # every agent you have
-context-tree install --host codex          # one agent
-context-tree install --project .           # ./.claude/skills and ./.agents/skills
-context-tree uninstall                     # remove context-tree-* skills
+context-tree create
 ```
 
-Install and uninstall own exactly the `context-tree-*` skill directories.
-Install never touches skills it does not own or creates a configuration directory
-for an agent that is not present; uninstall removes every owned-prefix directory
-and nothing else. Adding support for another agent is one entry in the host table
-in `src/core/install.ts`. Codex and Pi share the cross-agent `.agents/skills`
-location, so that directory is written and removed once and reported for both
-hosts.
+The tree is saved under `~/.context-tree/trees` and connected to your project.
 
-`create` and `connect` leave project instructions unchanged. When a project has
-a regular `AGENTS.md` and no `CLAUDE.md` entry, they best-effort create a
-`CLAUDE.md` symlink to `AGENTS.md`. Connections are stored separately.
+## Read and save context
 
-## Seven skills
+Ask your agent to use the tree as you work:
 
-### Setup
+> Read the Context Tree before planning this change.
 
-Read and write try their operation first. On `NO_CONNECTION`, they invoke
-`context-tree-setup` once, which offers an existing tree, a new local tree, a new
-private GitHub tree, or skipping Context Tree for this session. Existing targets
-can be managed names, GitHub `OWNER/REPO`, or exact checkout paths. Choices
-already supplied are reused without asking again. New private GitHub trees are
-created locally and then published; local-only creation needs no GitHub prompt.
+> Save our decision to use a single writer, including why we rejected multiple writers.
 
-After successful setup, the pending read/write resumes once for the original
-project. Skipping continues the user's task without Context Tree and suppresses
-further read/write and setup attempts for that project during the session,
-unless the user reopens them. The preference stays in the conversation, not
-project configuration. Failure or an unanswered setup question defers the
-Context Tree operation without silently choosing a fallback or claiming success.
-An installed skill does not require the user to adopt Context Tree.
+The read skill retrieves relevant context; the write skill updates it and commits
+changes, pushing them when the tree is shared on GitHub. Save decisions and
+constraints that future work should respect, with their rationale.
 
-### Create
+To invoke a skill explicitly, use `$context-tree-read` in Codex,
+`/context-tree-read` in Claude Code, or `/skill:context-tree-read` in Pi.
+Replace `read` with `write`, `setup`, `create`, `connect`, `publish`, `cleanup`,
+or `schedule-cleanup` for the other workflows.
+
+## Share or connect an existing tree
+
+Publish your local tree as a **new private GitHub repository**:
 
 ```bash
-context-tree create --project-path ./service
+context-tree publish OWNER/REPO
 ```
 
-`create` derives `<normalized-project-directory>-context-tree`, scaffolds and
-commits it under `~/.context-tree/trees`, then connects it atomically. It is
-idempotent only while the project remains connected to that managed tree.
-
-### Connect
-
-Connect to an existing managed tree by exact name:
+From another project or machine, connect to it:
 
 ```bash
-context-tree connect shared-context-tree --project-path ./service
+context-tree connect OWNER/REPO
 ```
 
-Or reuse or clone a GitHub tree by repository identity:
+You can also reuse a local tree by name or connect a checkout on disk:
 
 ```bash
-context-tree connect OWNER/REPO --project-path ./service
+context-tree list
+context-tree connect my-project-context-tree
+context-tree connect --tree-path /absolute/path/to/tree
 ```
 
-Or connect an existing checkout in place by exact disk path:
+Connecting switches the current project's tree. Run these commands from the
+project directory, or add `--project-path /path/to/project`.
+
+## Cleanup and scheduling
+
+Ask your agent to remove outdated clutter and consolidate duplicate context:
+
+> Run the context-tree-cleanup skill for this project and publish the changes.
+
+For recurring cleanup, use the schedule-cleanup skill or run:
 
 ```bash
-context-tree connect --tree-path /path/to/a/tree --project-path ./service
+context-tree cleanup schedule --agent codex --every 2h
+context-tree cleanup status
+context-tree cleanup logs
+context-tree cleanup remove
 ```
 
-`connect --tree-path` requires an exact, clean, fully valid Git root with no
-symlink components. Trees without an origin connect as local state;
-credential-free GitHub origins connect as GitHub state. External disk trees
-are never copied, moved, or deleted.
+Choose `codex`, `claude`, or `pi`; the agent CLI must be installed and authenticated.
+Schedules run locally on macOS or Linux while the machine is awake, and skip trees
+unused for 24 hours. Use one designated cleaner per shared tree.
+`context-tree cleanup run` runs the configured cleanup now; `cleanup logs --list`
+lists previous runs.
 
-An identical connection is idempotent. An explicit connect automatically
-switches the project. GitHub checkouts use the repository's lowercase name in
-the same flat managed namespace as created trees.
-
-`context-tree list` reports valid, clean managed trees; `context-tree list --json`
-returns them as `{ schemaVersion: 1, trees: [{ name, tree }] }`, and a missing
-managed directory is an empty list.
-
-### Read
+## Useful commands
 
 ```bash
-context-tree sync --project-path ./service
-context-tree read product/runtime.md --tree-path /path/from/sync
+context-tree resolve                              # show this project's tree
+context-tree read --tree-path /path/to/tree        # browse its root index
+context-tree verify --tree-path /path/to/tree      # check its structure
+context-tree install                              # add skills for a new agent
+context-tree install --project .                  # install skills for this project
+context-tree uninstall                            # remove Context Tree skills
+context-tree --help
 ```
 
-Local trees report their checked-out branch and exact `HEAD` without network
-access. GitHub trees perform one fast-forward-only pull of the checked-out
-branch. Reads navigate from indexes to narrow, task-relevant children.
+For scripts and custom integrations, see the [CLI specification](docs/specification.md),
+including synchronization, prepared writes, and JSON output.
 
-### Write
+## Working with OpenTag
+
+Create or publish a tree as above, then choose it on each OpenTag Computer:
 
 ```bash
-context-tree prepare-write --project-path ./service
-# Edit only the returned worktreePath.
-context-tree finish-write --project-path ./service \
-  --worktree-path /path/from/prepare \
-  --message "Record runtime constraint"
+opentag context-tree connect OWNER/REPO
+# Or use a local tree:
+opentag context-tree connect my-project-context-tree
 ```
 
-Preparation synchronizes first and creates a random isolated worktree at that
-exact commit. Finishing validates the worktree, stages every pending change,
-creates one unsigned commit using the host identity, and attempts one
-fast-forward merge for local trees or one non-force push for GitHub trees.
-
-If the destination advanced, `finish-write` returns `WRITE_OUTDATED` and
-preserves the worktree. Prepare again, reread affected nodes and their current
-placement, and adapt the intended semantic change once to any moved or
-consolidated content; there is no automatic rebase, retry loop, or pull-request fallback.
-
-A preserved or abandoned write leaves its temporary worktree on disk and a
-`context-tree/write/<name>` branch in the tree. The next `prepare-write` reclaims
-one of these only when it holds no commit your checkout lacks, has no pending
-change, and has gone untouched for twenty-four hours, so a worktree you are still
-editing and a `WRITE_OUTDATED` worktree awaiting its retry are both left alone.
-Those keep their pending edits until you clear them with
-`git worktree remove <path>` and `git branch -D <branch>` in the connected tree.
-
-### Publish
-
-```bash
-context-tree publish --project-path ./service
-# or: context-tree publish OWNER/REPO --project-path ./service
-```
-
-Publishing requires a clean, valid local tree with no `origin`. It creates one
-new private GitHub repository, pushes the checkout, and then changes the stored
-connection to GitHub state. Those external and local changes are not atomic;
-uncertain or partial outcomes are reported as `PUBLISH_INCOMPLETE` and are not
-automatically inspected or repaired.
-
-### Cleanup and scheduling
-
-`context-tree-cleanup` removes noise, consolidates duplicates, and improves
-placement across shared content and all member directories, then publishes one
-commit if anything changed. It preserves useful context and protected decisions.
-
-> Run `$context-tree-cleanup` for the project at `<absolute-project-path>`.
-> Clean the entire tree and publish the changes. If another writer advances it,
-> defer until the next run.
-
-Use `context-tree-schedule-cleanup` to create or update a persistent local
-cleanup task:
-
-```text
-# Codex
-$context-tree-schedule-cleanup every 2 hours
-
-# Claude Code
-/context-tree-schedule-cleanup every 2 hours
-
-# Pi
-/skill:context-tree-schedule-cleanup every 2 hours
-```
-
-The CLI manages one schedule per tree on this machine:
-
-```bash
-context-tree cleanup schedule --project-path /absolute/project --agent codex
-context-tree cleanup schedule --project-path /absolute/project --agent claude --every 2h
-context-tree cleanup schedule --project-path /absolute/project --agent pi --model anthropic/claude-haiku-4-5
-context-tree cleanup status --project-path /absolute/project
-context-tree cleanup run --project-path /absolute/project
-context-tree cleanup remove --project-path /absolute/project
-```
-
-All four operations accept `--json`. Scheduling starts no immediate cleanup.
-Cadence defaults to one hour and accepts positive whole-minute durations (`30m`,
-`2h`, `1d`, up to `365d`). Repeating schedule updates the same tree's entry.
-Remove an active schedule before changing it. Local identity is the resolved
-path; GitHub identity is the repository, case-insensitively. Connection changes
-require explicit removal and rescheduling.
-
-macOS uses user LaunchAgents, each invoking an executable named
-`context-tree-cleanup` at `~/.context-tree/cleanup/launchers/<schedule-id>/`.
-This private launcher executes the configured Node cleanup command and is removed
-with the schedule. Linux uses systemd user timers and services. The
-machine must be awake and the user scheduler available. No desktop app, root
-installation, daemon, or Linux lingering is needed. Cancel any previously created
-Codex desktop task or Claude Desktop routine before replacing it: the CLI cannot
-inspect or remove those tasks. Keep one designated cleaner per tree across machines.
-
-Agents use existing CLI authentication. Codex defaults to `gpt-5.6-luna` with
-low reasoning effort and Claude to `claude-haiku-4-5`; Pi uses its configured
-default model. `--model` selects an explicit override (Pi also accepts a
-`provider/model` value). Codex uses workspace-write sandboxing, Claude uses
-file-editing permissions, and Pi runs ephemeral with extensions disabled.
-Claude and Pi use restricted editing tool lists with no shell. Permission and
-authentication failures stop the run; models are never silently substituted.
-See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
-and the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
-
-Scheduling opens a 24-hour activity window. Successful ordinary `create`,
-`connect`, `sync`, `read`, `prepare-write`, and `finish-write` use refreshes it.
-Cleanup and status never do. Missing or older activity skips before network or
-model work; successfully inspected unchanged commits skip the model. Each run
-uses a fresh isolated worktree, one agent with a 15-minute timeout, shared
-editorial instructions, verification, and at most one publication attempt.
-
-Private atomic state in `~/.context-tree/cleanup` holds configuration, activity,
-the last successful commit, and only the latest outcome. `status` reports native
-registration/running state and whether inactivity prevents cleanup. `remove`
-disables future runs and stops the native scheduled process and its children,
-preserving unfinished worktrees. Publication already underway may have completed;
-uncertain outcomes are reported without rollback or retries. Failures and
-`WRITE_OUTDATED` never advance the successful-inspection checkpoint.
-
-## Project identity
-
-Git project paths resolve to the exact root of that checkout. A clone or Git
-worktree is independent even if it shares an origin or Git common directory.
-Non-Git projects match only the exact connected directory; nested directories
-do not inherit the connection.
-
-Connection data is written atomically with mode `0600` at
-`~/.context-tree/connections.json`. Duplicate project records are corruption.
-Stored local/GitHub state is not reclassified from mutable remotes.
-
-Every command that touches a connected tree reports why it refused:
-`NO_CONNECTION` (nothing connected), `DIRTY_TREE` (your uncommitted edits —
-commit or discard them), `INVALID_TREE` (structure fails `verify`),
-`STALE_CONNECTION` (the stored path is gone; connect again), and
-`CORRUPT_CONNECTION` (unreadable or duplicated records).
-
-## CLI plumbing
-
-The public command inventory is:
-
-```text
-install  uninstall  create  connect  list  resolve  sync  prepare-write
-finish-write  publish  read  verify
-```
-
-Setup, create, connect, read, write, publish, cleanup, and schedule-cleanup ship as
-eight skills; setup
-orchestrates the five concrete workflows. `install` is the distribution
-entry point, run for you by `npm install`; `uninstall` is its supported reverse.
-`resolve`, `sync`, `prepare-write`,
-`finish-write`, and `verify` are plumbing or diagnostic commands rather than
-separate user intentions; `list` backs setup's connect-target discovery.
-
-### Output
-
-`create`, `connect`, `list`, `resolve`, `publish`, `read`, and `verify` print
-human-readable text by default and accept `--json` to emit their strict schema
-version `1` payload for scripts and agents; in text mode a failure prints a
-sanitized message to stderr with a non-zero exit code. The eight skills always
-pass `--json`. `sync`, `prepare-write`, `finish-write`, `install`, and `uninstall` are
-low-level plumbing and always emit that JSON (with the error envelope on stdout).
-`--help` and `--version` are always plain text.
-
-```bash
-context-tree verify                 # human-readable report
-context-tree verify --json          # { "ok": true, "schemaVersion": 1, ... }
-```
-
-`verify` is intended for CI and diagnostics. Normal skills invoke it only after
-an operation reports invalid tree content.
-
-## Development
-
-```bash
-pnpm install
-pnpm check
-pnpm typecheck
-pnpm test
-pnpm check:package
-```
-
-See [docs/specification.md](docs/specification.md) for contracts and safety
-invariants.
-
-Cleanup runner history is available with `context-tree cleanup logs` (latest output),
-`context-tree cleanup logs --list` (newest runs first), or
-`context-tree cleanup logs --run <run-id>`. Each accepts `--project-path` and
-`--json`; `--list` and `--run` are mutually exclusive. JSON returns one versioned
-result containing run summaries and the selected run's events. Reading logs does
-not refresh activity or contact the scheduler. Active runs return a snapshot;
-runs without a terminal outcome are shown as incomplete.
-
-History lives under `~/.context-tree/cleanup/logs/<tree-id>/<run-id>/` and is shared
-by projects connected to the same tree. Removing a schedule preserves history.
-The runner keeps 50 runs, pruning oldest completed runs; incomplete entries are
-protected. Each run holds at most 5 MiB of serialized output, with truncation
-reported separately from its final outcome. Logs label lifecycle events, stdout,
-and stderr in observed line order. Agent CLIs differ in how much progress and
-final output they emit. Credentials and terminal controls are sanitized, and
-oversized lines are suppressed. Prompts and environment configuration are not
-recorded by the runner. History covers scheduled and explicit `cleanup run`
-attempts, including skips; previous transcripts cannot be recovered, and cleanup
-performed directly through a host skill is outside this runner.
+OpenTag connects each agent workspace to that tree when a session starts.
+Use the same read, write, and cleanup prompts in those sessions. For a GitHub tree,
+GitHub authentication must work on each Computer.
