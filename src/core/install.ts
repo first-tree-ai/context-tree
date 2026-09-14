@@ -13,19 +13,14 @@ import {
 } from "../schemas.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 
-/**
- * Per-host configuration directory, relative to the home directory or to a project root.
- *
- * Codex and Pi both read the cross-agent `.agents/skills` location, so they share one
- * destination: the directory is written and removed once and reported for each host.
- */
-const HOST_CONFIG_DIRECTORY: Record<SkillHost, string> = {
-  claude: ".claude",
-  codex: ".agents",
-  pi: ".agents",
+/** Home configuration paths detect hosts independently of their skills destinations. */
+const HOST_DIRECTORIES: Record<SkillHost, { config: readonly string[]; skills: string }> = {
+  claude: { config: [".claude"], skills: ".claude" },
+  codex: { config: [".codex"], skills: ".agents" },
+  pi: { config: [".pi", "agent"], skills: ".agents" },
 };
 
-/** Every supported host keeps user skills in the same subdirectory of its configuration directory. */
+/** Subdirectory below each skills destination. */
 const SKILLS_DIRECTORY = "skills";
 
 /** Only directories carrying this prefix are ever replaced or removed. */
@@ -98,23 +93,26 @@ function hostDestination(
   root: string,
   isProjectInstall: boolean,
 ): { destination: string } | { reason: string } {
-  const configDirectory = HOST_CONFIG_DIRECTORY[host];
+  const directories = HOST_DIRECTORIES[host];
   if (!isProjectInstall) {
     // Home installs only target hosts the user already has, so installing the CLI never
     // creates a configuration directory for an agent that is not present.
-    const hostRoot = join(root, configDirectory);
-    const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
-    if (entry === undefined) {
-      return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
+    let hostRoot = root;
+    for (const segment of directories.config) {
+      hostRoot = join(hostRoot, segment);
+      const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
+      if (entry === undefined) {
+        return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
+      }
+      if (entry.isSymbolicLink() || !entry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
     }
-    if (entry.isSymbolicLink() || !entry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
   }
-  return { destination: ensureRealDirectory(root, [configDirectory, SKILLS_DIRECTORY]) };
+  return { destination: ensureRealDirectory(root, [directories.skills, SKILLS_DIRECTORY]) };
 }
 
 /** Resolve one host's existing skills root without creating or following anything. */
 function hostSkillsRoot(host: SkillHost, root: string): { destination: string } | { reason: string } {
-  const hostRoot = join(root, HOST_CONFIG_DIRECTORY[host]);
+  const hostRoot = join(root, HOST_DIRECTORIES[host].skills);
   const hostEntry = lstatSync(hostRoot, { throwIfNoEntry: false });
   if (hostEntry === undefined) return { reason: `${hostRoot} does not exist; nothing to remove.` };
   if (hostEntry.isSymbolicLink() || !hostEntry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };

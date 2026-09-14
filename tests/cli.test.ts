@@ -242,13 +242,28 @@ describe("built CLI", () => {
 
   it("installs codex and pi into the shared .agents directory", () => {
     const root = workspace();
-    mkdirSync(join(root, ".agents"));
+    mkdirSync(join(root, ".codex"));
+    mkdirSync(join(root, ".pi", "agent"), { recursive: true });
     const result = JSON.parse(cli(root, ["install"], undefined, root).stdout);
     expect(result.installed.map((entry: { host: string }) => entry.host)).toEqual(["codex", "pi"]);
     expect(result.skipped.map((entry: { host: string }) => entry.host)).toEqual(["claude"]);
     const skillsRoot = join(realpathSync(root), ".agents", "skills");
     for (const entry of result.installed) expect(entry.path).toBe(skillsRoot);
     expect(existsSync(join(skillsRoot, "context-tree-read", "SKILL.md"))).toBe(true);
+  });
+
+  it.each([
+    ["codex", ".codex", "pi"],
+    ["pi", ".pi/agent", "codex"],
+  ])("detects %s independently of the shared skills destination", (host, config, absentHost) => {
+    const root = workspace();
+    mkdirSync(join(root, config), { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = JSON.parse(cli(root, ["install"], undefined, root).stdout);
+      expect(result.installed.map((entry: { host: string }) => entry.host)).toEqual([host]);
+      expect(result.skipped.map((entry: { host: string }) => entry.host)).toEqual(["claude", absentHost]);
+      expect(existsSync(join(root, ".agents", "skills", "context-tree-read", "SKILL.md"))).toBe(true);
+    }
   });
 
   it("is idempotent for repeated create", () => {

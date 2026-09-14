@@ -229,10 +229,10 @@ Agents use existing CLI authentication. Codex defaults to `gpt-5.6-luna` with
 low reasoning effort and Claude to `claude-haiku-4-5`; Pi uses its configured
 default model. `--model` selects an explicit override (Pi also accepts a
 `provider/model` value). Codex uses workspace-write sandboxing, Claude uses
-file-editing permissions, and Pi runs ephemeral with extensions disabled, all
-with a restricted editing tool list and no shell. Permission and authentication
-failures stop the run;
-models are never silently substituted. See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
+file-editing permissions, and Pi runs ephemeral with extensions disabled.
+Claude and Pi use restricted editing tool lists with no shell. Permission and
+authentication failures stop the run; models are never silently substituted.
+See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 and the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
 
 Scheduling opens a 24-hour activity window. Successful ordinary `create`,
