@@ -372,6 +372,34 @@ describe("macOS cleanup launcher", () => {
 });
 
 describe("cleanup history", () => {
+  it.each([false, true])("recovers unfinished initialization (events created: %s)", async (eventsCreated) => {
+    const { cleanupLogs } = await import("../src/core/cleanup/index.js");
+    const runId = "00000000-0000-4000-8000-000000000000";
+    const path = join(home, ".context-tree", "cleanup", "logs", config.id, runId);
+    mkdirSync(path, { recursive: true });
+    if (eventsCreated) writeFileSync(join(path, "events.jsonl"), "");
+    expect(cleanupLogs(project).runs).toEqual([]);
+    expect(() => cleanupLogs(project, { run: runId })).toThrow("Unknown cleanup run ID");
+    atomicState(statePath(config.id, "activity"), 1);
+    const outcome = await runCleanup(project);
+    expect(outcome.outcome).toBe("inactive");
+    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(outcome);
+    expect(existsSync(path)).toBe(true);
+  });
+  it("still rejects unsafe or corrupt initialization entries", async () => {
+    const { readCleanupHistory } = await import("../src/core/cleanup/history.js");
+    const path = join(home, ".context-tree", "cleanup", "logs", config.id, "00000000-0000-4000-8000-000000000000");
+    mkdirSync(path, { recursive: true });
+    const metadata = join(path, "metadata");
+    symlinkSync(join(home, "missing-metadata"), metadata);
+    expect(() => readCleanupHistory(config.id)).toThrow("regular file");
+    rmSync(metadata);
+    writeFileSync(metadata, "{}");
+    expect(() => readCleanupHistory(config.id)).toThrow();
+    rmSync(path, { recursive: true });
+    symlinkSync(home, path);
+    expect(() => readCleanupHistory(config.id)).toThrow();
+  });
   it("records synchronization before Git runs and preserves its failure in history", async () => {
     const { cleanupLogs } = await import("../src/core/cleanup/index.js");
     const agent = vi.fn();

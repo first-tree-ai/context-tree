@@ -41,9 +41,13 @@ function runDirectory(root: string, runId: string): string {
 }
 function summaries(root: string): CleanupRunMetadata[] {
   return readdirSync(root)
-    .map((id) => {
+    .flatMap((id) => {
       const path = runDirectory(root, id);
-      const metadata = cleanupRunMetadataSchema.parse(readState(join(path, "metadata")));
+      const state = readState(join(path, "metadata"));
+      // Metadata is the initialization commit point. Preserve unfinished directories:
+      // their writer may still be active, but they must not block history or later runs.
+      if (state === undefined) return [];
+      const metadata = cleanupRunMetadataSchema.parse(state);
       if (metadata.runId !== id) throw new Error("Cleanup log identity is corrupt.");
       return metadata;
     })
@@ -110,13 +114,13 @@ export class CleanupHistory {
       ...(config.model === undefined ? {} : { model: sanitizeLogText(config.model) }),
       truncated: false,
     };
-    atomicState(join(this.path, "metadata"), this.metadata);
     const fd = openSync(
       join(this.path, "events.jsonl"),
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
     );
     closeSync(fd);
+    atomicState(join(this.path, "metadata"), this.metadata);
   }
   event(source: CleanupLogEvent["source"], text: string): void {
     this.assertHealthy();
