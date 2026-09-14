@@ -314,3 +314,23 @@ pnpm check:package
 
 See [docs/specification.md](docs/specification.md) for contracts and safety
 invariants.
+
+Cleanup runner history is available with `context-tree cleanup logs` (latest output),
+`context-tree cleanup logs --list` (newest runs first), or
+`context-tree cleanup logs --run <run-id>`. Each accepts `--project-path` and
+`--json`; `--list` and `--run` are mutually exclusive. JSON returns one versioned
+result containing run summaries and the selected run's events. Reading logs does
+not refresh activity or contact the scheduler. Active runs return a snapshot;
+runs without a terminal outcome are shown as incomplete.
+
+History lives under `~/.context-tree/cleanup/logs/<tree-id>/<run-id>/` and is shared
+by projects connected to the same tree. Removing a schedule preserves history.
+The runner keeps 50 runs, pruning oldest completed runs; incomplete entries are
+protected. Each run holds at most 5 MiB of serialized output, with truncation
+reported separately from its final outcome. Logs label lifecycle events, stdout,
+and stderr in observed line order. Agent CLIs differ in how much progress and
+final output they emit. Credentials and terminal controls are sanitized, and
+oversized lines are suppressed. Prompts and environment configuration are not
+recorded by the runner. History covers scheduled and explicit `cleanup run`
+attempts, including skips; previous transcripts cannot be recovered, and cleanup
+performed directly through a host skill is outside this runner.

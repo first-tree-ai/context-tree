@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Command, CommanderError, Option } from "commander";
 import {
+  cleanupLogs,
   cleanupStatus,
   recordCleanupActivity,
   removeCleanup,
@@ -230,7 +231,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     });
 
   const cleanup = program.command("cleanup").description("Schedule and manage CLI-based Context Tree cleanup.");
-  for (const operation of ["schedule", "status", "remove", "run"]) {
+  for (const operation of ["schedule", "status", "remove", "run", "logs"]) {
     const command = cleanup
       .command(operation)
       .option("--project-path <path>", "project directory", ".")
@@ -240,6 +241,8 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         .requiredOption("--agent <agent>", "codex, claude, or pi")
         .option("--model <model>", "explicit model override")
         .option("--every <duration>", "positive whole-minute interval, e.g. 30m or 1h", "1h");
+    if (operation === "logs")
+      command.option("--list", "list recorded runs").option("--run <run-id>", "select a recorded run");
     if (operation === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
     command.action(
       async (options: {
@@ -249,8 +252,28 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         model?: string;
         every?: string;
         scheduleId?: string;
+        list?: boolean;
+        run?: string;
       }) => {
         const projectPath = resolve(io.cwd(), options.projectPath);
+        if (operation === "logs") {
+          const result = cleanupLogs(projectPath, options);
+          emit(io, options.json, result, (value) => {
+            if (!value.runs.length)
+              return `No cleanup logs recorded for project ${projectPath}.\nUse --project-path <path> to query another project's Context Tree.`;
+            if (options.list)
+              return value.runs
+                .map(
+                  (run) =>
+                    `${run.runId}  ${new Date(run.startedAt).toISOString()}  ${run.agent}/${run.model ?? "agent default"}  ${run.terminal?.outcome ?? "incomplete"}${run.truncated ? "  truncated" : ""}`,
+                )
+                .join("\n");
+            return value.events
+              .map((event) => `[${new Date(event.at).toISOString()}] [${event.source}] ${event.text}`)
+              .join("\n");
+          });
+          return;
+        }
         if (operation === "run") {
           const result = await runCleanup(projectPath, options.scheduleId);
           const wireResult = cleanupRunResultSchema.parse({ schemaVersion: SCHEMA_VERSION, ...result });

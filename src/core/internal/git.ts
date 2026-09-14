@@ -1,3 +1,4 @@
+import type { SpawnOptions, SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { spawnSync } from "node:child_process";
 
 /**
@@ -8,11 +9,33 @@ import { spawnSync } from "node:child_process";
 export type CommandResult = { status: number | null; stdout: string; stderr: string };
 export type CommandRunner = (command: string, args: string[]) => CommandResult;
 
-export function defaultRunner(command: string, args: string[]): CommandResult {
-  const result = spawnSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+export function defaultRunner(command: string, args: string[], timeoutMs = 120_000): CommandResult {
+  const options: SpawnSyncOptionsWithStringEncoding & Pick<SpawnOptions, "detached"> = {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+    detached: process.platform !== "win32",
+  };
+  const result = spawnSync(command, args, options);
+  const timedOut = result.error !== undefined && "code" in result.error && result.error.code === "ETIMEDOUT";
+  if (timedOut && process.platform !== "win32" && result.pid) {
+    // Git's SSH/credential children must not outlive a timed-out operation.
+    try {
+      process.kill(-result.pid, "SIGKILL");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+    }
+  }
   return {
     status: result.status,
-    stderr: typeof result.stderr === "string" ? result.stderr : "",
+    stderr: timedOut
+      ? `Command timed out after ${timeoutMs} ms.`
+      : result.error
+        ? "Unable to start command."
+        : typeof result.stderr === "string"
+          ? result.stderr
+          : "",
     stdout: typeof result.stdout === "string" ? result.stdout : "",
   };
 }

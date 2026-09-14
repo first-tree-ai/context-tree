@@ -56,3 +56,19 @@ activity skips before network or model work; unchanged successfully cleaned
 commits skip the model. Failures preserve worktrees and success checkpoints.
 The runner owns preparation, verification, and publication; the fresh agent
 only edits using the cleanup skill's shared required editorial resource.
+
+Inspect runner history with `context-tree cleanup logs --project-path <project> --json`.
+Use `--list` for newest-first summaries or `--run <run-id>` for a particular run;
+these selectors are mutually exclusive. The versioned result includes summaries
+and the selected run's labeled runner/stdout/stderr events. Reads are snapshots,
+do not refresh activity, and do not query the scheduler. Agent output varies by
+CLI. Missing terminal outcomes mean incomplete runs. Outcomes include `runId`
+when history was recorded.
+
+History is local, shared across connected projects, and survives schedule removal.
+Retention is 50 runs (oldest completed runs are pruned; incomplete entries are
+protected), with 5 MiB of serialized output per run and an explicit truncation
+flag. Final outcome metadata survives output truncation. Credentials and terminal
+controls are sanitized; oversized lines are suppressed. Only runner attempts are
+recorded, including inactivity and unchanged skips. Old transcripts and cleanup
+performed directly through a host skill are unavailable.

@@ -266,7 +266,8 @@ try {
   );
   const cleanupHelp = runCli(cliPath, consumerRoot, ["cleanup", "--help"]);
   assert.equal(cleanupHelp.status, 0);
-  for (const operation of ["schedule", "run", "status", "remove"]) assert.ok(cleanupHelp.stdout.includes(operation));
+  for (const operation of ["schedule", "run", "status", "remove", "logs"])
+    assert.ok(cleanupHelp.stdout.includes(operation));
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(validVerify.status, 0);

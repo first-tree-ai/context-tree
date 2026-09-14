@@ -376,6 +376,7 @@ export type CleanupSchedule = z.infer<typeof cleanupScheduleSchema>;
 export const cleanupOutcomeSchema = z
   .object({
     at: z.number(),
+    runId: z.string().uuid().optional(),
     outcome: z.union([
       z.literal("inactive"),
       z.literal("unchanged"),
@@ -408,3 +409,32 @@ export type CleanupResult = z.infer<typeof cleanupResultSchema>;
 export const cleanupRunResultSchema = cleanupOutcomeSchema
   .extend({ schemaVersion: z.literal(SCHEMA_VERSION) })
   .strict();
+
+export const cleanupLogEventSchema = z
+  .object({
+    at: z.number().finite(),
+    source: z.union([z.literal("runner"), z.literal("stdout"), z.literal("stderr")]),
+    text: z.string(),
+  })
+  .strict();
+export type CleanupLogEvent = z.infer<typeof cleanupLogEventSchema>;
+export const cleanupRunMetadataSchema = z
+  .object({
+    runId: z.string().uuid(),
+    startedAt: z.number().finite(),
+    agent: cleanupAgentSchema,
+    model: z.string().optional(),
+    truncated: z.boolean(),
+    terminal: cleanupOutcomeSchema.optional(),
+  })
+  .strict();
+export type CleanupRunMetadata = z.infer<typeof cleanupRunMetadataSchema>;
+export const cleanupLogsResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    runs: z.array(cleanupRunMetadataSchema),
+    selectedRunId: z.string().uuid().nullable(),
+    events: z.array(cleanupLogEventSchema),
+  })
+  .strict();
+export type CleanupLogsResult = z.infer<typeof cleanupLogsResultSchema>;
