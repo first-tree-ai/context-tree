@@ -144,7 +144,7 @@ export const contextContentClassCountsSchema = z
   .strict();
 export type ContextContentClassCounts = z.infer<typeof contextContentClassCountsSchema>;
 
-export const SKILL_HOSTS = ["claude", "codex"] as const;
+export const SKILL_HOSTS = ["claude", "codex", "pi"] as const;
 export const skillHostSchema = z.enum(SKILL_HOSTS);
 export type SkillHost = z.infer<typeof skillHostSchema>;
 
@@ -354,14 +354,16 @@ export const contextTreeCliErrorEnvelopeSchema = z
   .strict();
 export type ContextTreeCliErrorEnvelope = z.infer<typeof contextTreeCliErrorEnvelopeSchema>;
 
-export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude")]);
+export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude"), z.literal("pi")]);
+export type CleanupAgent = z.infer<typeof cleanupAgentSchema>;
 export const cleanupScheduleSchema = z
   .object({
     id: z.string().regex(/^[a-f0-9]{64}$/u),
     projectPath: z.string().refine(isAbsolute),
     identity: z.string(),
     agent: cleanupAgentSchema,
-    model: z.string().min(1),
+    // Optional: when absent the agent uses its own configured default model (Pi).
+    model: z.string().min(1).optional(),
     everyMinutes: z.number().int().positive().max(525600),
     nodePath: z.string().refine(isAbsolute),
     cliPath: z.string().refine(isAbsolute),
@@ -374,6 +376,7 @@ export type CleanupSchedule = z.infer<typeof cleanupScheduleSchema>;
 export const cleanupOutcomeSchema = z
   .object({
     at: z.number(),
+    runId: z.string().uuid().optional(),
     outcome: z.union([
       z.literal("inactive"),
       z.literal("unchanged"),
@@ -406,3 +409,32 @@ export type CleanupResult = z.infer<typeof cleanupResultSchema>;
 export const cleanupRunResultSchema = cleanupOutcomeSchema
   .extend({ schemaVersion: z.literal(SCHEMA_VERSION) })
   .strict();
+
+export const cleanupLogEventSchema = z
+  .object({
+    at: z.number().finite(),
+    source: z.union([z.literal("runner"), z.literal("stdout"), z.literal("stderr")]),
+    text: z.string(),
+  })
+  .strict();
+export type CleanupLogEvent = z.infer<typeof cleanupLogEventSchema>;
+export const cleanupRunMetadataSchema = z
+  .object({
+    runId: z.string().uuid(),
+    startedAt: z.number().finite(),
+    agent: cleanupAgentSchema,
+    model: z.string().optional(),
+    truncated: z.boolean(),
+    terminal: cleanupOutcomeSchema.optional(),
+  })
+  .strict();
+export type CleanupRunMetadata = z.infer<typeof cleanupRunMetadataSchema>;
+export const cleanupLogsResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    runs: z.array(cleanupRunMetadataSchema),
+    selectedRunId: z.string().uuid().nullable(),
+    events: z.array(cleanupLogEventSchema),
+  })
+  .strict();
+export type CleanupLogsResult = z.infer<typeof cleanupLogsResultSchema>;

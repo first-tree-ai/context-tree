@@ -13,13 +13,14 @@ import {
 } from "../schemas.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 
-/** Per-host configuration directory, relative to the home directory or to a project root. */
-const HOST_CONFIG_DIRECTORY: Record<SkillHost, string> = {
-  claude: ".claude",
-  codex: ".codex",
+/** Home configuration paths detect hosts independently of their skills destinations. */
+const HOST_DIRECTORIES: Record<SkillHost, { config: readonly string[]; skills: string }> = {
+  claude: { config: [".claude"], skills: ".claude" },
+  codex: { config: [".codex"], skills: ".agents" },
+  pi: { config: [".pi", "agent"], skills: ".agents" },
 };
 
-/** Every supported host keeps user skills in the same subdirectory of its configuration directory. */
+/** Subdirectory below each skills destination. */
 const SKILLS_DIRECTORY = "skills";
 
 /** Only directories carrying this prefix are ever replaced or removed. */
@@ -92,23 +93,26 @@ function hostDestination(
   root: string,
   isProjectInstall: boolean,
 ): { destination: string } | { reason: string } {
-  const configDirectory = HOST_CONFIG_DIRECTORY[host];
+  const directories = HOST_DIRECTORIES[host];
   if (!isProjectInstall) {
     // Home installs only target hosts the user already has, so installing the CLI never
     // creates a configuration directory for an agent that is not present.
-    const hostRoot = join(root, configDirectory);
-    const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
-    if (entry === undefined) {
-      return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
+    let hostRoot = root;
+    for (const segment of directories.config) {
+      hostRoot = join(hostRoot, segment);
+      const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
+      if (entry === undefined) {
+        return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
+      }
+      if (entry.isSymbolicLink() || !entry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
     }
-    if (entry.isSymbolicLink() || !entry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
   }
-  return { destination: ensureRealDirectory(root, [configDirectory, SKILLS_DIRECTORY]) };
+  return { destination: ensureRealDirectory(root, [directories.skills, SKILLS_DIRECTORY]) };
 }
 
 /** Resolve one host's existing skills root without creating or following anything. */
 function hostSkillsRoot(host: SkillHost, root: string): { destination: string } | { reason: string } {
-  const hostRoot = join(root, HOST_CONFIG_DIRECTORY[host]);
+  const hostRoot = join(root, HOST_DIRECTORIES[host].skills);
   const hostEntry = lstatSync(hostRoot, { throwIfNoEntry: false });
   if (hostEntry === undefined) return { reason: `${hostRoot} does not exist; nothing to remove.` };
   if (hostEntry.isSymbolicLink() || !hostEntry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
@@ -140,6 +144,7 @@ export function installSkills(options: InstallSkillsOptions = {}): InstallSkills
 
   const installed: SkillInstallation[] = [];
   const skipped: SkillInstallSkip[] = [];
+  const written = new Set<string>();
 
   for (const host of hosts) {
     const resolved = hostDestination(host, root, projectRoot !== undefined);
@@ -147,12 +152,16 @@ export function installSkills(options: InstallSkillsOptions = {}): InstallSkills
       skipped.push({ host, reason: resolved.reason });
       continue;
     }
-    for (const skill of skills) {
-      const target = join(resolved.destination, skill);
-      if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
-        rmSync(target, { force: true, recursive: true });
+    // Codex and Pi share one directory; writing once keeps the install idempotent per directory.
+    if (!written.has(resolved.destination)) {
+      for (const skill of skills) {
+        const target = join(resolved.destination, skill);
+        if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+          rmSync(target, { force: true, recursive: true });
+        }
+        copyRealTree(join(skillsRoot, skill), target);
       }
-      copyRealTree(join(skillsRoot, skill), target);
+      written.add(resolved.destination);
     }
     installed.push({ host, path: resolved.destination, skills });
   }
@@ -166,6 +175,7 @@ export function uninstallSkills(options: UninstallSkillsOptions = {}): Uninstall
   const root = options.projectPath === undefined ? realHome() : resolve(options.projectPath);
   const removed: SkillInstallation[] = [];
   const skipped: SkillInstallSkip[] = [];
+  const removedByDestination = new Map<string, string[]>();
 
   for (const host of hosts) {
     const resolved = hostSkillsRoot(host, root);
@@ -174,20 +184,26 @@ export function uninstallSkills(options: UninstallSkillsOptions = {}): Uninstall
       continue;
     }
 
-    const skills: string[] = [];
-    for (const entry of readdirSync(resolved.destination, { withFileTypes: true })) {
-      if (!entry.name.startsWith(OWNED_SKILL_PREFIX)) continue;
-      const target = join(resolved.destination, entry.name);
-      const targetEntry = lstatSync(target, { throwIfNoEntry: false });
-      if (targetEntry === undefined) continue;
-      if (targetEntry.isSymbolicLink() || !targetEntry.isDirectory()) {
-        skipped.push({ host, reason: `${target} is not a real directory.` });
-        continue;
+    // Codex and Pi share one directory; remove it once and report the same skills for each host.
+    let skills = removedByDestination.get(resolved.destination);
+    if (skills === undefined) {
+      skills = [];
+      for (const entry of readdirSync(resolved.destination, { withFileTypes: true })) {
+        if (!entry.name.startsWith(OWNED_SKILL_PREFIX)) continue;
+        const target = join(resolved.destination, entry.name);
+        const targetEntry = lstatSync(target, { throwIfNoEntry: false });
+        if (targetEntry === undefined) continue;
+        if (targetEntry.isSymbolicLink() || !targetEntry.isDirectory()) {
+          skipped.push({ host, reason: `${target} is not a real directory.` });
+          continue;
+        }
+        rmSync(target, { force: true, recursive: true });
+        skills.push(entry.name);
       }
-      rmSync(target, { force: true, recursive: true });
-      skills.push(entry.name);
+      skills.sort();
+      removedByDestination.set(resolved.destination, skills);
     }
-    removed.push({ host, path: resolved.destination, skills: skills.sort() });
+    removed.push({ host, path: resolved.destination, skills });
   }
 
   return { removed, schemaVersion: SCHEMA_VERSION, skipped, version: readPackageVersion() };

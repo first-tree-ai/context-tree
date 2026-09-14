@@ -1,33 +1,44 @@
 import { spawn, spawnSync } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import type { CleanupSchedule } from "../../schemas.js";
 
+/** Pi built-in tools mirroring the Claude editing allowlist; Bash stays disabled. */
+const PI_CLEANUP_TOOLS = "read,edit,write,grep,find,ls";
+
 export function agentArguments(config: CleanupSchedule): string[] {
-  return config.agent === "codex"
-    ? [
-        "exec",
-        "--sandbox",
-        "workspace-write",
-        "-c",
-        'approval_policy="never"',
-        "-c",
-        'model_reasoning_effort="low"',
-        "--model",
-        config.model,
-        "--ephemeral",
-        "-",
-      ]
-    : [
-        "-p",
-        "--model",
-        config.model,
-        "--permission-mode",
-        "acceptEdits",
-        "--tools",
-        "Read,Edit,Write,Glob,Grep",
-        "--allowedTools",
-        "Read,Edit,Write,Glob,Grep",
-        "--no-session-persistence",
-      ];
+  if (config.agent === "codex") {
+    const args = [
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      'model_reasoning_effort="low"',
+    ];
+    if (config.model !== undefined) args.push("--model", config.model);
+    args.push("--ephemeral", "-");
+    return args;
+  }
+  if (config.agent === "pi") {
+    const args = ["-p", "--tools", PI_CLEANUP_TOOLS, "--no-session", "--no-extensions"];
+    // Without a recorded model, Pi uses its own configured default. Keeping the flag out means an
+    // unauthenticated hardcoded provider can never be selected on the user's behalf.
+    if (config.model !== undefined) args.push("--model", config.model);
+    return args;
+  }
+  const args = [
+    "-p",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep",
+    "--no-session-persistence",
+  ];
+  if (config.model !== undefined) args.push("--model", config.model);
+  return args;
 }
 export async function runAgent(
   config: CleanupSchedule,
@@ -35,13 +46,14 @@ export async function runAgent(
   prompt: string,
   signal: AbortSignal,
   timeoutMs = 15 * 60 * 1000,
+  output?: (source: "stdout" | "stderr", text: string) => void,
 ): Promise<void> {
   if (signal.aborted) throw new Error("Cleanup cancelled.");
   await new Promise<void>((resolve, reject) => {
     const child = spawn(config.agentPath, agentArguments(config), {
       cwd: worktree,
       env: { ...process.env, PATH: config.searchPath, CONTEXT_TREE_CLEANUP: "1" },
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     let failure: string | undefined;
     let termination: Promise<void> | undefined;
@@ -61,6 +73,44 @@ export async function runAgent(
       for (const pid of descendants.reverse()) kill(pid, "SIGTERM");
       child.kill("SIGTERM");
     };
+    const promptLines = new Set(
+      prompt
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+    const flushers: Array<() => void> = [];
+    for (const source of ["stdout", "stderr"] as const) {
+      const decoder = new StringDecoder("utf8");
+      let pending = "";
+      let oversized = false;
+      const emit = (text: string): void => {
+        try {
+          output?.(source, promptLines.has(text.trim()) ? "[Prompt line suppressed]" : text);
+        } catch {
+          stop("Unable to store cleanup logs; worktree preserved.");
+        }
+      };
+      const consume = (text: string): void => {
+        for (const part of text.split(/(?<=\n)/u)) {
+          if (!oversized) pending += part;
+          if (pending.length > 16384) {
+            pending = "";
+            oversized = true;
+          }
+          if (part.endsWith("\n")) {
+            emit(oversized ? "[Oversized output line suppressed]" : pending.slice(0, -1));
+            pending = "";
+            oversized = false;
+          }
+        }
+      };
+      child[source].on("data", (chunk: Buffer) => consume(decoder.write(chunk)));
+      flushers.push(() => {
+        consume(decoder.end());
+        if (oversized || pending) emit(oversized ? "[Oversized output line suppressed]" : pending);
+      });
+    }
     const abort = (): void => stop("Cleanup cancelled.");
     const timer = setTimeout(() => stop("Cleanup agent exceeded its 15-minute timeout."), timeoutMs);
     signal.addEventListener("abort", abort, { once: true });
@@ -70,6 +120,7 @@ export async function runAgent(
       failure = "Unable to launch cleanup agent.";
     });
     child.on("close", async (code) => {
+      for (const flush of flushers) flush();
       clearTimeout(timer);
       signal.removeEventListener("abort", abort);
       await termination;

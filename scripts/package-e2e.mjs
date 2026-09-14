@@ -186,6 +186,11 @@ try {
     false,
     "postinstall must not create an absent host directory",
   );
+  assert.equal(
+    existsSync(join(temporaryRoot, ".agents")),
+    false,
+    "postinstall must not create an absent host directory",
+  );
 
   const foreignSkill = join(temporaryRoot, ".claude", "skills", "foreign-skill");
   mkdirSync(foreignSkill);
@@ -202,6 +207,7 @@ try {
   assert.equal(existsSync(foreignSkill), true, "uninstall must preserve foreign skills");
   assert.equal(existsSync(contextTreeState), true, "uninstall must preserve Context Tree state");
   assert.equal(existsSync(join(temporaryRoot, ".codex")), false, "uninstall must not create absent hosts");
+  assert.equal(existsSync(join(temporaryRoot, ".agents")), false, "uninstall must not create absent hosts");
 
   const cliPath = join(consumerRoot, "node_modules/.bin/context-tree");
 
@@ -248,14 +254,20 @@ try {
     ["codex"],
   );
   for (const skill of SKILLS) {
-    requirePackagedFile(consumerRoot, `.codex/skills/${skill}/SKILL.md`);
-    requirePackagedFile(consumerRoot, `.codex/skills/${skill}/agents/openai.yaml`);
+    requirePackagedFile(consumerRoot, `.agents/skills/${skill}/SKILL.md`);
+    requirePackagedFile(consumerRoot, `.agents/skills/${skill}/agents/openai.yaml`);
   }
 
-  requirePackagedFile(consumerRoot, ".codex/skills/context-tree-cleanup/references/editorial.md");
+  requirePackagedFile(consumerRoot, ".agents/skills/context-tree-cleanup/references/editorial.md");
+  assert.equal(
+    existsSync(join(consumerRoot, ".codex")),
+    false,
+    "a codex install must use the shared .agents directory, not .codex",
+  );
   const cleanupHelp = runCli(cliPath, consumerRoot, ["cleanup", "--help"]);
   assert.equal(cleanupHelp.status, 0);
-  for (const operation of ["schedule", "run", "status", "remove"]) assert.ok(cleanupHelp.stdout.includes(operation));
+  for (const operation of ["schedule", "run", "status", "remove", "logs"])
+    assert.ok(cleanupHelp.stdout.includes(operation));
 
   const validVerify = runCli(cliPath, consumerRoot, ["verify", "--tree-path", treePath, "--json"]);
   assert.equal(validVerify.status, 0);

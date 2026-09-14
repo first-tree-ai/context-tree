@@ -19,11 +19,11 @@ runs cleanup immediately. Use the installed CLI on PATH; if missing, report
    desktop task using its existing controls before creating the CLI schedule.
    The CLI cannot discover or cancel old desktop tasks. Do not create a duplicate
    while cancellation is unconfirmed.
-2. Select the requested installed agent, or the current host's CLI: `codex` or
-   `claude`. Use the requested model if supplied; otherwise keep CLI defaults.
-   Use a positive whole-minute cadence such as `30m`, `1h`, or `1d`; default to
-   every hour. Do not silently approximate unsupported schedules.
-3. Run `context-tree cleanup schedule --project-path "<absolute-project-path>" --agent <codex-or-claude> --every <duration> --json`.
+2. Select the requested installed agent, or the current host's CLI: `codex`,
+   `claude`, or `pi`. Use the requested model if supplied; otherwise keep CLI
+   defaults. Use a positive whole-minute cadence such as `30m`, `1h`, or `1d`;
+   default to every hour. Do not silently approximate unsupported schedules.
+3. Run `context-tree cleanup schedule --project-path "<absolute-project-path>" --agent <codex-claude-or-pi> --every <duration> --json`.
    Add `--model <model>` only for an explicit override. Quote real arguments
    safely. Connection or scheduler errors stop without setup or repair.
 4. Read back `context-tree cleanup status --project-path "<absolute-project-path>" --json`.
@@ -43,8 +43,10 @@ activity, unchanged commits, and overlap. Do not run it merely when scheduling.
 macOS uses user LaunchAgents; Linux uses systemd user timers/services. No desktop
 app, daemon, root installation, or Linux lingering is required. The machine must
 be awake and the user scheduler available; timing follows the native scheduler.
-Defaults are `gpt-5.6-luna` with low reasoning effort or `claude-haiku-4-5`, using
-existing CLI authentication. Do not change credentials, bypass permissions,
+Defaults are `gpt-5.6-luna` with low reasoning effort for Codex and
+`claude-haiku-4-5` for Claude, using existing CLI authentication. Pi uses its
+configured default model. Pi runs ephemeral with extensions disabled; `--model`
+may also name a `provider/model`. Do not change credentials, bypass permissions,
 silently switch models, or retry publication.
 
 Initial scheduling starts a 24-hour activity window. Successful ordinary create,
@@ -54,3 +56,19 @@ activity skips before network or model work; unchanged successfully cleaned
 commits skip the model. Failures preserve worktrees and success checkpoints.
 The runner owns preparation, verification, and publication; the fresh agent
 only edits using the cleanup skill's shared required editorial resource.
+
+Inspect runner history with `context-tree cleanup logs --project-path <project> --json`.
+Use `--list` for newest-first summaries or `--run <run-id>` for a particular run;
+these selectors are mutually exclusive. The versioned result includes summaries
+and the selected run's labeled runner/stdout/stderr events. Reads are snapshots,
+do not refresh activity, and do not query the scheduler. Agent output varies by
+CLI. Missing terminal outcomes mean incomplete runs. Outcomes include `runId`
+when history was recorded.
+
+History is local, shared across connected projects, and survives schedule removal.
+Retention is 50 runs (oldest completed runs are pruned; incomplete entries are
+protected), with 5 MiB of serialized output per run and an explicit truncation
+flag. Final outcome metadata survives output truncation. Credentials and terminal
+controls are sanitized; oversized lines are suppressed. Only runner attempts are
+recorded, including inactivity and unchanged skips. Old transcripts and cleanup
+performed directly through a host skill are unavailable.

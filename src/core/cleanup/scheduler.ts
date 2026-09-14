@@ -114,7 +114,13 @@ export function nativeScheduler(
     remove(config): void {
       const name = label(config);
       if (platform === "darwin") {
-        command(["bootout", `${domain}/${name}`], true);
+        try {
+          command(["bootout", `${domain}/${name}`], true);
+        } catch (error) {
+          // launchctl can report a generic bootout error for an absent job.
+          // Confirm absence before treating the removal as successful.
+          if (status(config).registered) throw error;
+        }
         const launcherDir = launcherDirectory(config);
         const launcher = join(launcherDir, "context-tree-cleanup");
         const entry = lstatSync(launcher, { throwIfNoEntry: false });

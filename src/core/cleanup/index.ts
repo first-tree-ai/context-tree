@@ -13,6 +13,8 @@ import {
 import { delimiter, join, resolve } from "node:path";
 import { z } from "zod";
 import {
+  type CleanupAgent,
+  type CleanupLogsResult,
   type CleanupOutcome,
   type CleanupResult,
   type CleanupSchedule,
@@ -32,6 +34,7 @@ import { syncProject } from "../sync.js";
 import { verifyTree } from "../verify.js";
 import { finishContextWrite, prepareContextWrite } from "../write.js";
 import { runAgent } from "./agent.js";
+import { CleanupHistory, readCleanupHistory } from "./history.js";
 import { type CleanupScheduler, nativeScheduler } from "./scheduler.js";
 import {
   activity,
@@ -44,6 +47,12 @@ import {
   statePath,
   treeIdentity,
 } from "./store.js";
+
+/** Low-cost editorial default for agents that need an explicit model; `--model` overrides it. */
+const DEFAULT_CLEANUP_MODEL: Partial<Record<CleanupAgent, string>> = {
+  claude: "claude-haiku-4-5",
+  codex: "gpt-5.6-luna",
+};
 
 export function parseCleanupInterval(value = "1h"): number {
   const match = /^(\d+)(m|h|d)$/u.exec(value);
@@ -76,6 +85,12 @@ function findSchedule(project: string): CleanupSchedule | undefined {
   if (owned[0]) return owned[0];
   const connection = findConnectionRecord(canonical);
   return connection ? schedules().find((config) => config.id === identityId(treeIdentity(connection.tree))) : undefined;
+}
+export function cleanupLogs(project: string, options: { list?: boolean; run?: string } = {}): CleanupLogsResult {
+  const connection = findConnectionRecord(canonicalProjectRoot(project));
+  const id = connection ? identityId(treeIdentity(connection.tree)) : findSchedule(project)?.id;
+  if (!id) throw new Error("No Context Tree connection or cleanup schedule exists for this project.");
+  return readCleanupHistory(id, options);
 }
 export function cleanupStatus(project: string, scheduler: CleanupScheduler = nativeScheduler()): CleanupResult {
   const config = findSchedule(project);
@@ -138,7 +153,7 @@ function scheduleCleanupUnlocked(
     projectPath: connection.projectPath,
     identity,
     agent,
-    model: options.model ?? (agent === "codex" ? "gpt-5.6-luna" : "claude-haiku-4-5"),
+    model: options.model ?? DEFAULT_CLEANUP_MODEL[agent],
     everyMinutes: parseCleanupInterval(options.every),
     nodePath: realpathSync(process.execPath),
     cliPath: resolvePackagedResource("dist", "cli", "index.mjs"),
@@ -284,14 +299,28 @@ export async function runCleanup(
   process.on("SIGINT", cancel);
   let worktreePath: string | undefined;
   let publishing = false;
+  let history: CleanupHistory | undefined;
   const record = (outcome: CleanupOutcome["outcome"], extra: Partial<CleanupOutcome> = {}): CleanupOutcome => {
     const value = cleanupOutcomeSchema.parse({
       at: Date.now(),
+      runId: history?.runId,
       outcome,
       ...(worktreePath ? { worktreePath } : {}),
       ...extra,
     });
     atomicState(statePath(config.id, "latest"), value);
+    if (outcome !== "running") {
+      try {
+        try {
+          history?.event("runner", `${outcome}${value.message ? `: ${value.message}` : ""}`);
+        } finally {
+          history?.finish(value);
+        }
+      } catch {
+        if (!["failed", "cancelled", "publication-uncertain"].includes(outcome))
+          throw new Error("Unable to store cleanup logs; worktree preserved.");
+      }
+    } else history?.event("runner", value.message ?? "Agent execution started.");
     return value;
   };
   const check = (): void => {
@@ -307,13 +336,17 @@ export async function runCleanup(
     return tree;
   };
   try {
+    history = new CleanupHistory(config);
+    history.event("runner", "Preparing cleanup.");
     check();
     const lastActivity = activity(config.id);
     if (lastActivity === null || Date.now() - lastActivity > 86400000) return record("inactive");
     identityCheck();
+    record("running", { message: "Synchronizing Context Tree." });
     const synced = (dependencies.sync ?? syncProject)(config.projectPath);
     check();
     if (readState(statePath(config.id, "success")) === synced.sha) return record("unchanged", { sha: synced.sha });
+    record("running", { message: "Preparing cleanup worktree." });
     worktreePath = (dependencies.prepare ?? prepareContextWrite)(config.projectPath).worktreePath;
     check();
     const head = git(worktreePath, ["rev-parse", "HEAD"]);
@@ -336,10 +369,14 @@ export async function runCleanup(
         worktreePath,
         `${editorial}\n\nYou are the editorial worker in an already prepared isolated worktree. Read all normal and member Markdown content directly using file tools. Edit and check references only. Do not invoke Context Tree lifecycle commands, stage, commit, change Git configuration, or publish. Do not follow other skills that request those operations. Report unresolved issues outside tree files.`,
         controller.signal,
+        undefined,
+        (source, text) => history?.event(source, text),
       );
     } finally {
       clearInterval(monitor);
     }
+    history.assertHealthy();
+    history.event("runner", "Verifying cleanup edits.");
     check();
     if (git(worktreePath, ["rev-parse", "HEAD"]) !== head) throw new Error("Cleanup agent committed changes.");
     const changed = inspectEdits(worktreePath, before);
@@ -357,7 +394,6 @@ export async function runCleanup(
       worktreePath,
       message: "Clean up Context Tree content",
     });
-    publishing = false;
     atomicState(statePath(config.id, "success"), finished.sha);
     return record("published", { sha: finished.sha });
   } catch (error) {
