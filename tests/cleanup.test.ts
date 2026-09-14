@@ -49,6 +49,7 @@ beforeEach(() => {
   mkdirSync(bin);
   writeFileSync(join(bin, "codex"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
   writeFileSync(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
+  writeFileSync(join(bin, "pi"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
   vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
   project = join(home, "project");
   mkdirSync(project);
@@ -94,6 +95,28 @@ describe("cleanup scheduling and activity", () => {
     expect(cleanupStatus(project, scheduler).registered).toBe(true);
     expect(removeCleanup(project, scheduler).registered).toBe(false);
     expect(removeCleanup(project, scheduler).registered).toBe(false);
+  });
+  it("keeps a pi schedule model-agnostic and resolves the pi binary", () => {
+    const result = scheduleCleanup({ projectPath: project, agent: "pi" }, scheduler);
+    expect(result.schedule?.agent).toBe("pi");
+    expect(result.schedule?.model).toBeUndefined();
+    expect(result.schedule?.agentPath).toBe(join(home, "bin", "pi"));
+    expect(agentArguments({ ...config, agent: "pi", model: undefined })).toEqual([
+      "-p",
+      "--tools",
+      "read,edit,write,grep,find,ls",
+      "--no-session",
+      "--no-extensions",
+    ]);
+    expect(agentArguments({ ...config, agent: "pi", model: "anthropic/claude-haiku-4-5" })).toEqual([
+      "-p",
+      "--tools",
+      "read,edit,write,grep,find,ls",
+      "--no-session",
+      "--no-extensions",
+      "--model",
+      "anthropic/claude-haiku-4-5",
+    ]);
   });
   it("validates cadence", () => {
     expect(parseCleanupInterval()).toBe(60);

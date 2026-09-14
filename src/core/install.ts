@@ -13,10 +13,16 @@ import {
 } from "../schemas.js";
 import { readPackageVersion, resolvePackagedResource } from "./internal/packaged-resource.js";
 
-/** Per-host configuration directory, relative to the home directory or to a project root. */
+/**
+ * Per-host configuration directory, relative to the home directory or to a project root.
+ *
+ * Codex and Pi both read the cross-agent `.agents/skills` location, so they share one
+ * destination: the directory is written and removed once and reported for each host.
+ */
 const HOST_CONFIG_DIRECTORY: Record<SkillHost, string> = {
   claude: ".claude",
-  codex: ".codex",
+  codex: ".agents",
+  pi: ".agents",
 };
 
 /** Every supported host keeps user skills in the same subdirectory of its configuration directory. */
@@ -140,6 +146,7 @@ export function installSkills(options: InstallSkillsOptions = {}): InstallSkills
 
   const installed: SkillInstallation[] = [];
   const skipped: SkillInstallSkip[] = [];
+  const written = new Set<string>();
 
   for (const host of hosts) {
     const resolved = hostDestination(host, root, projectRoot !== undefined);
@@ -147,12 +154,16 @@ export function installSkills(options: InstallSkillsOptions = {}): InstallSkills
       skipped.push({ host, reason: resolved.reason });
       continue;
     }
-    for (const skill of skills) {
-      const target = join(resolved.destination, skill);
-      if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
-        rmSync(target, { force: true, recursive: true });
+    // Codex and Pi share one directory; writing once keeps the install idempotent per directory.
+    if (!written.has(resolved.destination)) {
+      for (const skill of skills) {
+        const target = join(resolved.destination, skill);
+        if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+          rmSync(target, { force: true, recursive: true });
+        }
+        copyRealTree(join(skillsRoot, skill), target);
       }
-      copyRealTree(join(skillsRoot, skill), target);
+      written.add(resolved.destination);
     }
     installed.push({ host, path: resolved.destination, skills });
   }
@@ -166,6 +177,7 @@ export function uninstallSkills(options: UninstallSkillsOptions = {}): Uninstall
   const root = options.projectPath === undefined ? realHome() : resolve(options.projectPath);
   const removed: SkillInstallation[] = [];
   const skipped: SkillInstallSkip[] = [];
+  const removedByDestination = new Map<string, string[]>();
 
   for (const host of hosts) {
     const resolved = hostSkillsRoot(host, root);
@@ -174,20 +186,26 @@ export function uninstallSkills(options: UninstallSkillsOptions = {}): Uninstall
       continue;
     }
 
-    const skills: string[] = [];
-    for (const entry of readdirSync(resolved.destination, { withFileTypes: true })) {
-      if (!entry.name.startsWith(OWNED_SKILL_PREFIX)) continue;
-      const target = join(resolved.destination, entry.name);
-      const targetEntry = lstatSync(target, { throwIfNoEntry: false });
-      if (targetEntry === undefined) continue;
-      if (targetEntry.isSymbolicLink() || !targetEntry.isDirectory()) {
-        skipped.push({ host, reason: `${target} is not a real directory.` });
-        continue;
+    // Codex and Pi share one directory; remove it once and report the same skills for each host.
+    let skills = removedByDestination.get(resolved.destination);
+    if (skills === undefined) {
+      skills = [];
+      for (const entry of readdirSync(resolved.destination, { withFileTypes: true })) {
+        if (!entry.name.startsWith(OWNED_SKILL_PREFIX)) continue;
+        const target = join(resolved.destination, entry.name);
+        const targetEntry = lstatSync(target, { throwIfNoEntry: false });
+        if (targetEntry === undefined) continue;
+        if (targetEntry.isSymbolicLink() || !targetEntry.isDirectory()) {
+          skipped.push({ host, reason: `${target} is not a real directory.` });
+          continue;
+        }
+        rmSync(target, { force: true, recursive: true });
+        skills.push(entry.name);
       }
-      rmSync(target, { force: true, recursive: true });
-      skills.push(entry.name);
+      skills.sort();
+      removedByDestination.set(resolved.destination, skills);
     }
-    removed.push({ host, path: resolved.destination, skills: skills.sort() });
+    removed.push({ host, path: resolved.destination, skills });
   }
 
   return { removed, schemaVersion: SCHEMA_VERSION, skipped, version: readPackageVersion() };

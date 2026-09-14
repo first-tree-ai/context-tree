@@ -50,7 +50,7 @@ const skipped = Array.isArray(payload?.skipped) ? payload.skipped : [];
 
 if (installed.length === 0) {
   process.stdout.write(
-    "Context Tree: no agent directory found. Install Claude Code or Codex, then run `context-tree install`.\n",
+    "Context Tree: no agent directory found. Install Claude Code, Codex, or Pi, then run `context-tree install`.\n",
   );
   process.exit(0);
 }

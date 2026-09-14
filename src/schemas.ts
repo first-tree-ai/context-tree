@@ -144,7 +144,7 @@ export const contextContentClassCountsSchema = z
   .strict();
 export type ContextContentClassCounts = z.infer<typeof contextContentClassCountsSchema>;
 
-export const SKILL_HOSTS = ["claude", "codex"] as const;
+export const SKILL_HOSTS = ["claude", "codex", "pi"] as const;
 export const skillHostSchema = z.enum(SKILL_HOSTS);
 export type SkillHost = z.infer<typeof skillHostSchema>;
 
@@ -354,14 +354,16 @@ export const contextTreeCliErrorEnvelopeSchema = z
   .strict();
 export type ContextTreeCliErrorEnvelope = z.infer<typeof contextTreeCliErrorEnvelopeSchema>;
 
-export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude")]);
+export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude"), z.literal("pi")]);
+export type CleanupAgent = z.infer<typeof cleanupAgentSchema>;
 export const cleanupScheduleSchema = z
   .object({
     id: z.string().regex(/^[a-f0-9]{64}$/u),
     projectPath: z.string().refine(isAbsolute),
     identity: z.string(),
     agent: cleanupAgentSchema,
-    model: z.string().min(1),
+    // Optional: when absent the agent uses its own configured default model (Pi).
+    model: z.string().min(1).optional(),
     everyMinutes: z.number().int().positive().max(525600),
     nodePath: z.string().refine(isAbsolute),
     cliPath: z.string().refine(isAbsolute),

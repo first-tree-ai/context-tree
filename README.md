@@ -28,7 +28,8 @@ skill directory of every agent you already have:
 
 ```text
 ✓ claude  → ~/.claude/skills/   (8 skills)
-✓ codex   → ~/.codex/skills/    (8 skills)
+✓ codex   → ~/.agents/skills/   (8 skills)
+✓ pi      → ~/.agents/skills/   (8 skills)
 ```
 
 Restart your agent so it discovers them, then try asking:
@@ -43,7 +44,7 @@ new agent, or scope it to one project:
 ```bash
 context-tree install                       # every agent you have
 context-tree install --host codex          # one agent
-context-tree install --project .           # ./.claude/skills and ./.codex/skills
+context-tree install --project .           # ./.claude/skills and ./.agents/skills
 context-tree uninstall                     # remove context-tree-* skills
 ```
 
@@ -51,7 +52,9 @@ Install and uninstall own exactly the `context-tree-*` skill directories.
 Install never touches skills it does not own or creates a configuration directory
 for an agent that is not present; uninstall removes every owned-prefix directory
 and nothing else. Adding support for another agent is one entry in the host table
-in `src/core/install.ts`.
+in `src/core/install.ts`. Codex and Pi share the cross-agent `.agents/skills`
+location, so that directory is written and removed once and reported for both
+hosts.
 
 `create` and `connect` leave project instructions unchanged. When a project has
 a regular `AGENTS.md` and no `CLAUDE.md` entry, they best-effort create a
@@ -190,6 +193,9 @@ $context-tree-schedule-cleanup every 2 hours
 
 # Claude Code
 /context-tree-schedule-cleanup every 2 hours
+
+# Pi
+/skill:context-tree-schedule-cleanup every 2 hours
 ```
 
 The CLI manages one schedule per tree on this machine:
@@ -197,6 +203,7 @@ The CLI manages one schedule per tree on this machine:
 ```bash
 context-tree cleanup schedule --project-path /absolute/project --agent codex
 context-tree cleanup schedule --project-path /absolute/project --agent claude --every 2h
+context-tree cleanup schedule --project-path /absolute/project --agent pi --model anthropic/claude-haiku-4-5
 context-tree cleanup status --project-path /absolute/project
 context-tree cleanup run --project-path /absolute/project
 context-tree cleanup remove --project-path /absolute/project
@@ -218,10 +225,13 @@ installation, daemon, or Linux lingering is needed. Cancel any previously create
 Codex desktop task or Claude Desktop routine before replacing it: the CLI cannot
 inspect or remove those tasks. Keep one designated cleaner per tree across machines.
 
-Agents use existing CLI authentication. Defaults are `gpt-5.6-luna` with low
-reasoning effort and `claude-haiku-4-5`; `--model` selects an explicit override.
-Codex uses workspace-write sandboxing and Claude uses file-editing permissions
-with a restricted tool list. Permission and authentication failures stop the run;
+Agents use existing CLI authentication. Codex defaults to `gpt-5.6-luna` with
+low reasoning effort and Claude to `claude-haiku-4-5`; Pi uses its configured
+default model. `--model` selects an explicit override (Pi also accepts a
+`provider/model` value). Codex uses workspace-write sandboxing, Claude uses
+file-editing permissions, and Pi runs ephemeral with extensions disabled, all
+with a restricted editing tool list and no shell. Permission and authentication
+failures stop the run;
 models are never silently substituted. See [Codex noninteractive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 and the [Claude CLI reference](https://code.claude.com/docs/en/cli-reference).
 

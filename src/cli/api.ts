@@ -208,7 +208,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   program
     .command("install")
     .description("Install the packaged Context Tree skills into each agent's skill directory.")
-    .option("--host <host>", "restrict to one host: claude, codex, or all", "all")
+    .option("--host <host>", "restrict to one host: claude, codex, pi, or all", "all")
     .option("--project <path>", "install below this project root instead of the home directory")
     .action((options: { host: string; project?: string }) => {
       const request: InstallSkillsOptions = {};
@@ -220,7 +220,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
   program
     .command("uninstall")
     .description("Remove packaged Context Tree skills from each agent's skill directory.")
-    .option("--host <host>", "restrict to one host: claude, codex, or all", "all")
+    .option("--host <host>", "restrict to one host: claude, codex, pi, or all", "all")
     .option("--project <path>", "remove below this project root instead of the home directory")
     .action((options: { host: string; project?: string }) => {
       const request: UninstallSkillsOptions = {};
@@ -237,7 +237,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       .option(...jsonOption);
     if (operation === "schedule")
       command
-        .requiredOption("--agent <agent>", "codex or claude")
+        .requiredOption("--agent <agent>", "codex, claude, or pi")
         .option("--model <model>", "explicit model override")
         .option("--every <duration>", "positive whole-minute interval, e.g. 30m or 1h", "1h");
     if (operation === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
@@ -278,7 +278,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
             `  Registered: ${value.registered}; running: ${value.running}`,
             `  Project: ${config.projectPath}`,
             `  Every: ${config.everyMinutes} minutes`,
-            `  Agent: ${config.agent}; model: ${config.model}`,
+            `  Agent: ${config.agent}; model: ${config.model ?? "agent default"}`,
             `  Last activity: ${value.lastActivity === null ? "missing" : new Date(value.lastActivity).toISOString()}`,
             `  Inactivity: ${value.inactive ? "cleanup prevented (no activity within 24 hours)" : "cleanup permitted"}`,
             `  Latest: ${value.latest?.outcome ?? "none"}${value.latest?.message ? ` — ${value.latest.message}` : ""}`,

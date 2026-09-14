@@ -53,11 +53,34 @@ describe("skill installation", () => {
     }
   });
 
-  it("copies the Codex interface metadata alongside each skill", () => {
+  it("copies the Codex interface metadata alongside each skill into the shared .agents directory", () => {
     const root = workspace();
     installSkills({ hosts: ["codex"], projectPath: root });
     for (const skill of SKILLS) {
-      expect(existsSync(join(root, ".codex", "skills", skill, "agents", "openai.yaml")), skill).toBe(true);
+      expect(existsSync(join(root, ".agents", "skills", skill, "agents", "openai.yaml")), skill).toBe(true);
+    }
+    expect(existsSync(join(root, ".codex"))).toBe(false);
+  });
+
+  it("installs the shared .agents directory once for codex and pi", () => {
+    const root = workspace();
+    const result = installSkills({ hosts: ["codex", "pi"], projectPath: root });
+    expect(result.installed.map((entry) => entry.host)).toEqual(["codex", "pi"]);
+    expect(result.installed.map((entry) => entry.path)).toEqual([
+      join(root, ".agents", "skills"),
+      join(root, ".agents", "skills"),
+    ]);
+    for (const skill of SKILLS) {
+      expect(existsSync(join(root, ".agents", "skills", skill, "SKILL.md")), skill).toBe(true);
+    }
+  });
+
+  it("installs Pi skills into the cross-agent .agents directory", () => {
+    const root = workspace();
+    const result = installSkills({ hosts: ["pi"], projectPath: root });
+    expect(result.installed).toEqual([{ host: "pi", path: join(root, ".agents", "skills"), skills: SKILLS }]);
+    for (const skill of SKILLS) {
+      expect(existsSync(join(root, ".agents", "skills", skill, "SKILL.md")), skill).toBe(true);
     }
   });
 
@@ -95,7 +118,7 @@ describe("skill installation", () => {
   it("defaults to every host for a project install", () => {
     const root = workspace();
     const result = installSkills({ projectPath: root });
-    expect(result.installed.map((entry) => entry.host).sort()).toEqual(["claude", "codex"]);
+    expect(result.installed.map((entry) => entry.host).sort()).toEqual(["claude", "codex", "pi"]);
   });
 
   it("refuses to install through a symlinked skill directory", () => {
@@ -156,6 +179,19 @@ describe("skill removal", () => {
 
     expect(() => uninstallSkills({ hosts: ["claude"], projectPath: root })).not.toThrow();
     expect(uninstallSkills({ hosts: ["claude"], projectPath: root }).removed[0]?.skills).toEqual([]);
+  });
+
+  it("removes the shared .agents directory once for codex and pi", () => {
+    const root = workspace();
+    installSkills({ hosts: ["codex", "pi"], projectPath: root });
+
+    const result = uninstallSkills({ hosts: ["codex", "pi"], projectPath: root });
+
+    expect(result.removed).toEqual([
+      { host: "codex", path: join(root, ".agents", "skills"), skills: SKILLS },
+      { host: "pi", path: join(root, ".agents", "skills"), skills: SKILLS },
+    ]);
+    for (const skill of SKILLS) expect(existsSync(join(root, ".agents", "skills", skill))).toBe(false);
   });
 
   it("leaves everything outside the host skills directory alone", () => {

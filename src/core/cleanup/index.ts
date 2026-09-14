@@ -13,6 +13,7 @@ import {
 import { delimiter, join, resolve } from "node:path";
 import { z } from "zod";
 import {
+  type CleanupAgent,
   type CleanupOutcome,
   type CleanupResult,
   type CleanupSchedule,
@@ -44,6 +45,12 @@ import {
   statePath,
   treeIdentity,
 } from "./store.js";
+
+/** Low-cost editorial default for agents that need an explicit model; `--model` overrides it. */
+const DEFAULT_CLEANUP_MODEL: Partial<Record<CleanupAgent, string>> = {
+  claude: "claude-haiku-4-5",
+  codex: "gpt-5.6-luna",
+};
 
 export function parseCleanupInterval(value = "1h"): number {
   const match = /^(\d+)(m|h|d)$/u.exec(value);
@@ -138,7 +145,7 @@ function scheduleCleanupUnlocked(
     projectPath: connection.projectPath,
     identity,
     agent,
-    model: options.model ?? (agent === "codex" ? "gpt-5.6-luna" : "claude-haiku-4-5"),
+    model: options.model ?? DEFAULT_CLEANUP_MODEL[agent],
     everyMinutes: parseCleanupInterval(options.every),
     nodePath: realpathSync(process.execPath),
     cliPath: resolvePackagedResource("dist", "cli", "index.mjs"),

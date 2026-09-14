@@ -1,33 +1,43 @@
 import { spawn, spawnSync } from "node:child_process";
 import type { CleanupSchedule } from "../../schemas.js";
 
+/** Pi built-in tools mirroring the Claude editing allowlist; Bash stays disabled. */
+const PI_CLEANUP_TOOLS = "read,edit,write,grep,find,ls";
+
 export function agentArguments(config: CleanupSchedule): string[] {
-  return config.agent === "codex"
-    ? [
-        "exec",
-        "--sandbox",
-        "workspace-write",
-        "-c",
-        'approval_policy="never"',
-        "-c",
-        'model_reasoning_effort="low"',
-        "--model",
-        config.model,
-        "--ephemeral",
-        "-",
-      ]
-    : [
-        "-p",
-        "--model",
-        config.model,
-        "--permission-mode",
-        "acceptEdits",
-        "--tools",
-        "Read,Edit,Write,Glob,Grep",
-        "--allowedTools",
-        "Read,Edit,Write,Glob,Grep",
-        "--no-session-persistence",
-      ];
+  if (config.agent === "codex") {
+    const args = [
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      'model_reasoning_effort="low"',
+    ];
+    if (config.model !== undefined) args.push("--model", config.model);
+    args.push("--ephemeral", "-");
+    return args;
+  }
+  if (config.agent === "pi") {
+    const args = ["-p", "--tools", PI_CLEANUP_TOOLS, "--no-session", "--no-extensions"];
+    // Without a recorded model, Pi uses its own configured default. Keeping the flag out means an
+    // unauthenticated hardcoded provider can never be selected on the user's behalf.
+    if (config.model !== undefined) args.push("--model", config.model);
+    return args;
+  }
+  const args = [
+    "-p",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep",
+    "--no-session-persistence",
+  ];
+  if (config.model !== undefined) args.push("--model", config.model);
+  return args;
 }
 export async function runAgent(
   config: CleanupSchedule,

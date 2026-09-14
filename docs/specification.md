@@ -217,10 +217,10 @@ remains a separately authorized workflow and does not invoke setup.
 ## Distribution and skills
 
 `install` copies the packaged `skills/` directory into each host's skill
-directory: `~/.claude/skills` and `~/.codex/skills`, or the same paths below a
-project root with `--project`. A global `npm install` runs it through
-`postinstall`, so the skills always ship from the same tarball as the CLI that
-installs them and cannot drift from it.
+directory: `~/.claude/skills`, and `~/.agents/skills` for Codex and Pi, or the same
+paths below a project root with `--project`. A global `npm install` runs it
+through `postinstall`, so the skills always ship from the same tarball as the CLI
+that installs them and cannot drift from it.
 
 `postinstall` writes only for a global install (`npm_config_global`). Adding the
 package as a local dependency prints the `context-tree install` command instead,
@@ -232,7 +232,9 @@ A home install only targets hosts whose configuration directory already exists,
 and reports the rest under `skipped`; it never creates a directory for an absent
 agent. Installation refuses symlinked or non-directory path segments, writes
 skill files with mode `0644`, replaces only `context-tree-*` directories, and
-never modifies skills the package does not own.
+never modifies skills the package does not own. Codex and Pi share
+`.agents/skills`, so that directory is written once and reported for each host;
+no host ever installs to `.codex/skills`.
 
 `create` (including reuse) and `connect` never write the project's `AGENTS.md`.
 If it is a regular file and there is no `CLAUDE.md` entry, they best-effort create

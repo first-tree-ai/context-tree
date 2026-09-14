@@ -19,11 +19,11 @@ runs cleanup immediately. Use the installed CLI on PATH; if missing, report
    desktop task using its existing controls before creating the CLI schedule.
    The CLI cannot discover or cancel old desktop tasks. Do not create a duplicate
    while cancellation is unconfirmed.
-2. Select the requested installed agent, or the current host's CLI: `codex` or
-   `claude`. Use the requested model if supplied; otherwise keep CLI defaults.
-   Use a positive whole-minute cadence such as `30m`, `1h`, or `1d`; default to
-   every hour. Do not silently approximate unsupported schedules.
-3. Run `context-tree cleanup schedule --project-path "<absolute-project-path>" --agent <codex-or-claude> --every <duration> --json`.
+2. Select the requested installed agent, or the current host's CLI: `codex`,
+   `claude`, or `pi`. Use the requested model if supplied; otherwise keep CLI
+   defaults. Use a positive whole-minute cadence such as `30m`, `1h`, or `1d`;
+   default to every hour. Do not silently approximate unsupported schedules.
+3. Run `context-tree cleanup schedule --project-path "<absolute-project-path>" --agent <codex-claude-or-pi> --every <duration> --json`.
    Add `--model <model>` only for an explicit override. Quote real arguments
    safely. Connection or scheduler errors stop without setup or repair.
 4. Read back `context-tree cleanup status --project-path "<absolute-project-path>" --json`.
@@ -43,8 +43,10 @@ activity, unchanged commits, and overlap. Do not run it merely when scheduling.
 macOS uses user LaunchAgents; Linux uses systemd user timers/services. No desktop
 app, daemon, root installation, or Linux lingering is required. The machine must
 be awake and the user scheduler available; timing follows the native scheduler.
-Defaults are `gpt-5.6-luna` with low reasoning effort or `claude-haiku-4-5`, using
-existing CLI authentication. Do not change credentials, bypass permissions,
+Defaults are `gpt-5.6-luna` with low reasoning effort for Codex and
+`claude-haiku-4-5` for Claude, using existing CLI authentication. Pi uses its
+configured default model. Pi runs ephemeral with extensions disabled; `--model`
+may also name a `provider/model`. Do not change credentials, bypass permissions,
 silently switch models, or retry publication.
 
 Initial scheduling starts a 24-hour activity window. Successful ordinary create,
