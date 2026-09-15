@@ -98,8 +98,10 @@ function hostDestination(
     // Home installs only target hosts the user already has, so installing the CLI never
     // creates a configuration directory for an agent that is not present.
     let hostRoot = root;
-    for (const segment of directories.config) {
-      hostRoot = join(hostRoot, segment);
+    const codexHome = host === "codex" ? process.env.CODEX_HOME?.trim() : undefined;
+    const configPaths = codexHome ? [resolve(codexHome)] : directories.config;
+    for (const segment of configPaths) {
+      hostRoot = resolve(hostRoot, segment);
       const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
       if (entry === undefined) {
         return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
