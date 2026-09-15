@@ -14,7 +14,13 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectProject, listManagedTrees, managedTreesRoot, resolveConnection } from "../src/core/connections.js";
+import {
+  connectProject,
+  disconnectProject,
+  listManagedTrees,
+  managedTreesRoot,
+  resolveConnection,
+} from "../src/core/connections.js";
 import { createProject } from "../src/core/create.js";
 import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
 import { readTree } from "../src/core/read.js";
@@ -83,7 +89,8 @@ function githubRunner(remote: string, log: string[][] = []): CommandRunner {
   return (command, args) => {
     log.push([command, ...args]);
     if (command === "git" && args.slice(-3).join(" ") === "remote get-url origin") {
-      return { status: 0, stderr: "", stdout: "https://github.com/acme/context.git\n" };
+      const actual = defaultRunner(command, args);
+      return actual.status === 0 ? { status: 0, stderr: "", stdout: "https://github.com/acme/context.git\n" } : actual;
     }
     if (command === "git" && args.includes("clone")) {
       return defaultRunner(
@@ -355,13 +362,19 @@ describe("GitHub lifecycle", () => {
     ).toThrow(/does not belong/u);
   });
 
-  it("fails repository-name collisions before switching the project connection", () => {
+  it("allocates a GitHub checkout without colliding with a local tree", () => {
     const currentProject = project();
     const local = createProject(currentProject);
     const occupied = join(managedTreesRoot(), "context");
     scaffoldTree({ name: "context", path: occupied });
-    expect(() => connectProject({ projectPath: currentProject, target: "acme/context" })).toThrow(/different tree/u);
-    expect(resolveConnection(currentProject).tree.path).toBe(local.treePath);
+    const { remote } = bareTree();
+    const runner = githubRunner(remote);
+    const connected = connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
+    expect(connected.tree.path).not.toBe(occupied);
+    expect(existsSync(local.treePath)).toBe(true);
+    expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner).tree.path).toBe(
+      connected.tree.path,
+    );
   });
 
   it("rejects unsafe origins and symlinked managed names", () => {
@@ -445,4 +458,38 @@ describe.each(["local", "github"] as const)("%s cleanup concurrency", (kind) => 
     expect(existsSync(cleanup.worktreePath)).toBe(true);
     expect(git(remote ?? treePath, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
   });
+});
+
+it("disconnects idempotently without validating or deleting the tree", () => {
+  const currentProject = project();
+  const created = createProject(currentProject);
+  writeFileSync(join(created.treePath, "NODE.md"), "invalid");
+  expect(disconnectProject(currentProject)).toEqual({ schemaVersion: 1, disconnected: true });
+  expect(disconnectProject(currentProject)).toEqual({ schemaVersion: 1, disconnected: false });
+  expect(existsSync(created.treePath)).toBe(true);
+  expect(() => resolveConnection(currentProject)).toThrow(expect.objectContaining({ code: "NO_CONNECTION" }));
+});
+
+it("keeps equal repository names under different owners separate", () => {
+  const { remote } = bareTree();
+  const runner: CommandRunner = (command, args) => {
+    if (command === "git" && args.includes("clone")) {
+      const url = args[args.length - 2];
+      const destination = args[args.length - 1];
+      const result = defaultRunner(
+        command,
+        args.map((arg) => (arg === url ? remote : arg)),
+      );
+      if (result.status === 0 && destination && url)
+        defaultRunner("git", ["-C", destination, "remote", "set-url", "origin", url]);
+      return result;
+    }
+    return defaultRunner(command, args);
+  };
+  const first = connectProject({ projectPath: project("one"), target: "one/memory" }, runner);
+  const second = connectProject({ projectPath: project("two"), target: "two/memory" }, runner);
+  expect(first.tree.path).not.toBe(second.tree.path);
+  expect(connectProject({ projectPath: project("three"), target: "one/memory" }, runner).tree.path).toBe(
+    first.tree.path,
+  );
 });

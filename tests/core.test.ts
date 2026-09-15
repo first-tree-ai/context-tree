@@ -536,18 +536,18 @@ describe("publish", () => {
   );
 
   it.each([
-    "gh auth login required",
-    "HTTP 403 permission denied",
-    "network unreachable",
-    "repository created but push failed",
-  ])("surfaces ambiguous publication failure %j as PUBLISH_INCOMPLETE", (stderr) => {
+    ["gh auth login required", "GITHUB_AUTH"],
+    ["HTTP 403 permission denied", "GITHUB_PERMISSION"],
+    ["network unreachable", "PUBLISH_INCOMPLETE"],
+    ["repository created but push failed", "PUBLISH_INCOMPLETE"],
+  ])("classifies publication failure %j as %s", (stderr, code) => {
     const { project } = connectedProject();
     const runner = scriptedRunner((command, args) => {
       if (command === "gh" && args[0] === "repo") return { status: 1, stderr };
       return undefined;
     });
     const failure = publishError(() => publishProject(project, { repository: "acme/context" }, runner));
-    expect(failure.code).toBe("PUBLISH_INCOMPLETE");
+    expect(failure.code).toBe(code);
   });
 
   it("refuses to publish an invalid tree", () => {

@@ -32,6 +32,7 @@ export const CLI_ERROR_CODES = {
   dirtyTree: "DIRTY_TREE",
   failed: "CONTEXT_TREE_FAILED",
   githubAuth: "GITHUB_AUTH",
+  githubPermission: "GITHUB_PERMISSION",
   invalidTree: "INVALID_TREE",
   noConnection: "NO_CONNECTION",
   publishIncomplete: "PUBLISH_INCOMPLETE",

@@ -8,7 +8,7 @@ import {
   runCleanup,
   scheduleCleanup,
 } from "../core/cleanup/index.js";
-import { connectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
+import { connectProject, disconnectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
 import { createProject } from "../core/create.js";
 import {
   type InstallSkillsOptions,
@@ -54,7 +54,17 @@ const defaultIo: ContextTreeCliIo = {
 };
 
 /** Commands that default to human-readable text and accept --json to restore JSON. */
-const TEXT_DEFAULT_COMMANDS = new Set(["create", "connect", "list", "resolve", "publish", "read", "verify", "cleanup"]);
+const TEXT_DEFAULT_COMMANDS = new Set([
+  "create",
+  "connect",
+  "disconnect",
+  "list",
+  "resolve",
+  "publish",
+  "read",
+  "verify",
+  "cleanup",
+]);
 
 function line(io: ContextTreeCliIo, value: string): void {
   io.stdout(`${value}\n`);
@@ -114,6 +124,17 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         return;
       }
       throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
+    });
+
+  program
+    .command("disconnect")
+    .description("Remove this project's connection, preserving its Context Tree and repository.")
+    .option("--project-path <path>", "project directory", ".")
+    .option(...jsonOption)
+    .action((options: { json: boolean; projectPath: string }) => {
+      emit(io, options.json, disconnectProject(resolve(io.cwd(), options.projectPath)), (result) =>
+        result.disconnected ? "Context Tree disconnected." : "No Context Tree connection.",
+      );
     });
 
   program

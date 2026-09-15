@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -28,7 +29,7 @@ import {
   treeNameSchema,
 } from "../schemas.js";
 import { ContextTreeError } from "./internal/errors.js";
-import { type CommandRunner, git, optionalGit } from "./internal/git.js";
+import { CommandError, type CommandRunner, git, optionalGit } from "./internal/git.js";
 import { canonicalGitHubRepositoryUrl, gitHubRepositoryFromOriginUrl } from "./internal/github-repository.js";
 import { canonicalProjectRoot } from "./internal/project.js";
 import { linkProjectInstructions } from "./internal/project-instructions.js";
@@ -289,7 +290,12 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
   const repository = githubRepositoryIdentitySchema.parse(options.target);
   const repositoryName = repository.split("/")[1];
   if (repositoryName === undefined) throw new Error("Repository must be OWNER/REPO.");
-  const name = managedName(repositoryName.toLowerCase());
+  // Reuse published or legacy checkouts only after verifying their full origin identity.
+  for (const candidate of listManagedTrees(runner).trees) {
+    if (candidate.tree.kind === "github" && sameRepository(candidate.tree.repository, repository))
+      return connect(candidate.tree);
+  }
+  const name = managedName(`github-${createHash("sha256").update(repository.toLowerCase()).digest("hex")}`);
   const destination = join(treesRoot, name);
 
   if (existsSync(destination)) {
@@ -315,6 +321,32 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
     return connect(tree);
   } catch (error) {
     rmSync(destination, { force: true, recursive: true });
+    if (
+      error instanceof CommandError &&
+      /gh auth login|not logged|authentication failed|http 401|bad credentials|could not read Username|terminal prompts disabled/iu.test(
+        error.stderr,
+      )
+    ) {
+      throw new ContextTreeError(
+        CLI_ERROR_CODES.githubAuth,
+        "GitHub authentication failed; run gh auth login before connecting.",
+      );
+    }
+    if (error instanceof CommandError && /http 403|permission denied|not authorized/iu.test(error.stderr)) {
+      throw new ContextTreeError(CLI_ERROR_CODES.githubPermission, "GitHub denied access to this repository.");
+    }
     throw error;
   }
+}
+
+/** Remove only the project record, even if its tree is no longer usable. */
+export function disconnectProject(
+  projectPath: string,
+  runner?: CommandRunner,
+): { schemaVersion: 1; disconnected: boolean } {
+  const canonical = canonicalProjectRoot(projectPath, runner);
+  const stored = loadConnections(false);
+  const remaining = stored.connections.filter((connection) => connection.projectPath !== canonical);
+  if (remaining.length !== stored.connections.length) saveConnections({ ...stored, connections: remaining });
+  return { schemaVersion: SCHEMA_VERSION, disconnected: remaining.length !== stored.connections.length };
 }
