@@ -52,13 +52,14 @@ type Publish = {
   repository: string; url: string; branch: string; sha: string;
   schemaVersion: 1;
 };
+type Disconnect = { disconnected: boolean; schemaVersion: 1 };
 ```
 
 Errors use `{ ok: false, error: { code, message }, schemaVersion: 1 }`.
 Lifecycle-specific codes are `NO_CONNECTION`, `CORRUPT_CONNECTION`,
 `STALE_CONNECTION`, `DIRTY_TREE`, `INVALID_TREE`, `WRITE_OUTDATED`,
-`GITHUB_AUTH`, `REPOSITORY_EXISTS`, and `PUBLISH_INCOMPLETE`. Other failures
-use `CONTEXT_TREE_FAILED`.
+`GITHUB_AUTH`, `GITHUB_PERMISSION`, `REPOSITORY_EXISTS`, and
+`PUBLISH_INCOMPLETE`. Other failures use `CONTEXT_TREE_FAILED`.
 
 ## Creation and connection
 
@@ -72,11 +73,18 @@ failed create are removed; a destination that existed before the invocation is
 never removed.
 
 `connect <name>` performs an exact managed-directory lookup. `connect
-OWNER/REPO` reuses a matching checkout or clones it under the lowercased
-repository name. Every selection is validated and safely classified as local
-or GitHub state. Local-tree, repository, and unsafe-origin name collisions fail
-before the project connection changes. Explicit connection switches are
-automatic. Only a directory created by a failed clone is removed.
+OWNER/REPO` reuses a checkout whose verified origin matches the full repository
+identity or clones it into a managed name derived from `OWNER/REPO`, so equal
+repository names under different owners never share a directory. Every
+selection is validated and safely classified as local or GitHub state.
+Repository and unsafe-origin name collisions fail before the project
+connection changes. Explicit connection switches are automatic. Only a
+directory created by a failed clone is removed. Authentication and permission
+failures during the clone report `GITHUB_AUTH` and `GITHUB_PERMISSION`.
+
+`disconnect [--project-path <path>]` removes only this project's stored
+connection, preserving its tree and repository. It is idempotent, validates
+neither the tree nor its contents, and reports `{ disconnected: boolean }`.
 
 `connect --tree-path <path>` attaches an exact, clean, fully valid Git root
 with no symlink components in place and never copies, moves, or deletes it.
@@ -181,9 +189,9 @@ managed tree name; an explicit validated `OWNER/REPO` may override it.
 It runs one `gh repo create --private --source <tree> --remote origin --push`.
 
 After success, the connection is atomically updated to GitHub state. Clear
-authentication failures produce `GITHUB_AUTH`; clear name collisions produce
-`REPOSITORY_EXISTS`; uncertain or partial outcomes produce
-`PUBLISH_INCOMPLETE`. Publication does not inspect, adopt, repair, retry, or
+authentication failures produce `GITHUB_AUTH`; clear permission denials produce
+`GITHUB_PERMISSION`; clear name collisions produce `REPOSITORY_EXISTS`;
+uncertain or partial outcomes produce `PUBLISH_INCOMPLETE`. Publication does not inspect, adopt, repair, retry, or
 delete partial GitHub state. The GitHub operation and local connection update are not
 atomic.
 

@@ -125,6 +125,7 @@ describe("built CLI", () => {
       "cleanup",
       "connect",
       "create",
+      "disconnect",
       "finish-write",
       "install",
       "list",

@@ -45,6 +45,18 @@ function authenticatedAccount(runner?: CommandRunner): string {
 }
 
 function classifyCreationFailure(stderr: string): ContextTreeError {
+  if (/gh auth login|not logged|authentication failed|http 401|bad credentials/iu.test(stderr)) {
+    return new ContextTreeError(
+      CLI_ERROR_CODES.githubAuth,
+      "GitHub authentication failed; run gh auth login before publishing.",
+    );
+  }
+  if (/http 403|permission denied|not authorized|resource not accessible/iu.test(stderr)) {
+    return new ContextTreeError(
+      CLI_ERROR_CODES.githubPermission,
+      "GitHub denied permission to create this repository.",
+    );
+  }
   if (/already exists/iu.test(stderr)) {
     return new ContextTreeError(
       CLI_ERROR_CODES.repositoryExists,
