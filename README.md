@@ -75,6 +75,12 @@ context-tree connect --tree-path /absolute/path/to/tree
 Connecting switches the current project's tree. Run these commands from the
 project directory, or add `--project-path /path/to/project`.
 
+Stop using a tree without deleting it or its memory:
+
+```bash
+context-tree disconnect
+```
+
 ## Cleanup and scheduling
 
 Ask your agent to remove outdated clutter and consolidate duplicate context:
@@ -102,6 +108,7 @@ lists previous runs.
 context-tree resolve                              # show this project's tree
 context-tree read --tree-path /path/to/tree        # browse its root index
 context-tree verify --tree-path /path/to/tree      # check its structure
+context-tree disconnect                           # remove this project's connection
 context-tree install                              # add skills for a new agent
 context-tree install --project .                  # install skills for this project
 context-tree uninstall                            # remove Context Tree skills
@@ -113,14 +120,14 @@ including synchronization, prepared writes, and JSON output.
 
 ## Working with OpenTag
 
-Create or publish a tree as above, then choose it on each OpenTag Computer:
+Each OpenTag Agent selects its own tree in **Agent settings → Context Tree**.
+Enter a GitHub `OWNER/REPO` to connect an existing tree, create a new private
+repository from the same panel, or disconnect to leave memory off. OpenTag
+connects every visible and internal session for that Agent to the selection.
+For a GitHub tree, GitHub authentication must work on the Agent's Computer.
 
-```bash
-opentag context-tree connect OWNER/REPO
-# Or use a local tree:
-opentag context-tree connect my-project-context-tree
-```
+The former `opentag context-tree connect` command is retired and now points to
+Agent settings. Existing trees, connections, and memory are preserved; after
+upgrading OpenTag, select the repository again for each Agent.
 
-OpenTag connects each agent workspace to that tree when a session starts.
-Use the same read, write, and cleanup prompts in those sessions. For a GitHub tree,
-GitHub authentication must work on each Computer.
+Use the same read, write, and cleanup prompts in OpenTag sessions.
