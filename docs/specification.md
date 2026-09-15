@@ -230,7 +230,8 @@ failure to place skills never fails an install.
 
 A home install only targets hosts whose configuration directory already exists,
 and reports the rest under `skipped`; it never creates a directory for an absent
-agent. Installation refuses symlinked or non-directory path segments, writes
+agent. Codex detection uses `CODEX_HOME` when set, otherwise `~/.codex`; its skills
+destination remains `~/.agents/skills` in either case. Installation refuses symlinked or non-directory path segments, writes
 skill files with mode `0644`, replaces only `context-tree-*` directories, and
 never modifies skills the package does not own. Codex and Pi share
 `.agents/skills`, so that directory is written once and reported for each host;

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -11,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { installSkills, uninstallSkills } from "../src/core/install.js";
 
 const SKILLS = [
@@ -33,11 +34,46 @@ function workspace(): string {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of roots) rmSync(root, { force: true, recursive: true });
   roots.clear();
 });
 
 describe("skill installation", () => {
+  it.each([".codex", "codex-home"])("detects custom CODEX_HOME %s but installs into account HOME", (name) => {
+    const home = realpathSync(workspace());
+    const customRoot = workspace();
+    const codexHome = join(customRoot, name);
+    mkdirSync(codexHome);
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("CODEX_HOME", codexHome);
+
+    const result = installSkills({ hosts: ["codex"] });
+
+    expect(result.installed).toEqual([{ host: "codex", path: join(home, ".agents", "skills"), skills: SKILLS }]);
+    expect(result.skipped).toEqual([]);
+    expect(existsSync(join(home, ".codex"))).toBe(false);
+    expect(existsSync(join(customRoot, ".agents"))).toBe(false);
+    expect(existsSync(join(codexHome, "skills"))).toBe(false);
+    expect(existsSync(join(home, ".agents", "skills", "context-tree-read", "SKILL.md"))).toBe(true);
+  });
+
+  it.each(["missing", "file", "symlink"])("skips a %s CODEX_HOME even when the default exists", (kind) => {
+    const home = workspace();
+    const codexHome = join(home, "custom-codex");
+    mkdirSync(join(home, ".codex"));
+    if (kind === "file") writeFileSync(codexHome, "not a directory");
+    if (kind === "symlink") symlinkSync(join(home, ".codex"), codexHome, "dir");
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("CODEX_HOME", codexHome);
+
+    const result = installSkills({ hosts: ["codex"] });
+
+    expect(result.installed).toEqual([]);
+    expect(result.skipped).toEqual([{ host: "codex", reason: expect.stringContaining(codexHome) }]);
+    expect(existsSync(join(home, ".agents"))).toBe(false);
+  });
+
   it("installs every packaged skill for a named host below a project root", () => {
     const root = workspace();
     const result = installSkills({ hosts: ["claude"], projectPath: root });
