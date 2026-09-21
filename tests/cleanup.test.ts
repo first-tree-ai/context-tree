@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runContextTreeCli } from "../src/cli/api.js";
 import { agentArguments, runAgent } from "../src/core/cleanup/agent.js";
 import {
+  cleanupLogs,
   cleanupStatus,
   parseCleanupInterval,
   recordCleanupActivity,
@@ -25,7 +26,7 @@ import {
 } from "../src/core/cleanup/index.js";
 import { type CleanupScheduler, nativeScheduler } from "../src/core/cleanup/scheduler.js";
 import { atomicState, loadSchedule, readState, statePath } from "../src/core/cleanup/store.js";
-import { connectProject } from "../src/core/connections.js";
+import { connectProject, disconnectProject } from "../src/core/connections.js";
 import { createProject } from "../src/core/create.js";
 import { ContextTreeError } from "../src/core/internal/errors.js";
 import { CLI_ERROR_CODES, type CleanupSchedule } from "../src/schemas.js";
@@ -211,7 +212,8 @@ describe("cleanup lifecycle", () => {
       finish,
       agent: async (_config, path) => {
         remember(path);
-        connectProject({ projectPath: project, treePath: otherTree });
+        disconnectProject(project);
+        connectProject({ projectPath: project, treePath: otherTree, alias: config.alias });
       },
     });
     expect(result.outcome).toBe("failed");
@@ -520,3 +522,106 @@ it("stops before publication on log failure and preserves the worktree", async (
   expect(existsSync(result.worktreePath ?? "")).toBe(true);
   expect(readState(statePath(config.id, "latest"))).toMatchObject({ outcome: "failed", runId: result.runId });
 });
+
+it("keeps multiple schedules, activity, logs, and removal independent", async () => {
+  createProject(project, undefined, { name: "product", alias: "product" });
+  const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
+  if (!second) throw new Error("missing second schedule");
+  expect(second.id).not.toBe(config.id);
+  expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
+  atomicState(statePath(config.id, "activity"), 10);
+  atomicState(statePath(second.id, "activity"), 20);
+  recordCleanupActivity({ projectPath: project, tree: "product" });
+  expect(readState(statePath(config.id, "activity"))).toBe(10);
+  expect(readState(statePath(second.id, "activity"))).toBeGreaterThan(20);
+  const result = await runCleanup(project, undefined, { agent: async (_config, path) => remember(path) }, "product");
+  expect(result.outcome).toBe("noop");
+  expect(readState(statePath(config.id, "latest"))).toBeUndefined();
+  removeCleanup(project, scheduler, "product");
+  expect(loadSchedule(config.id).enabled).toBe(true);
+  expect(loadSchedule(second.id).enabled).toBe(false);
+});
+
+it("makes removed or replaced scheduled connections inactive", async () => {
+  disconnectProject(project);
+  expect(cleanupStatus(project, scheduler, config.alias).inactive).toBe(true);
+  const agent = vi.fn();
+  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
+  createProject(project, undefined, { name: "replacement", alias: config.alias });
+  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
+  expect(agent).not.toHaveBeenCalled();
+  expect(loadSchedule(config.id).tree.path).toBe(tree);
+});
+
+it("records CLI connect activity across checkouts of one GitHub repository", async () => {
+  const git = (path: string, args: string[]): void => {
+    const result = spawnSync("git", ["-C", path, ...args], { encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+  };
+  const remoteProject = join(home, "remote-project");
+  mkdirSync(remoteProject);
+  const remoteTree = createProject(remoteProject).treePath;
+  git(remoteTree, ["remote", "add", "origin", "https://github.com/example/shared.git"]);
+  disconnectProject(remoteProject);
+  connectProject({ projectPath: remoteProject, treePath: remoteTree, alias: "shared" });
+  const shared = scheduleCleanup({ projectPath: remoteProject, agent: "codex" }, scheduler).schedule;
+  if (!shared) throw new Error("missing shared schedule");
+  const checkout = join(home, "checkout");
+  git(home, ["clone", remoteTree, checkout]);
+  git(checkout, ["remote", "set-url", "origin", "https://github.com/example/shared.git"]);
+  atomicState(statePath(shared.id, "activity"), 1);
+  atomicState(statePath(config.id, "activity"), 2);
+  expect(
+    await runContextTreeCli(["node", "context-tree", "connect", "--tree-path", checkout, "--as", "second", "--json"], {
+      cwd: () => project,
+      stdout: vi.fn(),
+    }),
+  ).toBe(0);
+  expect(readState(statePath(shared.id, "activity"))).toBeGreaterThan(1);
+  expect(readState(statePath(config.id, "activity"))).toBe(2);
+});
+
+it("refreshes only successful entries during partial CLI sync", async () => {
+  const secondTree = createProject(project, undefined, { name: "product", alias: "product" }).treePath;
+  const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
+  if (!second) throw new Error("missing second schedule");
+  writeFileSync(join(secondTree, "NODE.md"), "invalid");
+  atomicState(statePath(config.id, "activity"), 1);
+  atomicState(statePath(second.id, "activity"), 2);
+  expect(
+    await runContextTreeCli(["node", "context-tree", "sync"], {
+      cwd: () => project,
+      stdout: vi.fn(),
+    }),
+  ).toBe(1);
+  expect(readState(statePath(config.id, "activity"))).toBeGreaterThan(1);
+  expect(readState(statePath(second.id, "activity"))).toBe(2);
+});
+
+it.each([false, true])(
+  "implicitly selects the remaining connection with a retained schedule (disabled: %s)",
+  async (disabled) => {
+    createProject(project, undefined, { name: "product", alias: "product" });
+    const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
+    if (!second) throw new Error("missing second schedule");
+    expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
+    expect(() => cleanupLogs(project)).toThrow(/--tree/);
+    expect(() => removeCleanup(project, scheduler)).toThrow(/--tree/);
+    await expect(runCleanup(project)).rejects.toThrow(/--tree/);
+    if (disabled) removeCleanup(project, scheduler, config.alias);
+    disconnectProject(project, undefined, { tree: config.alias });
+    atomicState(statePath(second.id, "activity"), 1);
+    expect(cleanupStatus(project, scheduler).schedule?.id).toBe(second.id);
+    const result = await runCleanup(project);
+    expect(result.outcome).toBe("inactive");
+    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(result);
+    expect(cleanupLogs(project, { tree: config.alias }).runs).toEqual([]);
+    expect(cleanupStatus(project, scheduler, config.alias).schedule?.id).toBe(config.id);
+    expect(removeCleanup(project, scheduler).schedule?.id).toBe(second.id);
+    expect(loadSchedule(config.id).enabled).toBe(!disabled);
+    expect(removeCleanup(project, scheduler, config.alias).schedule?.id).toBe(config.id);
+    disconnectProject(project);
+    expect(cleanupStatus(project, scheduler, "product").schedule?.id).toBe(second.id);
+    expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
+  },
+);

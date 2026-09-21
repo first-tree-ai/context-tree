@@ -1,18 +1,21 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 
 import {
   CLI_ERROR_CODES,
+  CONNECTION_SCHEMA_VERSION,
+  type ContextTreeConnection,
+  contextTreeConnectionSchema,
   type FinishContextWriteResult,
   type PrepareContextWriteResult,
   SCHEMA_VERSION,
 } from "../schemas.js";
-import { resolveConnectionRecord } from "./connections.js";
+import { connectionRecords, resolveConnectionRecord } from "./connections.js";
 import { ContextTreeError } from "./internal/errors.js";
 import { CommandError, type CommandRunner, git, optionalGit } from "./internal/git.js";
 import { realDirectoryWithoutSymlinks } from "./path.js";
-import { syncProject } from "./sync.js";
+import { syncConnection } from "./sync.js";
 import { verifyTree } from "./verify.js";
 
 const TASK_BRANCH_PREFIX = "context-tree/write/";
@@ -20,8 +23,13 @@ const TASK_BRANCH_PREFIX = "context-tree/write/";
 const ABANDONED_WRITE_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Synchronize first, then create an isolated task worktree at the exact HEAD. */
-export function prepareContextWrite(projectPath: string, runner?: CommandRunner): PrepareContextWriteResult {
-  const synchronized = syncProject(projectPath, runner);
+export function prepareContextWrite(
+  projectPath: string,
+  runner?: CommandRunner,
+  alias?: string,
+): PrepareContextWriteResult {
+  const connection = resolveConnectionRecord(projectPath, runner, alias);
+  const synchronized = syncConnection(projectPath, runner, connection.alias);
   const root = synchronized.tree.path;
   reclaimAbandonedWrites(root, synchronized.branch, runner);
   const destination = mkdtempSync(join(tmpdir(), "context-tree-write-"));
@@ -31,7 +39,12 @@ export function prepareContextWrite(projectPath: string, runner?: CommandRunner)
       message: "Creating the isolated write worktree failed.",
       runner,
     });
-    return { schemaVersion: SCHEMA_VERSION, worktreePath: realDirectoryWithoutSymlinks(destination, "Write worktree") };
+    writeFileSync(preparationPath(destination, runner), JSON.stringify(connection), { flag: "wx", mode: 0o600 });
+    return {
+      connection,
+      schemaVersion: CONNECTION_SCHEMA_VERSION,
+      worktreePath: realDirectoryWithoutSymlinks(destination, "Write worktree"),
+    };
   } catch (error) {
     rmSync(destination, { force: true, recursive: true });
     throw error;
@@ -39,6 +52,7 @@ export function prepareContextWrite(projectPath: string, runner?: CommandRunner)
 }
 
 export type FinishContextWriteOptions = {
+  tree?: string | undefined;
   message: string;
   projectPath: string;
   worktreePath: string;
@@ -49,7 +63,14 @@ export function finishContextWrite(
   options: FinishContextWriteOptions,
   runner?: CommandRunner,
 ): FinishContextWriteResult {
-  const connection = resolveConnectionRecord(options.projectPath, runner);
+  if (!connectionRecords(options.projectPath, runner).length)
+    throw new ContextTreeError(CLI_ERROR_CODES.noConnection, "No Context Tree connection exists; worktree preserved.");
+  const prepared = preparedConnection(options.worktreePath, runner);
+  if (options.tree !== undefined && options.tree !== prepared.alias)
+    throw new Error("The selected connection differs from the prepared connection.");
+  const connection = resolveConnectionRecord(options.projectPath, runner, prepared.alias);
+  if (JSON.stringify(connection) !== JSON.stringify(prepared))
+    throw new Error("The prepared connection was removed or replaced; worktree preserved.");
   const root = connection.tree.path;
   const { taskBranch, worktreePath } = validatePreparedWorktree(root, options.worktreePath, runner);
   const branch = git(root, ["symbolic-ref", "--short", "HEAD"], {
@@ -208,4 +229,19 @@ function reclaimAbandonedWrites(root: string, checkoutBranch: string, runner?: C
     if (path !== undefined) optionalGit(root, ["worktree", "remove", path], runner);
     optionalGit(root, ["branch", "-D", branch], runner);
   }
+}
+
+function preparationPath(root: string, runner?: CommandRunner): string {
+  const directory = git(root, ["rev-parse", "--absolute-git-dir"], {
+    runner,
+    message: "Failed to locate write metadata.",
+  });
+  return join(realDirectoryWithoutSymlinks(directory, "Write Git directory"), "context-tree-preparation.json");
+}
+
+export function preparedConnection(worktreePath: string, runner?: CommandRunner): ContextTreeConnection {
+  const metadata = preparationPath(worktreePath, runner);
+  const entry = lstatSync(metadata);
+  if (!entry.isFile() || entry.isSymbolicLink()) throw new Error("Unsafe write preparation metadata.");
+  return contextTreeConnectionSchema.parse(JSON.parse(readFileSync(metadata, "utf8")));
 }

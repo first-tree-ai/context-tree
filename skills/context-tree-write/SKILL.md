@@ -2,7 +2,7 @@
 name: context-tree-write
 description: Record a settled, durable decision, constraint, or rationale in the project's Context Tree when authorized. Offer setup once if unconnected; skip when the user has opted out for this session.
 license: Apache-2.0
-compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
+compatibility: Requires Node.js 22.13+ and the context-tree CLI with connection schema version 2.
 metadata:
   author: first-tree-ai
 ---
@@ -177,11 +177,11 @@ If your host can run work in a background subagent, delegate the mechanical
 steps to one and continue the user's task; otherwise perform them inline. Either
 way the steps and the gates are identical.
 
-1. Run `context-tree prepare-write --project-path "<project>"`.
+1. Run `context-tree prepare-write --project-path "<project>" --tree "<alias>"`.
 2. Edit only the returned `worktreePath`, preserving Context Tree structure and
    making the narrow change the evidence supports.
 3. Run
-   `context-tree finish-write --project-path "<project>" --worktree-path "<worktree-path>" --message "<message>"`.
+   `context-tree finish-write --project-path "<project>" --tree "<alias>" --worktree-path "<worktree-path>" --message "<message>"`.
 
 Keep each source-backed write and commit scoped to one source artifact.
 `finish-write` commits every change present in that worktree, so leave nothing
@@ -195,7 +195,7 @@ Run one write at a time. Another writer advancing the tree can cause
 ## Delegating The Mechanical Steps
 
 The brief must be complete enough that the executor needs no judgment of its
-own: the original project path, destination node paths, exact prose to record,
+own: the original project path, selected connection alias, destination node paths, exact prose to record,
 and commit message.
 
 The executor applies that brief and nothing else. It does not widen scope, add a
@@ -232,3 +232,14 @@ consolidated; never blindly restore the old paths or replay the rejected patch.
 If the intent is already satisfied, stop without finishing an empty write. If the second finish is
 also outdated, stop and report both preserved worktree paths. Do not rebase,
 loop, push manually, or open a pull request.
+
+Select the connection alias from `context-tree resolve --project-path "<project>" --json`.
+Infer the destination from the user's request, relevant indexes, and task context
+when clear; ask when several destinations are plausible. A single connection can
+be selected implicitly. Selecting a destination does not grant write authorization.
+Keep each operation and commit within one tree. Work spanning trees requires
+separate operations with individually reported outcomes; there is no cross-tree
+transaction and no primary tree or implicit precedence.
+
+Preparation returns `connection` and `worktreePath`. Retain both; a removed or
+replaced connection must stop completion and preserve the worktree.

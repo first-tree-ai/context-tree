@@ -7,7 +7,10 @@ intentions: create, connect, read, write, and publish. A separate cleanup skill
 performs editorial maintenance through the same write lifecycle.
 `install` is the distribution entry point. Supporting commands (`resolve`, `sync`, `list`,
 `prepare-write`, `finish-write`, and `verify`) are integration plumbing. Every
-JSON contract is strict and uses `schemaVersion: 1`.
+JSON contract is strict. Connection storage, `connect`, `resolve`, `sync`,
+`prepare-write`, and cleanup schedule/status contracts use `schemaVersion: 2`.
+Unchanged command responses (including cleanup run/logs and error envelopes)
+and tree document frontmatter remain version 1. Unsupported stored formats are rejected without migration or deletion.
 
 ## Shared invariants
 
@@ -24,7 +27,8 @@ JSON contract is strict and uses `schemaVersion: 1`.
   neither is reported as a stale connection.
 - Stored `local` or `github` state remains that kind after connection; every
   selected managed checkout is classified from a safe origin before storage.
-- Duplicate records for one project produce `CORRUPT_CONNECTION`.
+- Duplicate aliases or tree identities within one project produce `CORRUPT_CONNECTION`.
+- Connections are equal; order provides no authority. Each project may attach several trees.
 - Connections are persisted by an atomic replacement with mode `0600`. No
   locking or schema migration is provided.
 
@@ -40,13 +44,20 @@ type Tree =
   | { kind: "local"; path: string }
   | { kind: "github"; path: string; repository: string };
 
-type Connection = { tree: Tree; schemaVersion: 1 };
+type Connection = { alias: string; projectPath: string; tree: Tree };
+type Connect = { alias: string; tree: Tree; schemaVersion: 2 };
+type Discovery = Connection & ({ ok: true } | { ok: false; error: { code: string; message: string } });
+type Resolve = { connections: Discovery[]; schemaVersion: 2 };
 type ManagedTreeListing = {
   schemaVersion: 1;
   trees: Array<{ name: string; tree: Tree }>;
 };
-type Sync = { tree: Tree; branch: string; sha: string; schemaVersion: 1 };
-type Prepare = { worktreePath: string; schemaVersion: 1 };
+type SyncEntry = { alias: string; tree: Tree } & (
+  { ok: true; branch: string; sha: string; schemaVersion: 2 } |
+  { ok: false; error: { code: string; message: string } }
+);
+type Sync = { connections: SyncEntry[]; schemaVersion: 2 };
+type Prepare = { connection: Connection; worktreePath: string; schemaVersion: 2 };
 type Finish = { branch: string; sha: string; schemaVersion: 1 };
 type Publish = {
   repository: string; url: string; branch: string; sha: string;
@@ -56,7 +67,7 @@ type Disconnect = { disconnected: boolean; schemaVersion: 1 };
 ```
 
 Errors use `{ ok: false, error: { code, message }, schemaVersion: 1 }`.
-Lifecycle-specific codes are `NO_CONNECTION`, `CORRUPT_CONNECTION`,
+Lifecycle-specific codes are `AMBIGUOUS_CONNECTION`, `NO_CONNECTION`, `CORRUPT_CONNECTION`,
 `STALE_CONNECTION`, `DIRTY_TREE`, `INVALID_TREE`, `WRITE_OUTDATED`,
 `GITHUB_AUTH`, `GITHUB_PERMISSION`, `REPOSITORY_EXISTS`, and
 `PUBLISH_INCOMPLETE`. Other failures use `CONTEXT_TREE_FAILED`.
@@ -67,8 +78,8 @@ Lifecycle-specific codes are `NO_CONNECTION`, `CORRUPT_CONNECTION`,
 canonical project root. It scaffolds and commits the tree in the flat managed
 namespace before atomically connecting it. Repetition is idempotent only when
 the project is still connected to that tree. An occupied name otherwise fails
-with guidance to use `connect <name>`, and a project already connected to a
-different tree fails rather than being silently repointed. Files created by a
+with guidance to use `connect <name>`. `--name <name> --as <alias>` creates an
+additional tree; omitted names retain the project-derived default. Files created by a
 failed create are removed; a destination that existed before the invocation is
 never removed.
 
@@ -78,13 +89,16 @@ identity or clones it into a managed name derived from `OWNER/REPO`, so equal
 repository names under different owners never share a directory. Every
 selection is validated and safely classified as local or GitHub state.
 Repository and unsafe-origin name collisions fail before the project
-connection changes. Explicit connection switches are automatic. Only a
+connection changes. Connections are additive. `--as <alias>` sets a project-local
+name, defaulting to the managed name, repository name, or checkout basename.
+An alias cannot point at a different tree; one tree cannot have multiple aliases
+within a project. Reconnecting the same tree and alias is idempotent. Only a
 directory created by a failed clone is removed. Authentication and permission
 failures during the clone report `GITHUB_AUTH` and `GITHUB_PERMISSION`.
 
-`disconnect [--project-path <path>]` removes only this project's stored
-connection, preserving its tree and repository. It is idempotent, validates
-neither the tree nor its contents, and reports `{ disconnected: boolean }`.
+`disconnect --tree <alias>` removes one attachment; `--all` removes all.
+The selector is optional with one connection and required with several.
+Disconnection preserves the trees and repositories and works for broken trees.
 
 `connect --tree-path <path>` attaches an exact, clean, fully valid Git root
 with no symlink components in place and never copies, moves, or deletes it.
@@ -96,6 +110,13 @@ clean managed trees as `{ schemaVersion: 1, trees: [{ name, tree }] }`; a
 missing managed directory is an empty list and is never created by listing.
 
 ## Synchronization and reading
+
+`resolve` returns an alias-sorted collection of healthy or broken connections.
+`sync` processes all connections and retains individual sanitized failures alongside
+successful branch/SHA results; any failure sets a nonzero exit status. Both accept
+`--tree <alias>` to filter. The read skill reads every successful root index and
+follows task-relevant branches, attributing context to tree and revision. Conflicts
+are surfaced and resolved from evidence or clarification, never connection order.
 
 Local synchronization makes no network call and reports the checked-out branch
 and exact `HEAD`. GitHub synchronization performs exactly one
@@ -110,14 +131,15 @@ and member children.
 ## Writing
 
 `prepare-write` synchronizes and creates a random `context-tree/write/*` branch
-in an isolated worktree at the synchronized SHA. It returns only the worktree
-path and schema version; no token, registry, manifest, lock, or preparation
-record exists.
+in an isolated worktree at the synchronized SHA. With several connections,
+`--tree <alias>` is required. It returns the selected connection, worktree path,
+and schema version. Connection metadata is persisted in the worktree Git directory.
 
 `finish-write` requires that the supplied path is a real non-symlink directory,
-belongs to the connected tree's Git common directory, uses the reserved branch
+matches its saved project and connection, belongs to that tree's Git common directory, uses the reserved branch
 prefix, contains pending changes, and verifies as a complete Context Tree.
-Calling it authorizes all pending changes. It stages everything and creates one
+Removed or replaced connections fail before committing and preserve the worktree.
+Destination selection alone grants no write authorization. It stages everything and creates one
 commit with `commit.gpgsign=false` while retaining the host Git identity.
 
 For local state it attempts one fast-forward merge into the connected checkout's
@@ -134,8 +156,8 @@ its worktree reports no pending change, and that worktree has gone untouched for
 twenty-four hours. Any unknown answer preserves the worktree. Because
 `finish-write` commits before it merges or pushes, a `WRITE_OUTDATED` worktree
 holds an unmerged commit and is never reclaimed, so the documented retry keeps
-its preserved edits. Reclamation is silent: `prepare-write` still returns only
-the worktree path and schema version.
+its preserved edits. Reclamation is silent and limited to the selected repository.
+Writes spanning trees require separate operations and outcomes, with no cross-tree transaction.
 
 The write skill may prepare fresh and reapply the intended semantic change
 once after `WRITE_OUTDATED`, after rereading affected nodes and their placement
@@ -173,13 +195,19 @@ tree avoids wasted competing passes. Existing worktree retention applies:
 successes are removed, empty preparations are eligible after 24 hours, and
 rejected commits stay recoverable and may need manual housekeeping.
 
-Scheduling is entirely host-owned; start daily with the reusable prompt in
-[README](../README.md#cleanup-and-scheduling). Claude Code supports skill invocation
-through session-limited `/loop` and persistent scheduling options; Codex supports
-skill invocation in scheduled tasks. OpenTag uses one already-connected agent
-workspace and its existing packaged-skill discovery after upgrading its pinned
-dependency. Automatic OpenTag scheduling is outside v1. Cleanup adds no CLI
-commands, wire schemas, locks, scheduler, or runtime changes.
+The CLI provides cleanup schedule, status, remove, run, and logs commands with
+`--tree <alias>` selection. A project may schedule multiple trees; each tree
+identity has one schedule shared across projects. A versioned schedule persists
+the alias, project, tree state, and identity. Removed or replaced connections make
+it inactive. Activity and logs belong to the relevant tree, and successful commands
+refresh only the trees they used. Connect, sync, prepare-write, and finish-write
+match activity by tree identity across checkouts; partial sync refreshes only
+successful entries. Create and read match by path. Without `--tree`, cleanup
+selects the sole connection before considering retained schedules; multiple
+connections require selection. Explicit aliases can access retained schedules,
+and saved-schedule lookup remains available when no connections remain.
+Native LaunchAgents or systemd user timers run
+the saved configuration; host application UI is outside this repository's scope.
 
 ## Publication
 
@@ -188,7 +216,9 @@ commands, wire schemas, locks, scheduler, or runtime changes.
 managed tree name; an explicit validated `OWNER/REPO` may override it.
 It runs one `gh repo create --private --source <tree> --remote origin --push`.
 
-After success, the connection is atomically updated to GitHub state. Clear
+With several connections, `publish --tree <alias>` selects the local destination.
+After success, all connection records referencing that checkout are atomically
+updated to GitHub state, preserving aliases and unrelated connections. Clear
 authentication failures produce `GITHUB_AUTH`; clear permission denials produce
 `GITHUB_PERMISSION`; clear name collisions produce `REPOSITORY_EXISTS`;
 uncertain or partial outcomes produce `PUBLISH_INCOMPLETE`. Publication does not inspect, adopt, repair, retry, or
@@ -203,8 +233,7 @@ returns ready without replacing the existing connection. Otherwise it reuses
 prior user choices or offers an existing tree, a new local tree, a new private
 GitHub tree, or skipping for the session. Existing targets include listed
 managed names with local/GitHub kind, GitHub `OWNER/REPO`, and exact checkout
-paths. An explicit switch without a target asks for that target rather than
-silently retaining or replacing the current connection.
+paths. An explicit request to add a tree continues setup even with existing connections.
 
 Create defaults to local-only and does not prompt for publication afterward.
 Choosing a new private GitHub tree authorizes create followed by publish; it
@@ -259,5 +288,6 @@ policy travels with the skills that need it: the write skill carries the write
 gate, source boundary, memory routing, content model, add-vs-edit rules, and
 node shape; the read skill carries content classes and drift authority.
 
-The seven-skill inventory is setup, create, connect, read, write, publish, and cleanup;
+The eight-skill inventory is setup, create, connect, read, write, publish, cleanup,
+and schedule-cleanup;
 setup orchestrates the five concrete workflows.

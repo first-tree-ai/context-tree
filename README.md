@@ -1,70 +1,59 @@
 # Context Tree
 
-Context Tree gives coding agents lasting project memory: decisions, constraints,
-and the reasons behind them. Use it to avoid repeating context in new sessions,
-keep different agents aligned, or share knowledge across related repositories.
-Context lives in a separate Git repository. Keep it local or share it through
-private GitHub storage.
+Project memory for coding agents. Save decisions, constraints, and their rationale
+in a separate Git repository so your agent can use them in future sessions.
+Keep it local or share it through a private GitHub repository.
+
+Works with **Codex, Claude Code, and Pi**.
 
 ## Install
 
-Requires **Node.js 22.13+** and **Git**. For GitHub sharing, also install and
-sign in to the GitHub CLI (`gh auth login`).
+Requires **Node.js 22.13+** and **Git**.
 
 ```bash
 npm install --global @first-tree-ai/context-tree
 ```
 
-This installs the CLI and skills for installed **Codex, Claude Code, and Pi**
-agents. Restart your agent to discover the skills.
+This installs the CLI and skills for your installed agents. Restart your agent
+to load the skills.
 
-## Get started
+## Use it
 
-Open your project in your agent and ask:
-
-> Set up a local Context Tree for this project, then read the relevant context.
-
-You can also ask to connect an existing tree or create a private GitHub tree.
-To create a local tree yourself, run this from your project directory:
+From your project directory:
 
 ```bash
 context-tree create
 ```
 
-The tree is saved under `~/.context-tree/trees` and connected to your project.
-
-## Read and save context
-
-Ask your agent to use the tree as you work:
+This creates a local tree under `~/.context-tree/trees` and connects it to your
+project. Then ask your agent:
 
 > Read the Context Tree before planning this change.
 
 > Save our decision to use a single writer, including why we rejected multiple writers.
 
-The read skill retrieves relevant context; the write skill updates it and commits
-changes, pushing them when the tree is shared on GitHub. Save decisions and
-constraints that future work should respect, with their rationale.
+The agent reads relevant context and commits updates. For GitHub trees, it also
+pushes changes.
 
-To invoke a skill explicitly, use `$context-tree-read` in Codex,
+To invoke skills directly, use `$context-tree-read` in Codex,
 `/context-tree-read` in Claude Code, or `/skill:context-tree-read` in Pi.
-Replace `read` with `write`, `setup`, `create`, `connect`, `publish`, `cleanup`,
-or `schedule-cleanup` for the other workflows.
+Replace `read` with `write` or `cleanup` to save or tidy context.
 
-## Share or connect an existing tree
+## Share a tree
 
-Publish your local tree as a **new private GitHub repository**:
+Sign in with `gh auth login`, then publish to a new private GitHub repository:
 
 ```bash
 context-tree publish OWNER/REPO
 ```
 
-From another project or machine, connect to it:
+Connect from another project or machine:
 
 ```bash
 context-tree connect OWNER/REPO
 ```
 
-You can also reuse a local tree by name or connect a checkout on disk:
+You can also connect a local tree by name or path:
 
 ```bash
 context-tree list
@@ -72,62 +61,33 @@ context-tree connect my-project-context-tree
 context-tree connect --tree-path /absolute/path/to/tree
 ```
 
-Connecting switches the current project's tree. Run these commands from the
-project directory, or add `--project-path /path/to/project`.
+A project can use several trees. Name connections with `--as <alias>` and select
+one with `--tree <alias>` when writing or publishing.
 
-Stop using a tree without deleting it or its memory:
+## Maintain it
 
-```bash
-context-tree disconnect
-```
-
-## Cleanup and scheduling
-
-Ask your agent to remove outdated clutter and consolidate duplicate context:
-
-> Run the context-tree-cleanup skill for this project and publish the changes.
-
-For recurring cleanup, use the schedule-cleanup skill or run:
+Ask your agent to run `context-tree-cleanup`, or schedule regular cleanup:
 
 ```bash
 context-tree cleanup schedule --agent codex --every 2h
 context-tree cleanup status
-context-tree cleanup logs
 context-tree cleanup remove
 ```
 
-Choose `codex`, `claude`, or `pi`; the agent CLI must be installed and authenticated.
-Schedules run locally on macOS or Linux while the machine is awake, and skip trees
-unused for 24 hours. Use one designated cleaner per shared tree.
-`context-tree cleanup run` runs the configured cleanup now; `cleanup logs --list`
-lists previous runs.
+Schedules support Codex, Claude Code, and Pi on macOS and Linux. The agent CLI
+must be installed and authenticated, and the machine must be awake.
 
-## Useful commands
+## Other commands
 
 ```bash
-context-tree resolve                              # show this project's tree
-context-tree read --tree-path /path/to/tree        # browse its root index
-context-tree verify --tree-path /path/to/tree      # check its structure
-context-tree disconnect                           # remove this project's connection
-context-tree install                              # add skills for a new agent
-context-tree install --project .                  # install skills for this project
-context-tree uninstall                            # remove Context Tree skills
+context-tree resolve                # show this project's connections
+context-tree disconnect             # disconnect the sole tree without deleting it
+context-tree install                # install skills for a newly added agent
+context-tree uninstall              # remove Context Tree skills
 context-tree --help
 ```
 
-For scripts and custom integrations, see the [CLI specification](docs/specification.md),
-including synchronization, prepared writes, and JSON output.
+In OpenTag, select a tree in **Agent settings → Context Tree**.
 
-## Working with OpenTag
-
-Each OpenTag Agent selects its own tree in **Agent settings → Context Tree**.
-Enter a GitHub `OWNER/REPO` to connect an existing tree, create a new private
-repository from the same panel, or disconnect to leave memory off. OpenTag
-connects every visible and internal session for that Agent to the selection.
-For a GitHub tree, GitHub authentication must work on the Agent's Computer.
-
-The former `opentag context-tree connect` command is retired and now points to
-Agent settings. Existing trees, connections, and memory are preserved; after
-upgrading OpenTag, select the repository again for each Agent.
-
-Use the same read, write, and cleanup prompts in OpenTag sessions.
+See the [CLI specification](docs/specification.md) for command contracts and
+integration details.

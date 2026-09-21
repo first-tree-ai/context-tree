@@ -18,19 +18,19 @@ import {
   type CleanupOutcome,
   type CleanupResult,
   type CleanupSchedule,
+  CONNECTION_SCHEMA_VERSION,
   type ContextTreeState,
   cleanupAgentSchema,
   cleanupOutcomeSchema,
   cleanupResultSchema,
   cleanupScheduleSchema,
-  SCHEMA_VERSION,
 } from "../../schemas.js";
-import { findConnectionRecord, resolveConnectionRecord } from "../connections.js";
+import { connectionRecords, findConnectionRecord, resolveConnectionRecord } from "../connections.js";
 import { classifyContextContent } from "../internal/content-class.js";
 import { git, sanitizeCommandOutput } from "../internal/git.js";
 import { resolvePackagedResource } from "../internal/packaged-resource.js";
 import { canonicalProjectRoot } from "../internal/project.js";
-import { syncProject } from "../sync.js";
+import { syncConnection } from "../sync.js";
 import { verifyTree } from "../verify.js";
 import { finishContextWrite, prepareContextWrite } from "../write.js";
 import { runAgent } from "./agent.js";
@@ -76,27 +76,40 @@ function executable(name: string): string {
   }
   throw new Error(`Install ${name} on PATH before scheduling cleanup.`);
 }
-function findSchedule(project: string): CleanupSchedule | undefined {
+function findSchedule(project: string, alias?: string): CleanupSchedule | undefined {
   const canonical = canonicalProjectRoot(project);
+  const records = connectionRecords(canonical);
+  if (alias === undefined && records.length > 1)
+    throw new Error("Several Context Trees are connected; select --tree <alias>.");
+  alias ??= records[0]?.alias;
   // Saved project lookup remains available after a connection changes or disappears.
-  const owned = schedules().filter((config) => config.projectPath === canonical);
-  if (owned.length > 1)
-    throw new Error("Multiple saved cleanup identities for this project; remove the old schedule first.");
+  const owned = schedules().filter(
+    (config) => config.projectPath === canonical && (alias === undefined || config.alias === alias),
+  );
+  if (owned.length > 1) throw new Error("Several cleanup trees exist; select --tree <alias>.");
   if (owned[0]) return owned[0];
-  const connection = findConnectionRecord(canonical);
+  const connection = alias === undefined ? records[0] : records.find((c) => c.alias === alias);
   return connection ? schedules().find((config) => config.id === identityId(treeIdentity(connection.tree))) : undefined;
 }
-export function cleanupLogs(project: string, options: { list?: boolean; run?: string } = {}): CleanupLogsResult {
-  const connection = findConnectionRecord(canonicalProjectRoot(project));
-  const id = connection ? identityId(treeIdentity(connection.tree)) : findSchedule(project)?.id;
+export function cleanupLogs(
+  project: string,
+  options: { list?: boolean; run?: string; tree?: string } = {},
+): CleanupLogsResult {
+  const config = findSchedule(project, options.tree);
+  const connection = config ? undefined : findConnectionRecord(project, undefined, options.tree);
+  const id = config?.id ?? (connection ? identityId(treeIdentity(connection.tree)) : undefined);
   if (!id) throw new Error("No Context Tree connection or cleanup schedule exists for this project.");
   return readCleanupHistory(id, options);
 }
-export function cleanupStatus(project: string, scheduler: CleanupScheduler = nativeScheduler()): CleanupResult {
-  const config = findSchedule(project);
+export function cleanupStatus(
+  project: string,
+  scheduler: CleanupScheduler = nativeScheduler(),
+  alias?: string,
+): CleanupResult {
+  const config = findSchedule(project, alias);
   if (!config)
     return {
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: CONNECTION_SCHEMA_VERSION,
       schedule: null,
       registered: false,
       running: false,
@@ -107,10 +120,15 @@ export function cleanupStatus(project: string, scheduler: CleanupScheduler = nat
   const lastActivity = activity(config.id);
   const latest = readState(statePath(config.id, "latest"));
   return cleanupResultSchema.parse({
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: CONNECTION_SCHEMA_VERSION,
     schedule: config,
     ...scheduler.status(config),
-    inactive: lastActivity === null || Date.now() - lastActivity > 86400000,
+    inactive:
+      !connectionRecords(config.projectPath).some(
+        (c) => c.alias === config.alias && JSON.stringify(c.tree) === JSON.stringify(config.tree),
+      ) ||
+      lastActivity === null ||
+      Date.now() - lastActivity > 86400000,
     lastActivity,
     latest: latest === undefined ? null : cleanupOutcomeSchema.parse(latest),
   });
@@ -129,27 +147,34 @@ function manage<T>(operation: () => T): T {
   }
 }
 export function scheduleCleanup(
-  options: { projectPath: string; agent: string; model?: string; every?: string },
+  options: { projectPath: string; agent: string; model?: string; every?: string; tree?: string },
   scheduler: CleanupScheduler = nativeScheduler(),
 ): CleanupResult {
   return manage(() => scheduleCleanupUnlocked(options, scheduler));
 }
-export function removeCleanup(project: string, scheduler: CleanupScheduler = nativeScheduler()): CleanupResult {
-  return manage(() => removeCleanupUnlocked(project, scheduler));
+export function removeCleanup(
+  project: string,
+  scheduler: CleanupScheduler = nativeScheduler(),
+  alias?: string,
+): CleanupResult {
+  return manage(() => removeCleanupUnlocked(project, scheduler, alias));
 }
 function scheduleCleanupUnlocked(
-  options: { projectPath: string; agent: string; model?: string; every?: string },
+  options: { projectPath: string; agent: string; model?: string; every?: string; tree?: string },
   scheduler: CleanupScheduler = nativeScheduler(),
 ): CleanupResult {
   const agent = cleanupAgentSchema.parse(options.agent);
-  const connection = resolveConnectionRecord(options.projectPath);
+  const connection = resolveConnectionRecord(options.projectPath, undefined, options.tree);
   const identity = treeIdentity(connection.tree);
-  const previous = findSchedule(connection.projectPath);
+  const previous = findSchedule(connection.projectPath, connection.alias);
   if (previous?.enabled && previous.identity !== identity)
     throw new Error("Remove the previous cleanup schedule before scheduling a changed connection.");
   const id = identityId(identity);
   const config = cleanupScheduleSchema.parse({
     id,
+    schemaVersion: CONNECTION_SCHEMA_VERSION,
+    alias: connection.alias,
+    tree: connection.tree,
     projectPath: connection.projectPath,
     identity,
     agent,
@@ -172,11 +197,15 @@ function scheduleCleanupUnlocked(
     atomicState(statePath(id, "config"), { ...config, enabled: false });
     throw error;
   }
-  return cleanupStatus(connection.projectPath, scheduler);
+  return cleanupStatus(connection.projectPath, scheduler, connection.alias);
 }
-function removeCleanupUnlocked(project: string, scheduler: CleanupScheduler = nativeScheduler()): CleanupResult {
-  const config = findSchedule(project);
-  if (!config) return cleanupStatus(project, scheduler);
+function removeCleanupUnlocked(
+  project: string,
+  scheduler: CleanupScheduler = nativeScheduler(),
+  alias?: string,
+): CleanupResult {
+  const config = findSchedule(project, alias);
+  if (!config) return cleanupStatus(project, scheduler, alias);
   atomicState(statePath(config.id, "config"), { ...config, enabled: false });
   scheduler.remove(config);
   const latest = cleanupOutcomeSchema.safeParse(readState(statePath(config.id, "latest")));
@@ -196,7 +225,7 @@ function removeCleanupUnlocked(project: string, scheduler: CleanupScheduler = na
     .positive()
     .safeParse(readState(join(statePath(config.id, "lock"), "owner")));
   if (owner.success && !alive(owner.data)) rmSync(statePath(config.id, "lock"), { recursive: true });
-  return cleanupStatus(project, scheduler);
+  return cleanupStatus(project, scheduler, alias);
 }
 function alive(pid: number): boolean {
   try {
@@ -207,22 +236,32 @@ function alive(pid: number): boolean {
   }
 }
 /** CLI-only, best effort: the background process and all its child CLIs are excluded. */
-export function recordCleanupActivity(options: { projectPath?: string; treePath?: string }): void {
+export function recordCleanupActivity(options: {
+  projectPath?: string;
+  treePath?: string;
+  tree?: string | undefined;
+}): void {
   if (process.env.CONTEXT_TREE_CLEANUP === "1") return;
   try {
-    const tree = options.projectPath ? findConnectionRecord(options.projectPath)?.tree : undefined;
+    const trees = options.projectPath
+      ? connectionRecords(options.projectPath, undefined, options.tree).map((c) => c.tree)
+      : [];
     for (const config of schedules()) {
-      if (!config.enabled) continue;
-      let matches = tree !== undefined && treeIdentity(tree) === config.identity;
-      if (options.treePath) {
-        const supplied = realpathSync(options.treePath);
-        const connection = findConnectionRecord(config.projectPath);
-        matches ||=
-          connection !== undefined &&
-          treeIdentity(connection.tree) === config.identity &&
-          realpathSync(connection.tree.path) === supplied;
+      try {
+        if (!config.enabled) continue;
+        let matches = trees.some((tree) => treeIdentity(tree) === config.identity);
+        if (options.treePath) {
+          const supplied = realpathSync(options.treePath);
+          const connection = connectionRecords(config.projectPath).find((c) => c.alias === config.alias);
+          matches ||=
+            connection !== undefined &&
+            JSON.stringify(connection.tree) === JSON.stringify(config.tree) &&
+            realpathSync(connection.tree.path) === supplied;
+        }
+        if (matches) atomicState(statePath(config.id, "activity"), Date.now());
+      } catch {
+        /* A stale schedule must not prevent healthy trees from recording activity. */
       }
-      if (matches) atomicState(statePath(config.id, "activity"), Date.now());
     }
   } catch {
     /* Never turn an ordinary command into a failure. */
@@ -268,14 +307,15 @@ export type CleanupRunDependencies = {
   agent?: typeof runAgent;
   prepare?: typeof prepareContextWrite;
   finish?: typeof finishContextWrite;
-  sync?: typeof syncProject;
+  sync?: typeof syncConnection;
 };
 export async function runCleanup(
   project: string,
   savedId?: string,
   dependencies: CleanupRunDependencies = {},
+  alias?: string,
 ): Promise<CleanupOutcome> {
-  const config = savedId ? loadSchedule(savedId) : findSchedule(project);
+  const config = savedId ? loadSchedule(savedId) : findSchedule(project, alias);
   if (!config) throw new Error("No cleanup schedule exists for this project.");
   const lock = statePath(config.id, "lock");
   manage(() => {
@@ -330,8 +370,8 @@ export async function runCleanup(
   };
   const identityCheck = (): ContextTreeState => {
     check();
-    const tree = resolveConnectionRecord(config.projectPath).tree;
-    if (treeIdentity(tree) !== config.identity)
+    const tree = resolveConnectionRecord(config.projectPath, undefined, config.alias).tree;
+    if (treeIdentity(tree) !== config.identity || JSON.stringify(tree) !== JSON.stringify(config.tree))
       throw new Error("Cleanup connection identity changed; reschedule explicitly.");
     return tree;
   };
@@ -341,13 +381,21 @@ export async function runCleanup(
     check();
     const lastActivity = activity(config.id);
     if (lastActivity === null || Date.now() - lastActivity > 86400000) return record("inactive");
+    const attached = connectionRecords(config.projectPath).find((c) => c.alias === config.alias);
+    if (!attached || JSON.stringify(attached.tree) !== JSON.stringify(config.tree)) {
+      return record("inactive", { message: "Saved connection was removed or replaced." });
+    }
     identityCheck();
     record("running", { message: "Synchronizing Context Tree." });
-    const synced = (dependencies.sync ?? syncProject)(config.projectPath);
+    const synced = (dependencies.sync ?? syncConnection)(config.projectPath, undefined, config.alias);
     check();
     if (readState(statePath(config.id, "success")) === synced.sha) return record("unchanged", { sha: synced.sha });
     record("running", { message: "Preparing cleanup worktree." });
-    worktreePath = (dependencies.prepare ?? prepareContextWrite)(config.projectPath).worktreePath;
+    worktreePath = (dependencies.prepare ?? prepareContextWrite)(
+      config.projectPath,
+      undefined,
+      config.alias,
+    ).worktreePath;
     check();
     const head = git(worktreePath, ["rev-parse", "HEAD"]);
     const before = snapshot(worktreePath);
@@ -390,6 +438,7 @@ export async function runCleanup(
     check();
     publishing = true;
     const finished = (dependencies.finish ?? finishContextWrite)({
+      tree: config.alias,
       projectPath: config.projectPath,
       worktreePath,
       message: "Clean up Context Tree content",

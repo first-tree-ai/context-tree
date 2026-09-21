@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { upsertConnection } from "../src/core/connections.js";
+import { updateConnectionTree, upsertConnection } from "../src/core/connections.js";
 import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
 import { publishProject } from "../src/core/publish.js";
 import { readTree } from "../src/core/read.js";
@@ -429,7 +429,7 @@ describe("publish", () => {
     scaffoldTree({ path: tree, name: "context" });
     const realProject = realpathSync(project);
     const realTree = realpathSync(tree);
-    upsertConnection({ projectPath: realProject, tree: { kind: "local", path: realTree } });
+    upsertConnection({ alias: "tree", projectPath: realProject, tree: { kind: "local", path: realTree } });
     return { project: realProject, tree: realTree };
   }
 
@@ -497,7 +497,7 @@ describe("publish", () => {
       encoding: "utf8",
     });
     if (added.status !== 0) throw new Error(added.stderr);
-    upsertConnection({ projectPath: project, tree: { kind: "github", path: tree, repository: "acme/context" } });
+    updateConnectionTree(project, { kind: "github", path: tree, repository: "acme/context" });
     const failure = publishError(() => publishProject(project, {}, accountRunner([])));
     expect(failure.code).toBe("CONTEXT_TREE_FAILED");
     expect(failure.message).toContain("already published");

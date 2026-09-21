@@ -27,6 +27,9 @@ for (const trigger of ["timeout", "cancellation"]) {
     commands.spawnSync.mockReturnValue({ status: 0, stdout: "424242 313131\n", stderr: "" });
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
     const config: CleanupSchedule = {
+      schemaVersion: 2,
+      alias: "tree",
+      tree: { kind: "local", path: "/tmp/tree" },
       id: "a".repeat(64),
       projectPath: "/project",
       identity: "local:/tree",
@@ -74,6 +77,9 @@ it("decodes split UTF-8 and sanitizes complete credential lines while draining o
   });
   commands.spawn.mockReturnValue(child);
   const config: CleanupSchedule = {
+    schemaVersion: 2,
+    alias: "tree",
+    tree: { kind: "local", path: "/tmp/tree" },
     id: "a".repeat(64),
     projectPath: "/project",
     identity: "local:/tree",

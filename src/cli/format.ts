@@ -26,11 +26,14 @@ export function formatCreate(result: CreateProjectResult): string {
 }
 
 export function formatConnect(result: ConnectProjectResult): string {
-  return [`Connected ${result.tree.kind} Context Tree.`, ...treeLines(result.tree)].join("\n");
+  return [`Connected ${result.tree.kind} Context Tree as ${result.alias}.`, ...treeLines(result.tree)].join("\n");
 }
 
 export function formatResolve(result: ContextTreeConnectionResult): string {
-  return [`Connected ${result.tree.kind} Context Tree.`, ...treeLines(result.tree)].join("\n");
+  if (!result.connections.length) return "No Context Tree connections.";
+  return result.connections
+    .map((c) => [`${c.alias}: ${c.ok ? c.tree.kind : c.error.message}`, ...treeLines(c.tree)].join("\n"))
+    .join("\n");
 }
 
 export function formatList(result: ManagedTreeListingResult): string {

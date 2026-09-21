@@ -71,6 +71,7 @@ describe("JSON schemas", () => {
 
   it("accepts every lifecycle error code and rejects retired ones", () => {
     const codes = [
+      "AMBIGUOUS_CONNECTION",
       "CONTEXT_TREE_FAILED",
       "CORRUPT_CONNECTION",
       "DIRTY_TREE",

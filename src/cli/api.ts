@@ -23,7 +23,7 @@ import { publishProject } from "../core/publish.js";
 import { readTree } from "../core/read.js";
 import { syncProject } from "../core/sync.js";
 import { verifyTree } from "../core/verify.js";
-import { finishContextWrite, prepareContextWrite } from "../core/write.js";
+import { finishContextWrite, prepareContextWrite, preparedConnection } from "../core/write.js";
 import {
   CLI_ERROR_CODES,
   type ContextTreeCliErrorEnvelope,
@@ -78,9 +78,10 @@ function emit<T>(io: ContextTreeCliIo, json: boolean, result: T, format: (value:
   line(io, json ? JSON.stringify(result) : format(result));
 }
 
-const jsonOption = ["--json", "print machine-readable JSON (schema version 1) instead of text"] as const;
+const jsonOption = ["--json", "print machine-readable JSON (versioned schema) instead of text"] as const;
 
 function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
+  const activities: Parameters<typeof recordCleanupActivity>[0][] = [];
   const program = new Command()
     .name("context-tree")
     .description("Create, connect, list, read, write, and publish Context Trees.")
@@ -91,48 +92,66 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
 
   program
     .command("create")
+    .option("--name <name>", "managed tree name")
+    .option("--as <alias>", "project-local connection alias")
     .description("Create and connect one uniquely named managed Context Tree for the current project.")
     .option("--project-path <path>", "project directory", ".")
     .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string }) => {
-      emit(io, options.json, createProject(resolve(io.cwd(), options.projectPath)), formatCreate);
+    .action((options: { json: boolean; projectPath: string; tree?: string; name?: string; as?: string }) => {
+      const result = createProject(resolve(io.cwd(), options.projectPath), undefined, {
+        name: options.name,
+        alias: options.as,
+      });
+      activities.push({ treePath: result.treePath });
+      emit(io, options.json, result, formatCreate);
     });
 
   program
     .command("connect")
+    .option("--as <alias>", "project-local connection alias")
     .description("Connect the project by managed tree name, GitHub OWNER/REPO, or exact disk path.")
     .argument("[name-or-repository]", "managed tree name or GitHub OWNER/REPO")
     .option("--project-path <path>", "project directory", ".")
     .option("--tree-path <path>", "exact Context Tree Git root to connect in place")
     .option(...jsonOption)
-    .action((target: string | undefined, options: { json: boolean; projectPath: string; treePath?: string }) => {
-      const projectPath = resolve(io.cwd(), options.projectPath);
-      if (target !== undefined && options.treePath !== undefined) {
-        throw new Error("Connect requires exactly one of a name/repository or --tree-path.");
-      }
-      if (target !== undefined) {
-        emit(io, options.json, connectProject({ projectPath, target }), formatConnect);
-        return;
-      }
-      if (options.treePath !== undefined) {
-        emit(
-          io,
-          options.json,
-          connectProject({ projectPath, treePath: resolve(io.cwd(), options.treePath) }),
-          formatConnect,
-        );
-        return;
-      }
-      throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
-    });
+    .action(
+      (
+        target: string | undefined,
+        options: { json: boolean; projectPath: string; tree?: string; treePath?: string; as?: string },
+      ) => {
+        const projectPath = resolve(io.cwd(), options.projectPath);
+        if (target !== undefined && options.treePath !== undefined) {
+          throw new Error("Connect requires exactly one of a name/repository or --tree-path.");
+        }
+        if (target !== undefined) {
+          const result = connectProject({ projectPath, target, alias: options.as });
+          activities.push({ projectPath, tree: result.alias });
+          emit(io, options.json, result, formatConnect);
+          return;
+        }
+        if (options.treePath !== undefined) {
+          const result = connectProject({
+            projectPath,
+            alias: options.as,
+            treePath: resolve(io.cwd(), options.treePath),
+          });
+          activities.push({ projectPath, tree: result.alias });
+          emit(io, options.json, result, formatConnect);
+          return;
+        }
+        throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
+      },
+    );
 
   program
     .command("disconnect")
+    .option("--all", "remove all project connections")
     .description("Remove this project's connection, preserving its Context Tree and repository.")
     .option("--project-path <path>", "project directory", ".")
+    .option("--tree <alias>", "select a project connection")
     .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string }) => {
-      emit(io, options.json, disconnectProject(resolve(io.cwd(), options.projectPath)), (result) =>
+    .action((options: { json: boolean; projectPath: string; tree?: string }) => {
+      emit(io, options.json, disconnectProject(resolve(io.cwd(), options.projectPath), undefined, options), (result) =>
         result.disconnected ? "Context Tree disconnected." : "No Context Tree connection.",
       );
     });
@@ -149,25 +168,39 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .command("resolve")
     .description("Resolve the connected Context Tree for a project.")
     .option("--project-path <path>", "project directory", ".")
+    .option("--tree <alias>", "select a project connection")
     .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string }) => {
-      emit(io, options.json, resolveConnection(resolve(io.cwd(), options.projectPath)), formatResolve);
+    .action((options: { json: boolean; projectPath: string; tree?: string }) => {
+      emit(
+        io,
+        options.json,
+        resolveConnection(resolve(io.cwd(), options.projectPath), undefined, options.tree),
+        formatResolve,
+      );
     });
 
   program
     .command("sync")
     .description("Synchronize the connected Context Tree for a project.")
     .option("--project-path <path>", "project directory", ".")
-    .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(syncProject(resolve(io.cwd(), options.projectPath))));
+    .option("--tree <alias>", "select a project connection")
+    .action((options: { projectPath: string; tree?: string }) => {
+      const projectPath = resolve(io.cwd(), options.projectPath);
+      const result = syncProject(projectPath, undefined, options.tree);
+      line(io, JSON.stringify(result));
+      activities.push(...result.connections.filter((c) => c.ok).map((c) => ({ projectPath, tree: c.alias })));
+      if (result.connections.some((c) => !c.ok)) process.exitCode = 1;
     });
 
   program
     .command("prepare-write")
     .description("Prepare an isolated Context Tree worktree for a write.")
     .option("--project-path <path>", "project directory", ".")
-    .action((options: { projectPath: string }) => {
-      line(io, JSON.stringify(prepareContextWrite(resolve(io.cwd(), options.projectPath))));
+    .option("--tree <alias>", "select a project connection")
+    .action((options: { projectPath: string; tree?: string }) => {
+      const result = prepareContextWrite(resolve(io.cwd(), options.projectPath), undefined, options.tree);
+      activities.push({ projectPath: result.connection.projectPath, tree: result.connection.alias });
+      line(io, JSON.stringify(result));
     });
 
   program
@@ -176,17 +209,27 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .requiredOption("--worktree-path <path>", "prepared worktree path")
     .requiredOption("--message <message>", "commit message for the pending changes")
     .option("--project-path <path>", "project directory", ".")
-    .action((options: { message: string; projectPath: string; worktreePath: string }) => {
+    .option("--tree <alias>", "select a project connection")
+    .action((options: { message: string; projectPath: string; worktreePath: string; tree?: string }) => {
+      let activity: Parameters<typeof recordCleanupActivity>[0] | undefined;
+      try {
+        const connection = preparedConnection(resolve(io.cwd(), options.worktreePath));
+        activity = { projectPath: connection.projectPath, tree: connection.alias };
+      } catch {
+        /* finish reports validation errors */
+      }
       line(
         io,
         JSON.stringify(
           finishContextWrite({
+            tree: options.tree,
             message: options.message,
             projectPath: resolve(io.cwd(), options.projectPath),
             worktreePath: resolve(io.cwd(), options.worktreePath),
           }),
         ),
       );
+      if (activity) activities.push(activity);
     });
 
   program
@@ -194,9 +237,15 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .description("Publish the local tree as a new private GitHub repository.")
     .argument("[repository]", "GitHub OWNER/REPO override; defaults to the authenticated account and tree name")
     .option("--project-path <path>", "project directory", ".")
+    .option("--tree <alias>", "select a project connection")
     .option(...jsonOption)
-    .action((repository: string | undefined, options: { json: boolean; projectPath: string }) => {
-      emit(io, options.json, publishProject(resolve(io.cwd(), options.projectPath), { repository }), formatPublish);
+    .action((repository: string | undefined, options: { json: boolean; projectPath: string; tree?: string }) => {
+      emit(
+        io,
+        options.json,
+        publishProject(resolve(io.cwd(), options.projectPath), { repository, tree: options.tree }),
+        formatPublish,
+      );
     });
 
   program
@@ -214,6 +263,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         );
       }
       emit(io, options.json, readTree(treePath, path), formatRead);
+      activities.push({ treePath });
     });
 
   program
@@ -256,6 +306,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     const command = cleanup
       .command(operation)
       .option("--project-path <path>", "project directory", ".")
+      .option("--tree <alias>", "select a project connection")
       .option(...jsonOption);
     if (operation === "schedule")
       command
@@ -267,6 +318,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     if (operation === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
     command.action(
       async (options: {
+        tree?: string;
         projectPath: string;
         json: boolean;
         agent?: string;
@@ -296,7 +348,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
           return;
         }
         if (operation === "run") {
-          const result = await runCleanup(projectPath, options.scheduleId);
+          const result = await runCleanup(projectPath, options.scheduleId, {}, options.tree);
           const wireResult = cleanupRunResultSchema.parse({ schemaVersion: SCHEMA_VERSION, ...result });
           emit(
             io,
@@ -312,8 +364,8 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
           operation === "schedule"
             ? scheduleCleanup({ ...options, projectPath, agent: options.agent ?? "" })
             : operation === "remove"
-              ? removeCleanup(projectPath)
-              : cleanupStatus(projectPath);
+              ? removeCleanup(projectPath, undefined, options.tree)
+              : cleanupStatus(projectPath, undefined, options.tree);
         emit(io, options.json, result, (value) => {
           const config = value.schedule;
           if (!config) return "No cleanup schedule.";
@@ -332,14 +384,9 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
       },
     );
   }
-  program.hook("postAction", (_command, action) => {
-    if (!["create", "connect", "sync", "read", "prepare-write", "finish-write"].includes(action.name())) return;
-    const options: { projectPath?: string; treePath?: string } = action.opts();
-    recordCleanupActivity(
-      action.name() === "read"
-        ? { treePath: resolve(io.cwd(), options.treePath ?? ".") }
-        : { projectPath: resolve(io.cwd(), options.projectPath ?? ".") },
-    );
+  program.hook("postAction", () => {
+    for (const activity of activities) recordCleanupActivity(activity);
+    activities.length = 0;
   });
 
   return program;

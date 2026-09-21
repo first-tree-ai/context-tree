@@ -56,9 +56,9 @@ function requirePackagedFile(packageRoot, relativePath) {
 }
 
 /** The JSON contracts are covered by the unit tests; here we only assert the wire shape survives packing. */
-function parseOneLineJson(output) {
+function parseOneLineJson(output, schemaVersion = 1) {
   const parsed = JSON.parse(output);
-  assert.equal(parsed.schemaVersion, 1, "every machine-readable response must carry schema version 1");
+  assert.equal(parsed.schemaVersion, schemaVersion, "response must carry its contract schema version");
   return parsed;
 }
 
@@ -242,7 +242,26 @@ try {
 
   const resolved = runCli(cliPath, consumerRoot, ["resolve", "--json"]);
   assert.equal(resolved.status, 0);
-  assert.equal(parseOneLineJson(resolved.stdout).tree.path, treePath);
+  assert.equal(parseOneLineJson(resolved.stdout, 2).connections[0].tree.path, treePath);
+
+  const added = runCli(cliPath, consumerRoot, [
+    "create",
+    "--name",
+    "additional-context",
+    "--as",
+    "additional",
+    "--json",
+  ]);
+  assert.equal(added.status, 0);
+  const multiple = parseOneLineJson(runCli(cliPath, consumerRoot, ["resolve", "--json"]).stdout, 2);
+  assert.equal(multiple.connections.length, 2);
+  const selected = parseOneLineJson(runCli(cliPath, consumerRoot, ["sync", "--tree", "additional"]).stdout, 2);
+  assert.equal(selected.connections.length, 1);
+  assert.equal(selected.connections[0].alias, "additional");
+  assert.equal(selected.connections[0].ok, true);
+  const detached = runCli(cliPath, consumerRoot, ["disconnect", "--tree", "additional", "--json"]);
+  assert.equal(detached.status, 0);
+  assert.equal(parseOneLineJson(detached.stdout).disconnected, true);
 
   // A project-scoped install is the re-run path, and must not need a host directory to exist.
   const projectInstall = runCli(cliPath, consumerRoot, ["install", "--host", "codex", "--project", "."]);
