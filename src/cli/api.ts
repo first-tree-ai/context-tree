@@ -81,7 +81,7 @@ function emit<T>(io: ContextTreeCliIo, json: boolean, result: T, format: (value:
 const jsonOption = ["--json", "print machine-readable JSON (versioned schema) instead of text"] as const;
 
 function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
-  const activityPaths: string[] = [];
+  const activities: Parameters<typeof recordCleanupActivity>[0][] = [];
   const program = new Command()
     .name("context-tree")
     .description("Create, connect, list, read, write, and publish Context Trees.")
@@ -102,7 +102,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         name: options.name,
         alias: options.as,
       });
-      activityPaths.push(result.treePath);
+      activities.push({ treePath: result.treePath });
       emit(io, options.json, result, formatCreate);
     });
 
@@ -125,7 +125,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         }
         if (target !== undefined) {
           const result = connectProject({ projectPath, target, alias: options.as });
-          activityPaths.push(result.tree.path);
+          activities.push({ projectPath, tree: result.alias });
           emit(io, options.json, result, formatConnect);
           return;
         }
@@ -135,7 +135,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
             alias: options.as,
             treePath: resolve(io.cwd(), options.treePath),
           });
-          activityPaths.push(result.tree.path);
+          activities.push({ projectPath, tree: result.alias });
           emit(io, options.json, result, formatConnect);
           return;
         }
@@ -185,9 +185,10 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .option("--project-path <path>", "project directory", ".")
     .option("--tree <alias>", "select a project connection")
     .action((options: { projectPath: string; tree?: string }) => {
-      const result = syncProject(resolve(io.cwd(), options.projectPath), undefined, options.tree);
+      const projectPath = resolve(io.cwd(), options.projectPath);
+      const result = syncProject(projectPath, undefined, options.tree);
       line(io, JSON.stringify(result));
-      activityPaths.push(...result.connections.filter((c) => c.ok).map((c) => c.tree.path));
+      activities.push(...result.connections.filter((c) => c.ok).map((c) => ({ projectPath, tree: c.alias })));
       if (result.connections.some((c) => !c.ok)) process.exitCode = 1;
     });
 
@@ -198,7 +199,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .option("--tree <alias>", "select a project connection")
     .action((options: { projectPath: string; tree?: string }) => {
       const result = prepareContextWrite(resolve(io.cwd(), options.projectPath), undefined, options.tree);
-      activityPaths.push(result.connection.tree.path);
+      activities.push({ projectPath: result.connection.projectPath, tree: result.connection.alias });
       line(io, JSON.stringify(result));
     });
 
@@ -210,9 +211,10 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     .option("--project-path <path>", "project directory", ".")
     .option("--tree <alias>", "select a project connection")
     .action((options: { message: string; projectPath: string; worktreePath: string; tree?: string }) => {
-      let activityTree: string | undefined;
+      let activity: Parameters<typeof recordCleanupActivity>[0] | undefined;
       try {
-        activityTree = preparedConnection(resolve(io.cwd(), options.worktreePath)).tree.path;
+        const connection = preparedConnection(resolve(io.cwd(), options.worktreePath));
+        activity = { projectPath: connection.projectPath, tree: connection.alias };
       } catch {
         /* finish reports validation errors */
       }
@@ -227,7 +229,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
           }),
         ),
       );
-      if (activityTree) activityPaths.push(activityTree);
+      if (activity) activities.push(activity);
     });
 
   program
@@ -261,7 +263,7 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
         );
       }
       emit(io, options.json, readTree(treePath, path), formatRead);
-      activityPaths.push(treePath);
+      activities.push({ treePath });
     });
 
   program
@@ -383,8 +385,8 @@ function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
     );
   }
   program.hook("postAction", () => {
-    for (const treePath of activityPaths) recordCleanupActivity({ treePath });
-    activityPaths.length = 0;
+    for (const activity of activities) recordCleanupActivity(activity);
+    activities.length = 0;
   });
 
   return program;

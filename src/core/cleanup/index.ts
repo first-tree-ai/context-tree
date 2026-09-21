@@ -81,6 +81,7 @@ function findSchedule(project: string, alias?: string): CleanupSchedule | undefi
   const records = connectionRecords(canonical);
   if (alias === undefined && records.length > 1)
     throw new Error("Several Context Trees are connected; select --tree <alias>.");
+  alias ??= records[0]?.alias;
   // Saved project lookup remains available after a connection changes or disappears.
   const owned = schedules().filter(
     (config) => config.projectPath === canonical && (alias === undefined || config.alias === alias),
