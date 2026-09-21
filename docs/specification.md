@@ -200,7 +200,13 @@ The CLI provides cleanup schedule, status, remove, run, and logs commands with
 identity has one schedule shared across projects. A versioned schedule persists
 the alias, project, tree state, and identity. Removed or replaced connections make
 it inactive. Activity and logs belong to the relevant tree, and successful commands
-refresh only the trees they used. Native LaunchAgents or systemd user timers run
+refresh only the trees they used. Connect, sync, prepare-write, and finish-write
+match activity by tree identity across checkouts; partial sync refreshes only
+successful entries. Create and read match by path. Without `--tree`, cleanup
+selects the sole connection before considering retained schedules; multiple
+connections require selection. Explicit aliases can access retained schedules,
+and saved-schedule lookup remains available when no connections remain.
+Native LaunchAgents or systemd user timers run
 the saved configuration; host application UI is outside this repository's scope.
 
 ## Publication

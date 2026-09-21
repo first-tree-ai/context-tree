@@ -136,6 +136,10 @@ unused for 24 hours. Use one designated cleaner per shared tree. Select a tree
 with `--tree <alias>` on cleanup schedule, status, run, logs, and remove. Multiple
 trees can be scheduled per project, with one schedule per tree identity across
 projects. Removed or replaced connections make their saved schedules inactive.
+With one connection, cleanup selects it even if other schedules remain saved;
+use `--tree <alias>` to access a disconnected tree's retained schedule.
+Successful connect, sync, prepare-write, and finish-write refresh activity across
+checkouts of the same GitHub repository. Partial sync refreshes only successful trees.
 `context-tree cleanup run` runs the configured cleanup now; `cleanup logs --list`
 lists previous runs.
 
