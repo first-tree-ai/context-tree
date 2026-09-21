@@ -42,7 +42,9 @@ describe("MVP skill inventory", () => {
       const metadata = frontmatter(body);
       expect(metadata.name).toBe(name);
       expect(metadata.license).toBe("Apache-2.0");
-      expect(metadata.compatibility).toBe("Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.");
+      expect(metadata.compatibility).toBe(
+        "Requires Node.js 22.13+ and the context-tree CLI with connection schema version 2.",
+      );
       // Codex reads this interface block for plain user-installed skills, not only for plugins.
       expect(existsSync(join(ROOT, name, "agents", "openai.yaml"))).toBe(true);
       expect(body).toContain(INSTALL_HINT);
@@ -147,4 +149,16 @@ describe("editorial policy reaches the skills that need it", () => {
       expect(source(name)).toContain("treat the tree as drifted");
     }
   });
+});
+
+it("routes reads across equal trees and scopes writes and cleanup explicitly", () => {
+  const read = readFileSync(join(ROOT, "context-tree-read", "SKILL.md"), "utf8");
+  expect(read).toContain("connections");
+  expect(read).toContain("continue with successful trees");
+  expect(read).toContain("connection order gives no authority");
+  for (const skill of ["write", "publish", "cleanup", "schedule-cleanup"]) {
+    const text = readFileSync(join(ROOT, `context-tree-${skill}`, "SKILL.md"), "utf8");
+    expect(text).toContain('--tree "<alias>"');
+    expect(text).toContain("does not grant write authorization");
+  }
 });

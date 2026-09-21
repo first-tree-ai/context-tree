@@ -50,6 +50,40 @@ To invoke a skill explicitly, use `$context-tree-read` in Codex,
 Replace `read` with `write`, `setup`, `create`, `connect`, `publish`, `cleanup`,
 or `schedule-cleanup` for the other workflows.
 
+## Use several trees
+
+Connections have project-local aliases. No tree is primary, and connection order
+gives no authority. Agents read relevant context across the connected trees and
+surface disagreements with attribution to each tree and revision.
+
+```bash
+context-tree connect acme/company-context --as company
+context-tree connect acme/product-context --as product
+context-tree resolve --json
+context-tree sync                         # all trees, including per-tree errors
+context-tree prepare-write --tree product
+context-tree create --name research-context --as research
+context-tree disconnect --tree research
+```
+
+Use `--tree <alias>` to filter `resolve` or `sync`, or select a destination for
+`prepare-write`, `publish`, and cleanup commands. With one connection, selection
+is implicit; with several, writes require a selection. Each write affects one
+tree, and preparation returns its connection identity and isolated worktree path.
+`finish-write` checks that identity before committing. Cross-tree work uses
+separate operations with separate outcomes.
+
+`connect` defaults the alias to the managed name, repository name, or checkout
+basename. Repeating the same attachment is idempotent; alias collisions and
+attaching a tree twice under different aliases are rejected. `disconnect --all`
+removes every project attachment without deleting checkouts. `list` remains the
+managed-tree inventory; `resolve` shows project connections, including broken ones.
+
+Connection storage, `connect`, `resolve`, `sync`, `prepare-write`, and cleanup
+schedule/status contracts use schema version 2. Unchanged command responses and
+tree documents remain version 1. Unsupported stored formats are rejected and preserved without migration.
+A partial `sync` exits nonzero but retains healthy results in `connections`.
+
 ## Share or connect an existing tree
 
 Publish your local tree as a **new private GitHub repository**:
@@ -72,7 +106,7 @@ context-tree connect my-project-context-tree
 context-tree connect --tree-path /absolute/path/to/tree
 ```
 
-Connecting switches the current project's tree. Run these commands from the
+Connecting adds a named, equal tree to the project. Run these commands from the
 project directory, or add `--project-path /path/to/project`.
 
 Stop using a tree without deleting it or its memory:
@@ -98,17 +132,20 @@ context-tree cleanup remove
 
 Choose `codex`, `claude`, or `pi`; the agent CLI must be installed and authenticated.
 Schedules run locally on macOS or Linux while the machine is awake, and skip trees
-unused for 24 hours. Use one designated cleaner per shared tree.
+unused for 24 hours. Use one designated cleaner per shared tree. Select a tree
+with `--tree <alias>` on cleanup schedule, status, run, logs, and remove. Multiple
+trees can be scheduled per project, with one schedule per tree identity across
+projects. Removed or replaced connections make their saved schedules inactive.
 `context-tree cleanup run` runs the configured cleanup now; `cleanup logs --list`
 lists previous runs.
 
 ## Useful commands
 
 ```bash
-context-tree resolve                              # show this project's tree
+context-tree resolve                              # show all project connections
 context-tree read --tree-path /path/to/tree        # browse its root index
 context-tree verify --tree-path /path/to/tree      # check its structure
-context-tree disconnect                           # remove this project's connection
+context-tree disconnect                           # remove the sole connection
 context-tree install                              # add skills for a new agent
 context-tree install --project .                  # install skills for this project
 context-tree uninstall                            # remove Context Tree skills

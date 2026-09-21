@@ -2,7 +2,7 @@
 name: context-tree-setup
 description: Offer optional Context Tree setup when requested or after a read/write reports NO_CONNECTION. Connect an existing tree or create a local or private GitHub tree, then return to the pending operation; respect session opt-outs.
 license: Apache-2.0
-compatibility: Requires Node.js 22.13+ and the context-tree CLI JSON schema version 1.
+compatibility: Requires Node.js 22.13+ and the context-tree CLI with connection schema version 2.
 metadata:
   author: first-tree-ai
 ---
@@ -39,9 +39,10 @@ If `context-tree` is not found, report once that installation requires
 original task where possible; do not install automatically.
 
 Run `context-tree resolve --project-path "<project>" --json`. If it succeeds,
-return the existing connection as ready, with its kind and canonical path.
-Do not offer to replace it; an explicit request to switch belongs to
-`$context-tree-connect`.
+return the healthy connections as ready, with each alias, kind, and canonical
+path, and report unavailable entries. An explicit request to add a connection
+continues to `$context-tree-connect` or `$context-tree-create`; existing
+connections do not prevent adding another. No connection is primary.
 
 On `NO_CONNECTION`, use an already specified choice directly. Otherwise ask
 whether to use an existing tree, create a new one, or skip Context Tree for

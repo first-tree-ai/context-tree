@@ -13,6 +13,7 @@ import { canonicalGitHubRepositoryUrl } from "./internal/github-repository.js";
 
 export type PublishProjectOptions = {
   /** GitHub OWNER/REPO override; defaults to the authenticated account plus the managed tree name. */
+  tree?: string | undefined;
   repository?: string | undefined;
 };
 
@@ -81,7 +82,7 @@ export function publishProject(
   options: PublishProjectOptions = {},
   runner?: CommandRunner,
 ): ContextTreePublishResult {
-  const connection = resolveConnectionRecord(projectPath, runner);
+  const connection = resolveConnectionRecord(projectPath, runner, options.tree);
   const root = connection.tree.path;
   if (connection.tree.kind === "github") {
     throw new ContextTreeError(

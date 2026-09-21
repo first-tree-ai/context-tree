@@ -17,8 +17,12 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   contextTreeCliErrorEnvelopeSchema,
+  contextTreeConnectionResultSchema,
   contextTreeReadResultSchema,
+  contextTreeSyncResultSchema,
+  disconnectProjectResultSchema,
   managedTreeListingResultSchema,
+  prepareContextWriteResultSchema,
   verifyTreeReportSchema,
 } from "../src/schemas.js";
 
@@ -154,7 +158,10 @@ describe("built CLI", () => {
     expect(existsSync(join(created.treePath, "NODE.md"))).toBe(true);
 
     const resolved = JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout);
-    expect(resolved).toEqual({ schemaVersion: 1, tree: { kind: "local", path: created.treePath } });
+    expect(resolved).toMatchObject({
+      schemaVersion: 2,
+      connections: [{ ok: true, tree: { kind: "local", path: created.treePath } }],
+    });
 
     const verify = JSON.parse(
       cli(project, ["verify", "--tree-path", created.treePath, "--json"], undefined, root).stdout,
@@ -289,9 +296,9 @@ describe("built CLI", () => {
 
     const nested = join(project, "deep", "nested");
     mkdirSync(nested, { recursive: true });
-    expect(JSON.parse(cli(nested, ["resolve", "--json"], undefined, root).stdout)).toEqual({
-      schemaVersion: 1,
-      tree: { kind: "local", path: created.treePath },
+    expect(JSON.parse(cli(nested, ["resolve", "--json"], undefined, root).stdout)).toMatchObject({
+      schemaVersion: 2,
+      connections: [{ ok: true, tree: { kind: "local", path: created.treePath } }],
     });
   });
 
@@ -312,9 +319,9 @@ describe("built CLI", () => {
     const worktree = join(root, "worktree");
     git(project, ["worktree", "add", "--quiet", worktree], root);
     expectCliError(cli(worktree, ["resolve", "--json"], undefined, root), "NO_CONNECTION");
-    expect(JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout)).toEqual({
-      schemaVersion: 1,
-      tree: { kind: "local", path: created.treePath },
+    expect(JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout)).toMatchObject({
+      schemaVersion: 2,
+      connections: [{ ok: true, tree: { kind: "local", path: created.treePath } }],
     });
   });
 
@@ -336,13 +343,13 @@ describe("built CLI", () => {
     const second = join(root, "second");
     mkdirSync(second);
     const connected = JSON.parse(cli(second, ["connect", "first-context-tree", "--json"], undefined, root).stdout);
-    expect(connected).toEqual({
-      schemaVersion: 1,
+    expect(connected).toMatchObject({
+      schemaVersion: 2,
       tree: { kind: "local", path: created.treePath },
     });
-    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout)).toEqual({
-      schemaVersion: 1,
-      tree: { kind: "local", path: created.treePath },
+    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout)).toMatchObject({
+      schemaVersion: 2,
+      connections: [{ ok: true, tree: { kind: "local", path: created.treePath } }],
     });
   });
 
@@ -366,8 +373,8 @@ describe("built CLI", () => {
     mkdirSync(second);
     const tree = create(root, first).treePath;
     const connected = JSON.parse(cli(second, ["connect", "--tree-path", tree, "--json"], undefined, root).stdout);
-    expect(connected).toEqual({ schemaVersion: 1, tree: { kind: "local", path: tree } });
-    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).tree.path).toBe(tree);
+    expect(connected).toMatchObject({ schemaVersion: 2, tree: { kind: "local", path: tree } });
+    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).connections[0].tree.path).toBe(tree);
   });
 
   it("rejects ambiguous disk-path connect syntax", () => {
@@ -381,7 +388,7 @@ describe("built CLI", () => {
     );
   });
 
-  it("automatically switches an existing connection", () => {
+  it("adds another equal connection", () => {
     const root = workspace();
     const first = join(root, "first");
     const second = join(root, "second");
@@ -390,7 +397,9 @@ describe("built CLI", () => {
     const firstTree = create(root, first).treePath;
     const secondTree = create(root, second).treePath;
 
-    expect(JSON.parse(cli(first, ["resolve", "--json"], undefined, root).stdout).tree.path).toBe(firstTree);
+    expect(JSON.parse(cli(first, ["resolve", "--json"], undefined, root).stdout).connections[0].tree.path).toBe(
+      firstTree,
+    );
     const replaced = JSON.parse(cli(first, ["connect", "second-context-tree", "--json"], undefined, root).stdout);
     expect(replaced.tree.path).toBe(secondTree);
   });
@@ -420,7 +429,7 @@ describe("built CLI", () => {
     const created = create(root, project);
     const connectionPath = join(root, ".context-tree", "connections.json");
     const connection = JSON.parse(readFileSync(connectionPath, "utf8")).connections[0];
-    writeFileSync(connectionPath, `${JSON.stringify({ connections: [connection, connection], schemaVersion: 1 })}\n`);
+    writeFileSync(connectionPath, `${JSON.stringify({ connections: [connection, connection], schemaVersion: 2 })}\n`);
     expectCliError(cli(project, ["resolve", "--json"], undefined, root), "CORRUPT_CONNECTION");
 
     writeFileSync(connectionPath, "{not json");
@@ -431,12 +440,14 @@ describe("built CLI", () => {
 
     // An uncommitted edit is the user's own work in progress, not a broken connection.
     writeFileSync(join(created.treePath, "draft.md"), '---\ntitle: "Draft"\n---\n\n# Draft\n');
-    const dirty = expectCliError(cli(project, ["resolve", "--json"], undefined, root), "DIRTY_TREE");
+    const dirty = JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout).connections[0];
+    expect(dirty.error.code).toBe("DIRTY_TREE");
     expect(dirty.error.message).toContain("commit or discard");
     rmSync(join(created.treePath, "draft.md"));
 
     renameSync(created.treePath, `${created.treePath}-moved`);
-    const stale = expectCliError(cli(project, ["resolve", "--json"], undefined, root), "STALE_CONNECTION");
+    const stale = JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout).connections[0];
+    expect(stale.error.code).toBe("STALE_CONNECTION");
     expect(stale.error.message).toContain("context-tree connect");
   });
 
@@ -446,9 +457,9 @@ describe("built CLI", () => {
     mkdirSync(project);
     const created = create(root, project);
     const synced = JSON.parse(cli(project, ["sync"], undefined, root).stdout);
-    expect(synced).toEqual({
+    expect(synced.connections[0]).toMatchObject({
       branch: "trunk",
-      schemaVersion: 1,
+      schemaVersion: 2,
       sha: created.commitSha,
       tree: { kind: "local", path: created.treePath },
     });
@@ -461,7 +472,11 @@ describe("built CLI", () => {
     const created = create(root, project);
 
     const prepared = JSON.parse(cli(project, ["prepare-write"], undefined, root).stdout);
-    expect(prepared).toEqual({ schemaVersion: 1, worktreePath: expect.any(String) });
+    expect(prepared).toMatchObject({
+      connection: { alias: "service-context-tree" },
+      schemaVersion: 2,
+      worktreePath: expect.any(String),
+    });
     expect(existsSync(join(prepared.worktreePath, "NODE.md"))).toBe(true);
 
     const membersDir = join(prepared.worktreePath, "members", "engineer");
@@ -480,9 +495,9 @@ describe("built CLI", () => {
     );
     expect(finished).toMatchObject({ branch: "trunk", sha: expect.stringMatching(/^[0-9a-f]{40}$/u) });
     expect(existsSync(prepared.worktreePath)).toBe(false);
-    expect(JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout)).toEqual({
-      schemaVersion: 1,
-      tree: { kind: "local", path: created.treePath },
+    expect(JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout)).toMatchObject({
+      schemaVersion: 2,
+      connections: [{ ok: true, tree: { kind: "local", path: created.treePath } }],
     });
 
     const verify = JSON.parse(
@@ -551,7 +566,7 @@ describe("built CLI", () => {
     expectCliError(cli(project, ["connect", "service-context-tree", "--json"], undefined, root), "INVALID_TREE");
   });
 
-  it("refuses to create a second tree for an already connected project", () => {
+  it("creates an additional tree for an already connected project", () => {
     const root = workspace();
     const first = join(root, "first");
     const second = join(root, "second");
@@ -559,9 +574,11 @@ describe("built CLI", () => {
     mkdirSync(second);
     const shared = create(root, first).treePath;
     expect(cli(second, ["connect", "--tree-path", shared, "--json"], undefined, root).status).toBe(0);
-    const failure = expectCliError(cli(second, ["create", "--json"], undefined, root), "CONTEXT_TREE_FAILED");
-    expect(failure.error.message).toContain("already connected");
-    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).tree.path).toBe(shared);
+    expect(cli(second, ["create", "--json"], undefined, root).status).toBe(0);
+    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).connections).toHaveLength(2);
+    expect(JSON.parse(cli(second, ["resolve", "--json"], undefined, root).stdout).connections[0].tree.path).toBe(
+      shared,
+    );
   });
 
   it("prints human-readable text by default for the inspection commands", () => {
@@ -573,7 +590,7 @@ describe("built CLI", () => {
     const resolved = cli(project, ["resolve"], undefined, root);
     expect(resolved.status).toBe(0);
     expect(resolved.stderr).toBe("");
-    expect(resolved.stdout).toContain("Connected local Context Tree.");
+    expect(resolved.stdout).toContain("service-context-tree: local");
     expect(resolved.stdout).toContain(created.treePath);
 
     const verify = cli(project, ["verify", "--tree-path", created.treePath], undefined, root);
@@ -595,4 +612,51 @@ describe("built CLI", () => {
     mkdirSync(project);
     expectCliTextError(cli(project, ["resolve"], undefined, root), "No Context Tree connection exists");
   });
+});
+
+it("selects named connections and preserves partial sync results in one JSON line", () => {
+  const root = workspace();
+  const project = join(root, "multi");
+  mkdirSync(project);
+  const company = JSON.parse(
+    cli(project, ["create", "--name", "company-context", "--as", "company", "--json"], undefined, root).stdout,
+  );
+  const product = JSON.parse(
+    cli(project, ["create", "--name", "product-context", "--as", "product", "--json"], undefined, root).stdout,
+  );
+  const resolved = contextTreeConnectionResultSchema.parse(
+    JSON.parse(cli(project, ["resolve", "--json"], undefined, root).stdout),
+  );
+  expect(resolved.connections.map((c) => c.alias)).toEqual(["company", "product"]);
+  expectCliError(cli(project, ["prepare-write"], undefined, root), "AMBIGUOUS_CONNECTION");
+  expectCliTextError(cli(project, ["disconnect"], undefined, root), "--tree");
+  expectCliError(cli(project, ["publish", "--json"], undefined, root), "AMBIGUOUS_CONNECTION");
+  const selected = cli(project, ["resolve", "--tree", "product", "--json"], undefined, root);
+  expect(contextTreeConnectionResultSchema.parse(JSON.parse(selected.stdout)).connections.map((c) => c.alias)).toEqual([
+    "product",
+  ]);
+  writeFileSync(join(company.treePath, "draft.md"), "pending edit");
+  const partial = cli(project, ["sync"], undefined, root);
+  expect(partial.status).toBe(1);
+  expect(partial.stderr).toBe("");
+  expect(partial.stdout.trim().split("\n")).toHaveLength(1);
+  const synced = contextTreeSyncResultSchema.parse(JSON.parse(partial.stdout));
+  expect(synced.connections).toMatchObject([
+    { alias: "company", ok: false, error: { code: "DIRTY_TREE" } },
+    { alias: "product", ok: true, sha: product.commitSha },
+  ]);
+  const prepared = prepareContextWriteResultSchema.parse(
+    JSON.parse(cli(project, ["prepare-write", "--tree", "product"], undefined, root).stdout),
+  );
+  workspaces.add(prepared.worktreePath);
+  expect(prepared.connection.alias).toBe("product");
+  expect(
+    disconnectProjectResultSchema.parse(
+      JSON.parse(cli(project, ["disconnect", "--tree", "company", "--json"], undefined, root).stdout),
+    ).disconnected,
+  ).toBe(true);
+  expect(cli(project, ["sync"], undefined, root).status).toBe(0);
+  expect(cli(project, ["disconnect", "--all", "--json"], undefined, root).status).toBe(0);
+  expect(existsSync(company.treePath)).toBe(true);
+  expect(existsSync(product.treePath)).toBe(true);
 });

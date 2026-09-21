@@ -3,6 +3,8 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 export const SCHEMA_VERSION = 1 as const;
+export const CONNECTION_SCHEMA_VERSION = 2 as const;
+export const TREE_DOCUMENT_SCHEMA_VERSION = 1 as const;
 export const CONTEXT_TREE_ROOT_NODE_MAX_BYTES = 16 * 1024;
 
 export const VALIDATION_CODES = {
@@ -28,6 +30,7 @@ export const VALIDATION_CODES = {
 } as const;
 
 export const CLI_ERROR_CODES = {
+  ambiguousConnection: "AMBIGUOUS_CONNECTION",
   corruptConnection: "CORRUPT_CONNECTION",
   dirtyTree: "DIRTY_TREE",
   failed: "CONTEXT_TREE_FAILED",
@@ -106,7 +109,7 @@ export const githubRepositoryIdentitySchema = z.string().superRefine((value, con
 
 export const contextTreeRootNodeFrontmatterSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    schemaVersion: z.literal(TREE_DOCUMENT_SCHEMA_VERSION),
     title: z.string().trim().min(1),
     description: z.string().trim().min(1).optional(),
     soft_links: z.array(z.string().trim().min(1)).min(1).optional(),
@@ -247,17 +250,23 @@ export type ContextTreeState = z.infer<typeof contextTreeStateSchema>;
 
 export const contextTreeConnectionSchema = z
   .object({
+    alias: treeNameSchema,
     projectPath: absoluteSingleLinePathSchema,
     tree: contextTreeStateSchema,
   })
   .strict();
 export type ContextTreeConnection = z.infer<typeof contextTreeConnectionSchema>;
 
+export const connectionErrorSchema = z.object({ code: z.enum(CLI_ERROR_CODES), message: z.string() }).strict();
+export const connectionDiscoverySchema = z.discriminatedUnion("ok", [
+  contextTreeConnectionSchema.extend({ ok: z.literal(true) }),
+  contextTreeConnectionSchema.extend({ ok: z.literal(false), error: connectionErrorSchema }),
+]);
+export const connectionsFileSchema = z
+  .object({ schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION), connections: z.array(contextTreeConnectionSchema) })
+  .strict();
 export const contextTreeConnectionResultSchema = z
-  .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
-    tree: contextTreeStateSchema,
-  })
+  .object({ schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION), connections: z.array(connectionDiscoverySchema) })
   .strict();
 export type ContextTreeConnectionResult = z.infer<typeof contextTreeConnectionResultSchema>;
 
@@ -275,7 +284,8 @@ export type CreateProjectResult = z.infer<typeof createProjectResultSchema>;
 
 export const connectProjectResultSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    alias: treeNameSchema,
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
     tree: contextTreeStateSchema,
   })
   .strict();
@@ -297,19 +307,40 @@ export const managedTreeListingResultSchema = z
   .strict();
 export type ManagedTreeListingResult = z.infer<typeof managedTreeListingResultSchema>;
 
-export const contextTreeSyncResultSchema = z
+export const contextTreeSyncSnapshotSchema = z
   .object({
     branch: z.string().trim().min(1),
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
     sha: z.string(),
     tree: contextTreeStateSchema,
+  })
+  .strict();
+export type ContextTreeSyncSnapshot = z.infer<typeof contextTreeSyncSnapshotSchema>;
+
+export const contextTreeSyncResultSchema = z
+  .object({
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
+    connections: z.array(
+      z.discriminatedUnion("ok", [
+        contextTreeSyncSnapshotSchema.extend({ alias: treeNameSchema, ok: z.literal(true) }),
+        z
+          .object({
+            alias: treeNameSchema,
+            tree: contextTreeStateSchema,
+            ok: z.literal(false),
+            error: connectionErrorSchema,
+          })
+          .strict(),
+      ]),
+    ),
   })
   .strict();
 export type ContextTreeSyncResult = z.infer<typeof contextTreeSyncResultSchema>;
 
 export const prepareContextWriteResultSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    connection: contextTreeConnectionSchema,
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
     worktreePath: absoluteSingleLinePathSchema,
   })
   .strict();
@@ -359,6 +390,9 @@ export const cleanupAgentSchema = z.union([z.literal("codex"), z.literal("claude
 export type CleanupAgent = z.infer<typeof cleanupAgentSchema>;
 export const cleanupScheduleSchema = z
   .object({
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
+    alias: treeNameSchema,
+    tree: contextTreeStateSchema,
     id: z.string().regex(/^[a-f0-9]{64}$/u),
     projectPath: z.string().refine(isAbsolute),
     identity: z.string(),
@@ -396,7 +430,7 @@ export const cleanupOutcomeSchema = z
 export type CleanupOutcome = z.infer<typeof cleanupOutcomeSchema>;
 export const cleanupResultSchema = z
   .object({
-    schemaVersion: z.literal(SCHEMA_VERSION),
+    schemaVersion: z.literal(CONNECTION_SCHEMA_VERSION),
     schedule: cleanupScheduleSchema.nullable(),
     registered: z.boolean(),
     running: z.boolean(),
@@ -439,3 +473,8 @@ export const cleanupLogsResultSchema = z
   })
   .strict();
 export type CleanupLogsResult = z.infer<typeof cleanupLogsResultSchema>;
+
+export const disconnectProjectResultSchema = z
+  .object({ schemaVersion: z.literal(SCHEMA_VERSION), disconnected: z.boolean() })
+  .strict();
+export type DisconnectProjectResult = z.infer<typeof disconnectProjectResultSchema>;

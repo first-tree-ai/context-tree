@@ -14,14 +14,16 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { z } from "zod";
+import type { z } from "zod";
 import {
   CLI_ERROR_CODES,
+  CONNECTION_SCHEMA_VERSION,
   type ConnectProjectResult,
   type ContextTreeConnection,
   type ContextTreeConnectionResult,
-  contextTreeConnectionSchema,
+  connectionsFileSchema,
   contextTreeStateSchema,
+  type DisconnectProjectResult,
   githubRepositoryIdentitySchema,
   type ManagedTreeListingEntry,
   type ManagedTreeListingResult,
@@ -29,15 +31,12 @@ import {
   treeNameSchema,
 } from "../schemas.js";
 import { ContextTreeError } from "./internal/errors.js";
-import { CommandError, type CommandRunner, git, optionalGit } from "./internal/git.js";
+import { CommandError, type CommandRunner, git, optionalGit, sanitizeCommandOutput } from "./internal/git.js";
 import { canonicalGitHubRepositoryUrl, gitHubRepositoryFromOriginUrl } from "./internal/github-repository.js";
 import { canonicalProjectRoot } from "./internal/project.js";
 import { linkProjectInstructions } from "./internal/project-instructions.js";
 import { validateStoredTreeState, validateTreeCheckout } from "./internal/tree-state.js";
 
-const connectionsFileSchema = z
-  .object({ connections: z.array(contextTreeConnectionSchema), schemaVersion: z.literal(SCHEMA_VERSION) })
-  .strict();
 type ConnectionsFile = z.infer<typeof connectionsFileSchema>;
 
 const DUPLICATE_MESSAGE = "Duplicate Context Tree connection records exist for this project.";
@@ -83,9 +82,12 @@ export function managedTreesRoot(): string {
 
 function loadConnections(required: boolean): ConnectionsFile {
   const path = connectionsPath();
-  if (!existsSync(path)) {
+  const parent = lstatSync(dirname(path), { throwIfNoEntry: false });
+  if (parent && (parent.isSymbolicLink() || !parent.isDirectory()))
+    throw new ContextTreeError(CLI_ERROR_CODES.corruptConnection, "Unsafe connections directory.");
+  if (!lstatSync(path, { throwIfNoEntry: false })) {
     if (required) throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
-    return { connections: [], schemaVersion: SCHEMA_VERSION };
+    return { connections: [], schemaVersion: CONNECTION_SCHEMA_VERSION };
   }
   try {
     const entry = lstatSync(path);
@@ -94,7 +96,7 @@ function loadConnections(required: boolean): ConnectionsFile {
   } catch {
     throw new ContextTreeError(
       CLI_ERROR_CODES.corruptConnection,
-      "Context Tree connections are corrupt; remove connections.json and run context-tree connect again.",
+      "Context Tree connections use an unsupported or corrupt format; the stored file has been preserved.",
     );
   }
 }
@@ -116,10 +118,36 @@ function saveConnections(value: ConnectionsFile): void {
   }
 }
 
-/** Exactly one record may exist per project; more than one is corruption. */
-function singleConnection(stored: ConnectionsFile, canonical: string): ContextTreeConnection | undefined {
-  const matches = stored.connections.filter((connection) => connection.projectPath === canonical);
-  if (matches.length > 1) throw new ContextTreeError(CLI_ERROR_CODES.corruptConnection, DUPLICATE_MESSAGE);
+export function connectionRecords(
+  projectPath: string,
+  runner?: CommandRunner,
+  alias?: string,
+): ContextTreeConnection[] {
+  const canonical = canonicalProjectRoot(projectPath, runner);
+  const matches = loadConnections(false)
+    .connections.filter((c) => c.projectPath === canonical)
+    .sort((a, b) => a.alias.localeCompare(b.alias));
+  if (
+    new Set(matches.map((c) => c.alias)).size !== matches.length ||
+    new Set(matches.map((c) => treeKey(c.tree))).size !== matches.length ||
+    new Set(matches.map((c) => c.tree.path)).size !== matches.length
+  )
+    throw new ContextTreeError(CLI_ERROR_CODES.corruptConnection, DUPLICATE_MESSAGE);
+  if (alias === undefined) return matches;
+  const selected = matches.filter((c) => c.alias === alias);
+  if (!selected.length)
+    throw new ContextTreeError(CLI_ERROR_CODES.noConnection, `No connection named ${alias}. Run context-tree resolve.`);
+  return selected;
+}
+function treeKey(tree: ContextTreeConnection["tree"]): string {
+  return tree.kind === "github" ? `github:${tree.repository.toLowerCase()}` : `local:${tree.path}`;
+}
+function selectConnection(matches: ContextTreeConnection[]): ContextTreeConnection | undefined {
+  if (matches.length > 1)
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.ambiguousConnection,
+      "Several Context Trees are connected; select --tree <alias> (see context-tree resolve).",
+    );
   return matches[0];
 }
 
@@ -155,8 +183,12 @@ export function listManagedTrees(runner?: CommandRunner): ManagedTreeListingResu
   return { schemaVersion: SCHEMA_VERSION, trees };
 }
 
-export function findConnectionRecord(projectPath: string, runner?: CommandRunner): ContextTreeConnection | undefined {
-  return singleConnection(loadConnections(false), canonicalProjectRoot(projectPath, runner));
+export function findConnectionRecord(
+  projectPath: string,
+  runner?: CommandRunner,
+  alias?: string,
+): ContextTreeConnection | undefined {
+  return selectConnection(connectionRecords(projectPath, runner, alias));
 }
 
 function validateManagedTreeState(
@@ -173,46 +205,83 @@ function validateManagedTreeState(
   return validated;
 }
 
-export function resolveConnectionRecord(projectPath: string, runner?: CommandRunner): ContextTreeConnection {
-  const canonical = canonicalProjectRoot(projectPath, runner);
-  const connection = singleConnection(loadConnections(true), canonical);
+export function resolveConnectionRecord(
+  projectPath: string,
+  runner?: CommandRunner,
+  alias?: string,
+): ContextTreeConnection {
+  const connection = selectConnection(connectionRecords(projectPath, runner, alias));
   if (connection === undefined) throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
   try {
-    return { projectPath: connection.projectPath, tree: validateManagedTreeState(connection.tree, runner) };
+    return { ...connection, tree: validateManagedTreeState(connection.tree, runner) };
   } catch (error) {
     // Dirty and invalid checkouts already carry their own specific code.
     if (error instanceof ContextTreeError) throw error;
     const detail = error instanceof Error ? error.message : "unknown failure";
     throw new ContextTreeError(
       CLI_ERROR_CODES.staleConnection,
-      `The connected Context Tree is no longer usable at ${connection.tree.path}; run context-tree connect to point this project at its current location. ${detail}`,
+      `The connected Context Tree is no longer usable at ${connection.tree.path}; remove the stale alias with context-tree disconnect --tree <alias>, then run context-tree connect at its current location. ${detail}`,
     );
   }
 }
 
-export function resolveConnection(projectPath: string, runner?: CommandRunner): ContextTreeConnectionResult {
-  return { schemaVersion: SCHEMA_VERSION, tree: resolveConnectionRecord(projectPath, runner).tree };
+export function resolveConnection(
+  projectPath: string,
+  runner?: CommandRunner,
+  alias?: string,
+): ContextTreeConnectionResult {
+  const records = connectionRecords(projectPath, runner, alias);
+  if (!records.length) throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
+  return {
+    schemaVersion: CONNECTION_SCHEMA_VERSION,
+    connections: records.map((connection) => {
+      try {
+        return { ...resolveConnectionRecord(projectPath, runner, connection.alias), ok: true as const };
+      } catch (error) {
+        return {
+          ...connection,
+          ok: false as const,
+          error: {
+            code: error instanceof ContextTreeError ? error.code : CLI_ERROR_CODES.failed,
+            message: sanitizeCommandOutput(error instanceof Error ? error.message : "Connection unavailable."),
+          },
+        };
+      }
+    }),
+  };
 }
 
-export function upsertConnection(
-  connection: ContextTreeConnection,
-  runner?: CommandRunner,
-): ContextTreeConnectionResult {
+export function upsertConnection(connection: ContextTreeConnection, runner?: CommandRunner): ConnectProjectResult {
   const canonical = canonicalProjectRoot(connection.projectPath, runner);
   const record: ContextTreeConnection = {
+    alias: treeNameSchema.parse(connection.alias),
     projectPath: canonical,
     tree: validateManagedTreeState(contextTreeStateSchema.parse(connection.tree), runner),
   };
   const stored = loadConnections(false);
-  const previous = singleConnection(stored, canonical);
+  const matches = connectionRecords(canonical, runner);
+  const previous = matches.find((c) => c.alias === record.alias);
+  if (previous && treeKey(previous.tree) !== treeKey(record.tree))
+    throw new Error("Connection alias already belongs to a different tree.");
+  if (
+    matches.some(
+      (c) => c.alias !== record.alias && (treeKey(c.tree) === treeKey(record.tree) || c.tree.path === record.tree.path),
+    )
+  )
+    throw new Error("This tree is already attached under another alias.");
   if (previous !== undefined && JSON.stringify(previous.tree) === JSON.stringify(record.tree)) {
-    return { schemaVersion: SCHEMA_VERSION, tree: record.tree };
+    return { schemaVersion: CONNECTION_SCHEMA_VERSION, alias: record.alias, tree: record.tree };
   }
   saveConnections({
-    connections: [...stored.connections.filter((candidate) => candidate.projectPath !== canonical), record],
-    schemaVersion: SCHEMA_VERSION,
+    connections: [
+      ...stored.connections.filter(
+        (candidate) => candidate.projectPath !== canonical || candidate.alias !== record.alias,
+      ),
+      record,
+    ],
+    schemaVersion: CONNECTION_SCHEMA_VERSION,
   });
-  return { schemaVersion: SCHEMA_VERSION, tree: record.tree };
+  return { schemaVersion: CONNECTION_SCHEMA_VERSION, alias: record.alias, tree: record.tree };
 }
 
 export function updateConnectionTree(
@@ -222,15 +291,15 @@ export function updateConnectionTree(
 ): void {
   const canonical = canonicalProjectRoot(projectPath, runner);
   const stored = loadConnections(true);
-  if (singleConnection(stored, canonical) === undefined) {
+  if (!stored.connections.some((c) => c.projectPath === canonical && c.tree.path === tree.path)) {
     throw new ContextTreeError(CLI_ERROR_CODES.noConnection, NO_CONNECTION_MESSAGE);
   }
   const validatedTree = validateManagedTreeState(contextTreeStateSchema.parse(tree), runner);
   saveConnections({
     connections: stored.connections.map((connection) =>
-      connection.projectPath === canonical ? { ...connection, tree: validatedTree } : connection,
+      connection.tree.path === tree.path ? { ...connection, tree: validatedTree } : connection,
     ),
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: CONNECTION_SCHEMA_VERSION,
   });
 }
 
@@ -258,7 +327,10 @@ function realManagedDirectory(name: string, destination: string): void {
   }
 }
 
-export type ConnectProjectOptions = { projectPath: string; target: string } | { projectPath: string; treePath: string };
+export type ConnectProjectOptions = (
+  | { projectPath: string; target: string }
+  | { projectPath: string; treePath: string }
+) & { alias?: string | undefined };
 
 /**
  * Connect by exact managed name or GitHub OWNER/REPO, or attach an exact,
@@ -267,11 +339,20 @@ export type ConnectProjectOptions = { projectPath: string; target: string } | { 
 export function connectProject(options: ConnectProjectOptions, runner?: CommandRunner): ConnectProjectResult {
   /** Store the connection and offer instruction discovery for existing project instructions. */
   const connect = (tree: ContextTreeConnection["tree"]): ConnectProjectResult => {
-    const result = upsertConnection({ projectPath: options.projectPath, tree }, runner);
+    const result = upsertConnection(
+      {
+        alias:
+          options.alias ?? ("target" in options ? options.target.split("/").at(-1) : undefined) ?? basename(tree.path),
+        projectPath: options.projectPath,
+        tree,
+      },
+      runner,
+    );
     const canonical = canonicalProjectRoot(options.projectPath, runner);
     linkProjectInstructions(canonical);
     return {
-      schemaVersion: SCHEMA_VERSION,
+      schemaVersion: CONNECTION_SCHEMA_VERSION,
+      alias: result.alias,
       tree: result.tree,
     };
   };
@@ -343,10 +424,15 @@ export function connectProject(options: ConnectProjectOptions, runner?: CommandR
 export function disconnectProject(
   projectPath: string,
   runner?: CommandRunner,
-): { schemaVersion: 1; disconnected: boolean } {
+  options: { tree?: string | undefined; all?: boolean } = {},
+): DisconnectProjectResult {
   const canonical = canonicalProjectRoot(projectPath, runner);
   const stored = loadConnections(false);
-  const remaining = stored.connections.filter((connection) => connection.projectPath !== canonical);
+  if (options.all && options.tree) throw new Error("Choose --all or --tree, not both.");
+  const selected = options.all ? undefined : selectConnection(connectionRecords(projectPath, runner, options.tree));
+  const remaining = stored.connections.filter(
+    (connection) => connection.projectPath !== canonical || (!options.all && connection.alias !== selected?.alias),
+  );
   if (remaining.length !== stored.connections.length) saveConnections({ ...stored, connections: remaining });
   return { schemaVersion: SCHEMA_VERSION, disconnected: remaining.length !== stored.connections.length };
 }

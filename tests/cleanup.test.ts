@@ -25,7 +25,7 @@ import {
 } from "../src/core/cleanup/index.js";
 import { type CleanupScheduler, nativeScheduler } from "../src/core/cleanup/scheduler.js";
 import { atomicState, loadSchedule, readState, statePath } from "../src/core/cleanup/store.js";
-import { connectProject } from "../src/core/connections.js";
+import { connectProject, disconnectProject } from "../src/core/connections.js";
 import { createProject } from "../src/core/create.js";
 import { ContextTreeError } from "../src/core/internal/errors.js";
 import { CLI_ERROR_CODES, type CleanupSchedule } from "../src/schemas.js";
@@ -211,7 +211,8 @@ describe("cleanup lifecycle", () => {
       finish,
       agent: async (_config, path) => {
         remember(path);
-        connectProject({ projectPath: project, treePath: otherTree });
+        disconnectProject(project);
+        connectProject({ projectPath: project, treePath: otherTree, alias: config.alias });
       },
     });
     expect(result.outcome).toBe("failed");
@@ -519,4 +520,34 @@ it("stops before publication on log failure and preserves the worktree", async (
   expect(finish).not.toHaveBeenCalled();
   expect(existsSync(result.worktreePath ?? "")).toBe(true);
   expect(readState(statePath(config.id, "latest"))).toMatchObject({ outcome: "failed", runId: result.runId });
+});
+
+it("keeps multiple schedules, activity, logs, and removal independent", async () => {
+  createProject(project, undefined, { name: "product", alias: "product" });
+  const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
+  if (!second) throw new Error("missing second schedule");
+  expect(second.id).not.toBe(config.id);
+  expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
+  atomicState(statePath(config.id, "activity"), 10);
+  atomicState(statePath(second.id, "activity"), 20);
+  recordCleanupActivity({ projectPath: project, tree: "product" });
+  expect(readState(statePath(config.id, "activity"))).toBe(10);
+  expect(readState(statePath(second.id, "activity"))).toBeGreaterThan(20);
+  const result = await runCleanup(project, undefined, { agent: async (_config, path) => remember(path) }, "product");
+  expect(result.outcome).toBe("noop");
+  expect(readState(statePath(config.id, "latest"))).toBeUndefined();
+  removeCleanup(project, scheduler, "product");
+  expect(loadSchedule(config.id).enabled).toBe(true);
+  expect(loadSchedule(second.id).enabled).toBe(false);
+});
+
+it("makes removed or replaced scheduled connections inactive", async () => {
+  disconnectProject(project);
+  expect(cleanupStatus(project, scheduler, config.alias).inactive).toBe(true);
+  const agent = vi.fn();
+  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
+  createProject(project, undefined, { name: "replacement", alias: config.alias });
+  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
+  expect(agent).not.toHaveBeenCalled();
+  expect(loadSchedule(config.id).tree.path).toBe(tree);
 });
