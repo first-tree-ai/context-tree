@@ -7,10 +7,10 @@ description: Remove noise, consolidate duplicates, and improve placement through
 
 Read [the editorial rules](references/editorial.md) before editing.
 
-For a manual pass, select the requested tree and run `context-tree write prepare --tree <name-or-source>`. Work only inside the returned `treeRoot`. Read every normal and member document, apply the editorial rules, and review the complete diff. Run `context-tree write finish <id> --message "Clean up Context Tree content"` to validate and retain a review commit. Include `--publish` only when publication to this managed Git source is already authorized. Directory sources use the host's review and merge workflow.
+A host-scheduled run supplies a prepared tree directory. Edit only that directory using the editorial rules; the runner owns validation, commits, and publication. Do not start another session.
 
-A host-scheduled run supplies an already prepared tree directory. In that case edit only that directory and report findings; the runner owns validation, commits, and publication. Never start another session from inside it.
+For a manual pass, run `context-tree write prepare --tree <name-or-source>` from the target project. Save the session `id` and apply the editorial rules inside its `treeRoot`. Run `context-tree write finish <id> --message "Clean up Context Tree content"` to validate and retain a review commit. Include `--publish` only when publication to this managed Git source is authorized. Directory sources use the project's review and merge workflow.
 
-Report unresolved contradictions and retained review branches outside the tree. Preserve failed work rather than resetting it.
+Report retained work with its path and session ID. Preserve failed work rather than resetting it.
 
 Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.

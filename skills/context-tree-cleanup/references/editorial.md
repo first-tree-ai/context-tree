@@ -23,5 +23,6 @@ never traverse symlinks or leave the worktree.
 Review the complete diff including untracked additions. Check affected links
 and anchors directly; structural verification does not catch every broken
 Markdown link. Inspect infrastructure only for reference integrity. Skip a move
-or deletion if preserving references requires editing infrastructure. Fix only
-problems introduced by this pass. Keep reports outside the tree.
+or deletion if preserving references requires editing infrastructure. Repair
+links broken by this pass; report pre-existing broken references. Keep reports
+outside the tree.
