@@ -20,7 +20,7 @@ function load(root: string): ProjectConfig {
   if (!config.success)
     throw new ContextTreeError(
       CLI_ERROR_CODES.corruptConnection,
-      `Invalid ${CONFIG_FILE}; no legacy formats are supported.`,
+      `Invalid ${CONFIG_FILE}; expected schemaVersion ${SCHEMA_VERSION} and a trees array of sources.`,
     );
   const identities = config.data.trees.map((source) => sourceIdentity(root, source));
   if (new Set(identities).size !== identities.length)

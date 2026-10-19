@@ -199,7 +199,7 @@ describe("indexed reading", () => {
     const rootRead = readTree(root);
     expect(rootRead.node).toMatchObject({ body: expect.stringContaining("Canonical durable context"), path: "." });
     expect(rootRead.node.body).not.toContain("schemaVersion:");
-    expect(rootRead.children.map((child) => child.path)).toEqual(["members", "opentag.md", "product"]);
+    expect(rootRead.children.map((child) => child.path)).toEqual(["members", "overview.md", "product"]);
     expect(rootRead.children.map((child) => child.path)).not.toContain("product/runtime.md");
 
     expect(readTree(root, "members").children.map((child) => child.path)).toEqual(["members/alice"]);

@@ -1,10 +1,10 @@
 # Context Tree
 
-Durable, indexed project context for coding agents. A tree is a directory of Markdown files. It can live in `opentag/docs/`, a standalone folder, or a subtree of a shared Git repository.
+Durable, indexed project context for coding agents. A tree is a directory of Markdown files. It can live in a project's `docs/` directory, a standalone folder, or a subtree of a shared Git repository.
 
 ```sh
 npm install --global @first-tree-ai/context-tree
-cd opentag
+cd my-project
 context-tree init docs
 context-tree read
 ```
@@ -76,11 +76,11 @@ Every content directory has a `NODE.md` index. Every Markdown document has a non
 ```markdown
 ---
 schemaVersion: 1
-title: OpenTag
+title: Project Context
 description: Product decisions and engineering context
 ---
 
-# OpenTag
+# Project Context
 
 Start with the product and architecture indexes.
 ```
@@ -105,7 +105,7 @@ Cleanup uses an isolated write session and produces a review branch by default. 
 
 ## Integration and development
 
-CLI JSON and project configuration use schema version **3**; document metadata uses version **1**. Import runtime schemas and derived types from `@first-tree-ai/context-tree/contracts`. Old configuration and commands are unsupported; there is no migration layer.
+CLI JSON and project configuration use schema version **3**; document metadata uses version **1**. Import runtime schemas and derived types from `@first-tree-ai/context-tree/contracts`.
 
 Human-facing commands accept `--json`. `sync`, `prepare-write`, `finish-write`, `abort-write`, `install`, and `uninstall` always emit JSON. Failures return a nonzero exit code and sanitized details. `--project-path` selects a project; `read` and `verify` also accept `--tree-path` for direct content access.
 

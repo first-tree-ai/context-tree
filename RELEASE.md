@@ -25,7 +25,7 @@ Both channels run behind the `test` job. A red CI run publishes nothing.
 `pnpm check:package` packs the real working tree, installs it into a scratch
 consumer with scripts enabled, and asserts that a local install writes no
 skills, that a global `postinstall` places all six at mode `0644` for a host
-that exists while skipping one that does not, and that the repository docs, a
+that exists while skipping one that does not, and that the repository docs,
 internal library entry points, and per-skill launcher scripts stay out of the tarball. It
 then drives the init/resolve/write/install/verify/read lifecycle and the public contracts export against the
 installed CLI and removes everything it created.
@@ -38,13 +38,11 @@ entry, so a separate `npm pack --dry-run` step would add nothing.
 Every push to `main` publishes automatically. Nothing to do by hand.
 
 The version is the current `package.json` version with the patch incremented,
-followed by `-alpha.` and a UTC minute-resolution build number. `0.1.0` becomes
-`0.1.1-alpha.202608200654`.
+followed by `-alpha.` and a UTC minute-resolution build number. For example, a
+base of `1.2.3` produces `1.2.4-alpha.202610190654`.
 
-The patch is bumped *before* the prerelease suffix is attached because SemVer
-ranks `0.1.0-alpha.N` below `0.1.0`. Naming a staging build after the current
-base would publish something that sorts older than the last production release,
-and `@staging` would resolve backwards.
+Incrementing the patch before attaching the prerelease suffix makes staging
+versions sort above the base version under SemVer.
 
 To publish a staging build without a new commit, run the `CI` workflow manually
 from the Actions tab (`workflow_dispatch` on `main`).
@@ -74,18 +72,19 @@ shipped. Keep `main` at or ahead of the newest tag.
 
 ### Accepted tags
 
-`v0.1.1` and `0.1.1` both publish `0.1.1`; the leading `v` is stripped. A tag
+Both `vX.Y.Z` and `X.Y.Z` publish `X.Y.Z`; the leading `v` is stripped. A tag
 that is not `X.Y.Z` with an optional prerelease suffix fails the job before
 anything is published.
 
-A prerelease tag publishes under its own identifier and never touches `latest`:
+A prerelease tag publishes under its own identifier and never touches `latest`.
+For example:
 
 | Tag | Version | dist-tag |
 | --- | --- | --- |
-| `v0.2.0` | `0.2.0` | `latest` |
-| `v0.2.0-beta.1` | `0.2.0-beta.1` | `beta` |
-| `v0.2.0-rc.1` | `0.2.0-rc.1` | `rc` |
-| `v0.2.0-1` | `0.2.0-1` | `next` |
+| `v1.2.3` | `1.2.3` | `latest` |
+| `v1.2.3-beta.1` | `1.2.3-beta.1` | `beta` |
+| `v1.2.3-rc.1` | `1.2.3-rc.1` | `rc` |
+| `v1.2.3-1` | `1.2.3-1` | `next` |
 
 Only a clean `X.Y.Z` tag moves the stable channel.
 
