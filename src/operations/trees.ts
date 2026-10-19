@@ -5,8 +5,8 @@ import {
   CLI_ERROR_CODES,
   connectionSchema,
   type ResolvedTree,
-  type ResolveResult,
   SCHEMA_VERSION,
+  type SyncResult,
   type TreeSource,
 } from "../contracts/index.js";
 import { ContextTreeError } from "../errors.js";
@@ -42,12 +42,12 @@ export function initTree(project: string, path: string, runner?: CommandRunner):
   // Failed attachment leaves the successfully initialized content available to connect explicitly.
   return connectTree(root, directorySource(root, treeRoot), runner);
 }
-export function resolveTrees(project: string, selector?: string, sync = false, runner?: CommandRunner): ResolveResult {
+export function syncTrees(project: string, selector?: string, offline = false, runner?: CommandRunner): SyncResult {
   return {
     schemaVersion: SCHEMA_VERSION,
     connections: connections(project, selector, runner).map((entry) => {
       try {
-        return { ok: true as const, ...resolveSource(entry, sync, runner) };
+        return { ok: true as const, ...resolveSource(entry, !offline, runner) };
       } catch (error) {
         return {
           ok: false as const,

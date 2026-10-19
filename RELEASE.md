@@ -27,7 +27,7 @@ consumer with scripts enabled, and asserts that a local install writes no
 skills, that a global `postinstall` places all six at mode `0644` for a host
 that exists while skipping one that does not, and that the repository docs,
 internal library entry points, and per-skill launcher scripts stay out of the tarball. It
-then drives the init/resolve/write/install/verify/read lifecycle and the public contracts export against the
+then drives the init/sync/edit/verify/read lifecycle and skills installation and the public contracts export against the
 installed CLI and removes everything it created.
 
 This is the only tarball check CI runs. It asserts the packed file list entry by
@@ -155,7 +155,7 @@ failure here is a build failure; reproduce it locally with `pnpm build`.
 
 **A consumer installed the CLI but has no skills** — they installed locally
 rather than with `--global`, or with `--ignore-scripts`, so `postinstall` either
-declined to write or never ran. Have them run `context-tree install`.
+declined to write or never ran. Have them run `context-tree skills install`.
 
 **A version is permanently unavailable** — npm never lets an unpublished
 version number be reused. Choose the next version rather than trying to

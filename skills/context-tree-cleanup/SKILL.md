@@ -7,7 +7,7 @@ description: Remove noise, consolidate duplicates, and improve placement through
 
 Read [the editorial rules](references/editorial.md) before editing.
 
-For a manual pass, select the requested tree and run `context-tree prepare-write --tree <name-or-source> --isolated`. Work only inside the returned `treeRoot`. Read every normal and member document, apply the editorial rules, and review the complete diff. Run `context-tree finish-write <id> --message "Clean up Context Tree content"` to validate and retain a review commit. Include `--publish` only when publication to this managed Git source is already authorized. Directory sources use the host's review and merge workflow.
+For a manual pass, select the requested tree and run `context-tree write prepare --tree <name-or-source>`. Work only inside the returned `treeRoot`. Read every normal and member document, apply the editorial rules, and review the complete diff. Run `context-tree write finish <id> --message "Clean up Context Tree content"` to validate and retain a review commit. Include `--publish` only when publication to this managed Git source is already authorized. Directory sources use the host's review and merge workflow.
 
 A host-scheduled run supplies an already prepared tree directory. In that case edit only that directory and report findings; the runner owns validation, commits, and publication. Never start another session from inside it.
 

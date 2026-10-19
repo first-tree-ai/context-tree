@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 // Install the packaged skills for every agent the user already has, then report in prose.
-// The CLI itself only ever emits one line of JSON, so the human summary lives here.
+// Skill installation emits one line of JSON, so the human summary lives here.
 // A failure must never fail `npm install`: the CLI is still usable, and
-// `context-tree install` can be run by hand afterwards.
+// `context-tree skills install` can be run by hand afterwards.
 //
 // Only a direct global install writes to the home directory; anything else just prints the
 // command, so installing this package as a dependency never touches a developer's own agents.
@@ -26,15 +26,15 @@ function ownedByAnotherPackage(directory) {
 }
 
 if (process.env.npm_config_global !== "true" || ownedByAnotherPackage(packageRoot)) {
-  process.stdout.write("Context Tree: run `context-tree install` to add the skills to your agent.\n");
+  process.stdout.write("Context Tree: run `context-tree skills install` to add the skills to your agent.\n");
   process.exit(0);
 }
 
 const cli = join(packageRoot, "dist", "cli", "index.mjs");
-const result = spawnSync(process.execPath, [cli, "install"], { encoding: "utf8" });
+const result = spawnSync(process.execPath, [cli, "skills", "install"], { encoding: "utf8" });
 
 if (result.error !== undefined || result.status !== 0) {
-  process.stdout.write("Context Tree: run `context-tree install` to add the skills to your agent.\n");
+  process.stdout.write("Context Tree: run `context-tree skills install` to add the skills to your agent.\n");
   process.exit(0);
 }
 
@@ -50,7 +50,7 @@ const skipped = Array.isArray(payload?.skipped) ? payload.skipped : [];
 
 if (installed.length === 0) {
   process.stdout.write(
-    "Context Tree: no agent directory found. Install Claude Code, Codex, or Pi, then run `context-tree install`.\n",
+    "Context Tree: no agent directory found. Install Claude Code, Codex, or Pi, then run `context-tree skills install`.\n",
   );
   process.exit(0);
 }

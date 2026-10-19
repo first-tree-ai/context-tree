@@ -34,49 +34,36 @@ function commonDirectory(root: string, runner?: CommandRunner): string {
     "Git common directory",
   );
 }
-export function prepareWrite(
-  project: string,
-  selector?: string,
-  isolated = false,
-  runner?: CommandRunner,
-): WriteSession {
+export function prepareWrite(project: string, selector?: string, runner?: CommandRunner): WriteSession {
   const selected = connection(project, selector, runner);
   const resolved = resolveSource(selected, true, runner);
+  const repository = resolved.repository;
+  if (!repository || repository.sha === "unborn")
+    throw new Error(
+      "Isolated edits require a committed Git repository. For local edits, edit the tree directly and run verify.",
+    );
+  if (resolved.dirty)
+    throw new ContextTreeError(
+      CLI_ERROR_CODES.dirtyTree,
+      "Commit the tree's pending edits before an isolated write; unrelated project edits may remain.",
+    );
   const id = randomUUID();
+  const worktreeRoot = join(stateDirectory("worktrees"), id);
+  const taskBranch = `context-tree/write/${id}`;
+  git(repository.root, ["worktree", "add", "--quiet", "-b", taskBranch, worktreeRoot, repository.sha], { runner });
   const session: WriteSession = {
     schemaVersion: SCHEMA_VERSION,
     id,
     connection: selected,
-    treeRoot: resolved.treeRoot,
-    mode: "workspace",
-    repository: resolved.repository,
-    worktreeRoot: null,
-    taskBranch: null,
-    commit: null,
-  };
-  if (selected.source.kind === "git" || isolated) {
-    const repository = resolved.repository;
-    if (!repository || repository.sha === "unborn")
-      throw new Error("Isolated edits require a committed Git repository.");
-    if (resolved.dirty)
-      throw new ContextTreeError(
-        CLI_ERROR_CODES.dirtyTree,
-        "Commit the tree's pending edits before an isolated write; unrelated project edits may remain.",
-      );
-    session.mode = "isolated";
-    session.worktreeRoot = join(stateDirectory("worktrees"), id);
-    session.taskBranch = `context-tree/write/${id}`;
-    session.repository = {
+    treeRoot: realDirectoryWithoutSymlinks(join(worktreeRoot, repository.directory), "Editable tree"),
+    repository: {
       ...repository,
       root: selected.source.kind === "git" ? commonDirectory(repository.root, runner) : repository.root,
-    };
-    git(
-      repository.root,
-      ["worktree", "add", "--quiet", "-b", session.taskBranch, session.worktreeRoot, repository.sha],
-      { runner },
-    );
-    session.treeRoot = realDirectoryWithoutSymlinks(join(session.worktreeRoot, repository.directory), "Editable tree");
-  }
+    },
+    worktreeRoot,
+    taskBranch,
+    commit: null,
+  };
   save(session);
   return session;
 }
@@ -89,12 +76,9 @@ function assertConnection(session: WriteSession, runner?: CommandRunner): void {
   if (current.source.kind === "directory") {
     const root = directoryRoot(current);
     const repository = inspectRepository(root, runner);
-    if (session.mode === "workspace" && root !== session.treeRoot) throw new Error("Prepared directory changed.");
     if (
       JSON.stringify(repository && [repository.root, repository.branch, repository.directory]) !==
-      JSON.stringify(
-        session.repository && [session.repository.root, session.repository.branch, session.repository.directory],
-      )
+      JSON.stringify([session.repository.root, session.repository.branch, session.repository.directory])
     )
       throw new Error("Project repository or branch changed; edits are preserved.");
   }
@@ -120,7 +104,6 @@ export function assertScope(paths: string[], directory: string): void {
 }
 function assertIsolated(session: WriteSession, runner?: CommandRunner): { root: string; directory: string } {
   const { repository, worktreeRoot, taskBranch } = session;
-  if (!repository || !worktreeRoot || !taskBranch) throw new Error("Not an isolated session.");
   const root = realDirectoryWithoutSymlinks(worktreeRoot, "Write worktree");
   if (
     commonDirectory(root, runner) !== commonDirectory(repository.root, runner) ||
@@ -132,10 +115,8 @@ function assertIsolated(session: WriteSession, runner?: CommandRunner): { root: 
   return { root, directory: repository.directory };
 }
 function removeSession(session: WriteSession, runner?: CommandRunner): void {
-  if (session.worktreeRoot && session.repository && session.taskBranch) {
-    git(session.repository.root, ["worktree", "remove", session.worktreeRoot], { runner });
-    git(session.repository.root, ["branch", "-D", session.taskBranch], { runner });
-  }
+  git(session.repository.root, ["worktree", "remove", session.worktreeRoot], { runner });
+  git(session.repository.root, ["branch", "-D", session.taskBranch], { runner });
   rmSync(sessionPath(session.id));
 }
 export function finishWrite(id: string, message: string, publish = false, runner?: CommandRunner): FinishWriteResult {
@@ -144,18 +125,6 @@ export function finishWrite(id: string, message: string, publish = false, runner
     assertConnection(session, runner);
     if (publish && session.connection.source.kind !== "git")
       throw new Error("Directory sources use the host's Git workflow; Context Tree cannot publish them.");
-    if (session.mode === "workspace") {
-      validateTree(session.treeRoot);
-      removeSession(session, runner);
-      return {
-        schemaVersion: SCHEMA_VERSION,
-        outcome: "validated",
-        treeRoot: session.treeRoot,
-        branch: null,
-        sha: null,
-        sessionId: null,
-      };
-    }
     const { root, directory } = assertIsolated(session, runner);
     const pending = changedPaths(root, runner);
     assertScope(pending, directory);
@@ -186,7 +155,6 @@ export function finishWrite(id: string, message: string, publish = false, runner
       save(session);
     }
     const repository = session.repository;
-    if (!repository) throw new Error("Missing prepared repository.");
     const changed = gitRaw(root, ["diff", "--no-renames", "--name-only", "-z", repository.sha, session.commit], {
       runner,
     })
@@ -234,15 +202,12 @@ export function finishWrite(id: string, message: string, publish = false, runner
     return result;
   });
 }
-/** Release metadata, or remove an isolated preparation only when it contains no work. */
+/** Remove an isolated preparation only when it contains no work. */
 export function abortWrite(id: string, runner?: CommandRunner): void {
   withLock(`${sessionPath(id)}.lock`, () => {
     const session = loadWriteSession(id);
-    if (session.mode === "isolated") {
-      const { root } = assertIsolated(session, runner);
-      if (session.commit || changedPaths(root, runner).length)
-        throw new Error("Session contains work; it is preserved.");
-    }
+    const { root } = assertIsolated(session, runner);
+    if (session.commit || changedPaths(root, runner).length) throw new Error("Session contains work; it is preserved.");
     removeSession(session, runner);
   });
 }

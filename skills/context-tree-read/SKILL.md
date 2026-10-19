@@ -5,7 +5,7 @@ description: Retrieve relevant durable context from connected trees before proje
 
 # Context Tree Read
 
-Run `context-tree sync --project-path <project>` to resolve connections and refresh remote snapshots. Inspect every result: a failed source does not invalidate successful sources. If refresh fails, `context-tree resolve --json` can expose a cached snapshot; state its limitations. Do not create or reconnect a tree just to suppress a failure.
+Run `context-tree sync --project-path <project>` to resolve connections and refresh remote snapshots. Inspect every result: a failed source does not invalidate successful sources. If refresh fails, `context-tree sync --offline` can expose a cached snapshot; state its limitations. Do not create or reconnect a tree just to suppress a failure.
 
 For each relevant successful result, run `context-tree read --tree-path <treeRoot> --json`. Read the root body and immediate child summaries; follow only promising branches using the same returned `treeRoot`. This keeps a remote read on one immutable revision. Directory sources expose live edits; a repository SHA does not certify uncommitted content.
 

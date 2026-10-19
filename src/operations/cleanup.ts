@@ -174,10 +174,8 @@ export async function runCleanup(
       session = prepareWrite(
         config.projectPath,
         sourceSelector(config.projectPath, config.source),
-        true,
         dependencies.runner,
       );
-      if (!session.repository || !session.worktreeRoot) throw new Error("Cleanup requires an isolated session.");
       const digest = git(
         session.worktreeRoot,
         ["rev-parse", session.repository.directory === "." ? "HEAD^{tree}" : `HEAD:${session.repository.directory}`],

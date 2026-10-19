@@ -92,7 +92,7 @@ function hostDestination(
       hostRoot = resolve(hostRoot, segment);
       const entry = lstatSync(hostRoot, { throwIfNoEntry: false });
       if (entry === undefined) {
-        return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree install.` };
+        return { reason: `${hostRoot} does not exist; install ${host} first, then run context-tree skills install.` };
       }
       if (entry.isSymbolicLink() || !entry.isDirectory()) return { reason: `${hostRoot} is not a real directory.` };
     }

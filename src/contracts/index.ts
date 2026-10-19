@@ -274,37 +274,30 @@ export const discoverySchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), ...resolvedTreeSchema.shape }).strict(),
   z.object({ ok: z.literal(false), connection: connectionSchema, error: errorSchema }).strict(),
 ]);
-export const resolveResultSchema = z
+export const syncResultSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
     connections: z.array(discoverySchema),
   })
   .strict();
-export type ResolveResult = z.infer<typeof resolveResultSchema>;
+export type SyncResult = z.infer<typeof syncResultSchema>;
 export const writeSessionSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
     id: z.string().uuid(),
     connection: connectionSchema,
     treeRoot: absoluteSingleLinePathSchema,
-    mode: z.enum(["workspace", "isolated"]),
-    repository: repositoryLocationSchema.nullable(),
-    worktreeRoot: absoluteSingleLinePathSchema.nullable(),
-    taskBranch: z.string().nullable(),
+    repository: repositoryLocationSchema,
+    worktreeRoot: absoluteSingleLinePathSchema,
+    taskBranch: branchSchema,
     commit: z.string().nullable(),
   })
-  .strict()
-  .superRefine((session, context) => {
-    if (session.mode === "isolated" && (!session.repository || !session.worktreeRoot || !session.taskBranch))
-      context.addIssue({ code: "custom", message: "Isolated sessions require a repository, worktree, and branch." });
-    if (session.mode === "workspace" && (session.worktreeRoot || session.taskBranch || session.commit))
-      context.addIssue({ code: "custom", message: "Workspace sessions do not own Git state." });
-  });
+  .strict();
 export type WriteSession = z.infer<typeof writeSessionSchema>;
 export const finishWriteResultSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
-    outcome: z.enum(["validated", "unchanged", "committed", "published"]),
+    outcome: z.enum(["unchanged", "committed", "published"]),
     treeRoot: absoluteSingleLinePathSchema,
     branch: z.string().nullable(),
     sha: z.string().nullable(),

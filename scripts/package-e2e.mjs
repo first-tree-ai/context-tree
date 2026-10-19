@@ -199,7 +199,7 @@ try {
   mkdirSync(foreignSkill);
   const contextTreeState = join(temporaryRoot, ".context-tree", "trees", "preserved");
   mkdirSync(contextTreeState, { recursive: true });
-  const uninstall = runCli(join(globalPrefix, "bin/context-tree"), temporaryRoot, ["uninstall"]);
+  const uninstall = runCli(join(globalPrefix, "bin/context-tree"), temporaryRoot, ["skills", "uninstall"]);
   assert.equal(uninstall.status, 0);
   assert.equal(uninstall.stdout.trim().split("\n").length, 1, "uninstall must print one JSON line");
   const uninstallResult = parseOneLineJson(uninstall.stdout);
@@ -231,13 +231,13 @@ try {
     assert.equal(existsSync(join(consumerRoot, name)), false);
     assert.equal(existsSync(join(treePath, name)), false);
   }
-  const resolved = runCli(cliPath, consumerRoot, ["resolve", "--json"]);
+  const resolved = runCli(cliPath, consumerRoot, ["sync", "--offline"]);
   assert.equal(resolved.status, 0);
   assert.equal(parseOneLineJson(resolved.stdout).connections[0].treeRoot, treePath);
-  const session = parseOneLineJson(runCli(cliPath, consumerRoot, ["prepare-write"]).stdout);
-  const finished = runCli(cliPath, consumerRoot, ["finish-write", session.id]);
-  assert.equal(finished.status, 0);
-  assert.equal(parseOneLineJson(finished.stdout).outcome, "validated");
+  writeFileSync(join(treePath, "decision.md"), "---\ntitle: Decision\n---\nUse a directory.\n");
+  const verified = runCli(cliPath, consumerRoot, ["verify", "--json"]);
+  assert.equal(verified.status, 0);
+  assert.equal(parseOneLineJson(verified.stdout).ok, true);
 
   const contractsConsumer = join(consumerRoot, "contracts.mjs");
   writeFileSync(
@@ -252,7 +252,7 @@ projectConfigSchema.parse({schemaVersion: 3, trees: [{kind: "directory", path: "
 
   const added = runCli(cliPath, consumerRoot, ["init", "additional", "--json"]);
   assert.equal(added.status, 0);
-  const multiple = parseOneLineJson(runCli(cliPath, consumerRoot, ["resolve", "--json"]).stdout);
+  const multiple = parseOneLineJson(runCli(cliPath, consumerRoot, ["sync", "--offline"]).stdout);
   assert.equal(multiple.connections.length, 2);
   const selected = parseOneLineJson(runCli(cliPath, consumerRoot, ["sync", "--tree", "additional"]).stdout);
   assert.equal(selected.connections.length, 1);
@@ -263,7 +263,7 @@ projectConfigSchema.parse({schemaVersion: 3, trees: [{kind: "directory", path: "
   assert.equal(parseOneLineJson(detached.stdout).disconnected, true);
 
   // A project-scoped install is the re-run path, and must not need a host directory to exist.
-  const projectInstall = runCli(cliPath, consumerRoot, ["install", "--host", "codex", "--project", "."]);
+  const projectInstall = runCli(cliPath, consumerRoot, ["skills", "install", "--host", "codex", "--project", "."]);
   assert.equal(projectInstall.status, 0);
   const projectInstallResult = parseOneLineJson(projectInstall.stdout);
   assert.equal(projectInstallResult.version, manifest.version);

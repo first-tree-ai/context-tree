@@ -7,7 +7,7 @@ import { CLI_ERROR_CODES, SCHEMA_VERSION, skillHostSchema, treeSourceSchema } fr
 import { ContextTreeError } from "../errors.js";
 import { cleanupLogs, cleanupStatus, removeCleanup, runCleanup, scheduleCleanup } from "../operations/cleanup.js";
 import { connection, disconnect } from "../operations/connections.js";
-import { connectTree, directorySource, initTree, resolveTrees } from "../operations/trees.js";
+import { connectTree, directorySource, initTree, syncTrees } from "../operations/trees.js";
 import { abortWrite, finishWrite, prepareWrite } from "../operations/write.js";
 import { sourceSelector } from "../sources/identity.js";
 import { projectRoot } from "../sources/project.js";
@@ -23,7 +23,7 @@ const defaultIo: CliIo = {
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
 };
-const MACHINE_COMMANDS = new Set(["sync", "prepare-write", "finish-write", "abort-write", "install", "uninstall"]);
+const MACHINE_COMMANDS = new Set(["sync", "write", "skills"]);
 
 export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo = defaultIo): Promise<number> {
   let exitCode = 0;
@@ -87,34 +87,23 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
       disconnect(project(options), options.tree);
       emit({ schemaVersion: SCHEMA_VERSION, disconnected: true }, options.json, "Disconnected.");
     });
-  for (const name of ["resolve", "sync"]) {
-    const command = select(program.command(name));
-    if (name === "resolve") json(command);
-    command
-      .description(
-        name === "sync"
-          ? "Fetch Git sources and open verified snapshots; directory sources stay in place."
-          : "Resolve declared trees without network access.",
-      )
-      .action((options: Selection) => {
-        const result = resolveTrees(project(options), options.tree, name === "sync");
-        if (result.connections.some((entry) => !entry.ok)) exitCode = 1;
-        emit(
-          result,
-          name === "sync" || options.json,
-          result.connections
-            .map(
-              (entry) =>
-                `${sourceSelector(entry.connection.projectRoot, entry.connection.source)}: ${entry.ok ? `${entry.treeRoot}${entry.dirty ? " (working changes)" : ""}` : entry.error.message}`,
-            )
-            .join("\n"),
-        );
-      });
-  }
+  select(program.command("sync"))
+    .option("--offline", "use local directories and cached Git snapshots without fetching")
+    .description("Locate connected trees and refresh Git snapshots; use --offline to skip fetching.")
+    .action((options: Selection & { offline?: boolean }) => {
+      const result = syncTrees(project(options), options.tree, options.offline);
+      if (result.connections.some((entry) => !entry.ok)) exitCode = 1;
+      emit(result, true, "");
+    });
   for (const name of ["read", "verify"]) {
     const command = json(select(program.command(name))).option(
       "--tree-path <path>",
       "explicit content root instead of a connection",
+    );
+    command.description(
+      name === "read"
+        ? "Read a document or index and its immediate child summaries."
+        : "Validate tree structure, metadata, and links.",
     );
     if (name === "read") command.argument("[path]", "tree-relative node", ".");
     const action = (path: string, options: Selection & { treePath?: string }): void => {
@@ -134,33 +123,39 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
     if (name === "read") command.action(action);
     else command.action((options: Selection & { treePath?: string }) => action(".", options));
   }
-  select(program.command("prepare-write"))
-    .option("--isolated", "prepare a review branch for a directory source")
-    .description("Return an edit session and its exact tree root.")
-    .action((options: Selection & { isolated?: boolean }) => {
-      const result = prepareWrite(project(options), options.tree, options.isolated);
+  const write = program.command("write").description("Prepare, finish, or abort an isolated editing session.");
+  select(write.command("prepare"))
+    .description("Create a review branch and return its session and editable tree root.")
+    .action((options: Selection) => {
+      const result = prepareWrite(project(options), options.tree);
       emit(result, true, "");
     });
-  program
-    .command("finish-write")
+  write
+    .command("finish")
     .argument("<session-id>")
     .option("--message <message>", "managed commit message", "Update Context Tree")
     .option("--publish", "push a managed Git session to its prepared target branch")
-    .description("Validate workspace edits, or commit an isolated session; publishing is explicit.")
+    .description("Validate and commit an isolated session; optionally publish a Git source.")
     .action((id: string, options: { message: string; publish?: boolean }) =>
       emit(finishWrite(id, options.message, options.publish), true, ""),
     );
-  program
-    .command("abort-write")
+  write
+    .command("abort")
     .argument("<session-id>")
-    .description("Release a session without discarding any edits.")
+    .description("Remove an empty session; retain sessions containing edits or commits.")
     .action((id: string) => {
       abortWrite(id);
       emit({ schemaVersion: SCHEMA_VERSION, released: true }, true, "");
     });
+  const skills = program.command("skills").description("Install or uninstall agent skills.");
   for (const name of ["install", "uninstall"]) {
-    program
+    skills
       .command(name)
+      .description(
+        name === "install"
+          ? "Install skills for detected hosts or an explicit project."
+          : "Remove Context Tree skills from selected hosts or a project.",
+      )
       .option("--host <host>", "claude, codex, pi, or all", "all")
       .option("--project <path>", "project skill destination")
       .action((options: { host: string; project?: string }) => {

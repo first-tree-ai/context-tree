@@ -25,17 +25,19 @@ Directory identity is its resolved path. Git identity is repository + subtree + 
 
 Directory resolution returns the real content root and, when available, repository root, repository-relative subtree, branch, HEAD, and subtree dirtiness. No repository is required. Reads allow working changes.
 
-Managed Git resolution uses one bare cache per repository and detached snapshots keyed by repository and commit. Refresh fetches the exact declared branch. Resolution without refresh requires a cached ref. A snapshot's identity and cleanliness are checked before reuse. Symlinked roots and nested repository ownership are rejected. `sync` validates fetched tree content. The returned snapshot path is stable across later refreshes.
+Managed Git resolution uses one bare cache per repository and detached snapshots keyed by repository and commit. `sync` fetches the exact declared branch. `sync --offline` requires a cached ref and performs no network access. A snapshot's identity and cleanliness are checked before reuse. Symlinked roots and nested repository ownership are rejected. `sync` validates fetched tree content. The returned snapshot path is stable across later refreshes.
 
-`resolve` and `sync` return `{ schemaVersion, connections }`. Each entry is either `{ ok: true, connection, treeRoot, repository, dirty }` or `{ ok: false, connection, error }`. Configuration failure fails the whole request; individual source failure preserves successful results.
+`sync` returns `{ schemaVersion, connections }`. Each entry is either `{ ok: true, connection, treeRoot, repository, dirty }` or `{ ok: false, connection, error }`. Configuration failure fails the whole request; individual source failure preserves successful results.
 
 ## Write sessions
 
-A session pins its project connection, content root, mode, and repository state. Session IDs are UUIDs. Directory sessions edit the workspace unless isolation is requested; managed Git sessions always isolate. Isolated preparation starts at the resolved committed revision on a unique branch in a separate worktree.
+Directory content can be edited directly and checked with `verify`; this requires no session or Git repository. The host owns staging and commits for direct edits.
 
-Workspace completion validates and releases session metadata. It does not own Git. Isolated completion checks connection and repository identity, requires the expected branch and HEAD, rejects every pending path outside the tree, validates content, stages only its subtree, and commits. It rechecks the commit and worktree before reporting success. Ignored untracked content is included in boundary checks and cannot silently disappear from a managed commit.
+`write prepare` creates an isolated session for either source kind, starting at the resolved committed revision on a unique branch in a separate worktree. The subtree must be clean. A session pins its project connection, content root, and repository state. Session IDs are UUIDs; repository, worktree, and task branch are required.
 
-Completion reports `validated`, `unchanged`, `committed`, or `published`. A committed session remains available for review or later publication. Publishing is supported only for managed Git sources and requires an explicit flag. It rechecks origin and uses a normal nonforce push to the pinned target branch. No rebasing, retries, merges, or conflict resolution is hidden inside completion. Errors retain work. Empty isolated sessions can be aborted; sessions containing edits or commits cannot be discarded by the CLI.
+`write finish` checks connection and repository identity, requires the expected branch and HEAD, rejects every pending path outside the tree, validates content, stages only its subtree, and commits. It rechecks the commit and worktree before reporting success. Ignored untracked content is included in boundary checks and cannot silently disappear from a managed commit.
+
+Completion reports `unchanged`, `committed`, or `published`. A committed session remains available for review or later publication. Publishing is supported only for managed Git sources and requires an explicit flag. It rechecks origin and uses a normal nonforce push to the pinned target branch. No rebasing, retries, merges, or conflict resolution is hidden inside completion. Errors retain work. `write abort` removes empty sessions; sessions containing edits or commits cannot be discarded by the CLI.
 
 ## Content
 

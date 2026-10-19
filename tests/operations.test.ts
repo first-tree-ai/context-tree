@@ -5,13 +5,14 @@ import { git, gitRaw } from "../src/adapters/git.js";
 import { readState, withLock } from "../src/adapters/state.js";
 import { SCHEMA_VERSION } from "../src/contracts/index.js";
 import { connection, connections, disconnect } from "../src/operations/connections.js";
-import { connectTree, initTree, resolveTrees } from "../src/operations/trees.js";
+import { connectTree, initTree, syncTrees } from "../src/operations/trees.js";
 import { abortWrite, finishWrite, loadWriteSession, prepareWrite } from "../src/operations/write.js";
 import { connectionIdentity, sourceName, sourceSelector } from "../src/sources/identity.js";
 import { projectRoot } from "../src/sources/project.js";
 import { resolveSource } from "../src/sources/resolve.js";
 import { readTree } from "../src/tree/read.js";
 import { scaffoldTree } from "../src/tree/scaffold.js";
+import { verifyTree } from "../src/tree/verify.js";
 import { commit, initRepository, node, remoteFixture, useFixture } from "./helpers.js";
 
 const fixture = useFixture();
@@ -40,9 +41,9 @@ describe("directory sources", () => {
     const { project } = fixture();
     const result = initTree(project, project);
     expect(result.repository).toBeNull();
-    const session = prepareWrite(project);
-    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
-    expect(finishWrite(session.id, "Ignored by workspace mode").outcome).toBe("validated");
+    writeFileSync(join(result.treeRoot, "choice.md"), node("Choice"));
+    expect(verifyTree(result.treeRoot).ok).toBe(true);
+    expect(() => prepareWrite(project)).toThrow(/committed Git repository/u);
     expect(existsSync(join(project, ".git"))).toBe(false);
   });
   it("reads and edits dirty docs without staging or publishing unrelated host work", () => {
@@ -54,12 +55,10 @@ describe("directory sources", () => {
     git(project, ["add", "code.ts"]);
     writeFileSync(join(project, "docs/choice.md"), node("Uncommitted choice"));
     const index = gitRaw(project, ["diff", "--cached"]);
-    expect(resolveTrees(project).connections[0]).toMatchObject({ ok: true, dirty: true });
-    const session = prepareWrite(project);
-    expect(session.mode).toBe("workspace");
-    writeFileSync(join(session.treeRoot, "choice.md"), node("Revised choice"));
-    expect(() => finishWrite(session.id, "No push", true)).toThrow(/host's Git workflow/u);
-    expect(finishWrite(session.id, "Validate").outcome).toBe("validated");
+    expect(syncTrees(project).connections[0]).toMatchObject({ ok: true, dirty: true });
+    const tree = resolveSource(connection(project));
+    writeFileSync(join(tree.treeRoot, "choice.md"), node("Revised choice"));
+    expect(verifyTree(tree.treeRoot).ok).toBe(true);
     expect(gitRaw(project, ["diff", "--cached"])).toBe(index);
     expect(readTree(join(project, "docs"), "choice.md").node.body).toContain("Revised");
   });
@@ -78,7 +77,7 @@ describe("directory sources", () => {
     const { home, project } = fixture();
     const tree = scaffoldTree(join(home, "external"), "External");
     connectTree(project, { kind: "directory", path: tree });
-    expect(prepareWrite(project).treeRoot).toBe(tree);
+    expect(resolveSource(connection(project)).treeRoot).toBe(tree);
   });
   it("preserves existing content when initialization fails", () => {
     const { project } = fixture();
@@ -144,8 +143,8 @@ describe("isolated writes", () => {
     git(project, ["add", "code.ts"]);
     const head = git(project, ["rev-parse", "HEAD"]);
     const staged = gitRaw(project, ["diff", "--cached"]);
-    const session = prepareWrite(project, undefined, true);
-    expect(session.treeRoot).toBe(join(session.worktreeRoot ?? "", "docs"));
+    const session = prepareWrite(project);
+    expect(session.treeRoot).toBe(join(session.worktreeRoot, "docs"));
     writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
     const result = finishWrite(session.id, "Record choice");
     expect(result).toMatchObject({ outcome: "committed", sessionId: session.id });
@@ -153,6 +152,8 @@ describe("isolated writes", () => {
     expect(gitRaw(project, ["diff", "--cached"])).toBe(staged);
     expect(existsSync(join(project, "docs/choice.md"))).toBe(false);
     expect(finishWrite(session.id, "Retry").sha).toBe(result.sha);
+    expect(() => finishWrite(session.id, "No push", true)).toThrow(/host's Git workflow/u);
+    expect(() => abortWrite(session.id)).toThrow(/contains work/u);
   });
   it.each(["unstaged", "staged", "untracked", "ignored", "rename"])("rejects %s changes outside the tree", (kind) => {
     const project = setup();
@@ -160,8 +161,8 @@ describe("isolated writes", () => {
       writeFileSync(join(project, ".gitignore"), "secret.txt\n");
       commit(project);
     }
-    const session = prepareWrite(project, undefined, true);
-    const root = session.worktreeRoot ?? "";
+    const session = prepareWrite(project);
+    const root = session.worktreeRoot;
     writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
     if (kind === "rename") renameSync(join(root, "code.ts"), join(session.treeRoot, "code.md"));
     else
@@ -173,12 +174,12 @@ describe("isolated writes", () => {
     expect(() => finishWrite(session.id, "Reject outside edits")).toThrow(
       expect.objectContaining({ code: "OUTSIDE_TREE" }),
     );
-    expect(git(root, ["rev-parse", "HEAD"])).toBe(session.repository?.sha);
+    expect(git(root, ["rev-parse", "HEAD"])).toBe(session.repository.sha);
     expect(existsSync(session.treeRoot)).toBe(true);
   });
   it("rejects branch changes and replaced connections", () => {
     const project = setup();
-    const session = prepareWrite(project, undefined, true);
+    const session = prepareWrite(project);
     writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
     git(project, ["switch", "--quiet", "-c", "other"]);
     expect(() => finishWrite(session.id, "Wrong branch")).toThrow(/branch changed/u);
@@ -189,35 +190,56 @@ describe("isolated writes", () => {
   });
   it("rejects agent-created commits and invalid tree content", () => {
     const project = setup();
-    const session = prepareWrite(project, undefined, true);
+    const session = prepareWrite(project);
     writeFileSync(join(session.treeRoot, "bad.md"), "# No metadata");
     expect(() => finishWrite(session.id, "Invalid")).toThrow(expect.objectContaining({ code: "INVALID_TREE" }));
     writeFileSync(join(session.treeRoot, "bad.md"), node("Valid"));
-    commit(session.worktreeRoot ?? "");
+    commit(session.worktreeRoot);
     expect(() => finishWrite(session.id, "Already committed")).toThrow(/Git state changed/u);
   });
-  it("requires a clean subtree for isolation, while workspace editing remains available", () => {
+  it("requires a clean subtree for isolated writes", () => {
     const project = setup();
     writeFileSync(join(project, "docs/choice.md"), node("Pending"));
-    expect(() => prepareWrite(project, undefined, true)).toThrow(expect.objectContaining({ code: "DIRTY_TREE" }));
-    expect(prepareWrite(project).mode).toBe("workspace");
+    expect(() => prepareWrite(project)).toThrow(expect.objectContaining({ code: "DIRTY_TREE" }));
   });
   it("releases empty sessions and never discards pending edits", () => {
     const project = setup();
-    const empty = prepareWrite(project, undefined, true);
+    const empty = prepareWrite(project);
     expect(finishWrite(empty.id, "Empty").outcome).toBe("unchanged");
     expect(existsSync(empty.treeRoot)).toBe(false);
-    const dirty = prepareWrite(project, undefined, true);
+    const dirty = prepareWrite(project);
     writeFileSync(join(dirty.treeRoot, "choice.md"), node("Choice"));
     expect(() => abortWrite(dirty.id)).toThrow(/contains work/u);
     expect(lstatSync(dirty.treeRoot).isDirectory()).toBe(true);
-    const workspace = prepareWrite(project);
-    abortWrite(workspace.id);
-    expect(existsSync(workspace.treeRoot)).toBe(true);
+    const emptyAbort = prepareWrite(project);
+    abortWrite(emptyAbort.id);
+    expect(existsSync(emptyAbort.treeRoot)).toBe(false);
+    expect(existsSync(join(project, "docs/NODE.md"))).toBe(true);
   });
 });
 
 describe("managed Git subtrees", () => {
+  it("uses cached snapshots offline and fetches the target branch during sync", () => {
+    const { home, project } = fixture();
+    const { runner, seed, remote, calls } = remoteFixture(home);
+    connectTree(project, gitSource, runner);
+    const fetchCount = (): number => calls.filter((args) => args.includes("fetch")).length;
+    const before = fetchCount();
+    writeFileSync(join(seed, "docs/choice.md"), node("New"));
+    commit(seed);
+    git(seed, ["push", remote, "main"]);
+    const cached = syncTrees(project, undefined, true, runner).connections[0];
+    expect(cached?.ok).toBe(true);
+    if (!cached?.ok) throw new Error("Expected cached tree");
+    expect(fetchCount()).toBe(before);
+    expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
+    const fresh = syncTrees(project, undefined, false, runner).connections[0];
+    expect(fresh?.ok).toBe(true);
+    if (!fresh?.ok) throw new Error("Expected refreshed tree");
+    expect(fetchCount()).toBe(before + 1);
+    expect(readTree(fresh.treeRoot, "choice.md").node.body).toContain("New");
+    expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
+  });
   it("shares repository storage while distinguishing subtree and ref identities", () => {
     const { home, project } = fixture();
     const { runner, seed, remote, calls } = remoteFixture(home);
@@ -237,24 +259,12 @@ describe("managed Git subtrees", () => {
     expect(docs.repository?.root).toBe(handbook.repository?.root);
     expect(docs.treeRoot).not.toBe(handbook.treeRoot);
   });
-  it("holds reads at the selected revision when the remote advances", () => {
-    const { home, project } = fixture();
-    const { runner, seed, remote } = remoteFixture(home);
-    const initial = connectTree(project, gitSource, runner);
-    writeFileSync(join(seed, "docs/choice.md"), node("New"));
-    commit(seed);
-    git(seed, ["push", remote, "main"]);
-    const next = resolveSource(connection(project), true, runner);
-    expect(next.repository?.sha).not.toBe(initial.repository?.sha);
-    expect(existsSync(join(initial.treeRoot, "choice.md"))).toBe(false);
-    expect(readTree(next.treeRoot, "choice.md").node.body).toContain("New");
-  });
   it("commits only the selected subtree and publishes only when explicitly requested", () => {
     const { home, project } = fixture();
     const { runner, remote } = remoteFixture(home);
     connectTree(project, gitSource, runner);
     const before = git(remote, ["rev-parse", "main"]);
-    const session = prepareWrite(project, undefined, false, runner);
+    const session = prepareWrite(project, undefined, runner);
     writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
     const retained = finishWrite(session.id, "Record choice", false, runner);
     expect(git(remote, ["rev-parse", "main"])).toBe(before);
@@ -269,8 +279,8 @@ describe("managed Git subtrees", () => {
     const { home, project } = fixture();
     const { runner, remote } = remoteFixture(home);
     connectTree(project, gitSource, runner);
-    const first = prepareWrite(project, undefined, false, runner);
-    const second = prepareWrite(project, undefined, false, runner);
+    const first = prepareWrite(project, undefined, runner);
+    const second = prepareWrite(project, undefined, runner);
     writeFileSync(join(first.treeRoot, "first.md"), node("First"));
     writeFileSync(join(second.treeRoot, "second.md"), node("Second"));
     const winner = finishWrite(first.id, "First", true, runner);
@@ -280,7 +290,7 @@ describe("managed Git subtrees", () => {
     expect(loadWriteSession(second.id).commit).not.toBeNull();
     expect(existsSync(second.treeRoot)).toBe(true);
     expect(git(remote, ["rev-parse", "main"])).toBe(winner.sha);
-    const retry = prepareWrite(project, undefined, false, runner);
+    const retry = prepareWrite(project, undefined, runner);
     expect(readTree(retry.treeRoot, "first.md").node.body).toContain("First");
   });
   it("returns independent failures without hiding healthy sources", () => {
@@ -289,7 +299,7 @@ describe("managed Git subtrees", () => {
     connectTree(project, gitSource, runner);
     initTree(project, join(project, "local"));
     writeFileSync(join(project, "local/NODE.md"), "broken");
-    const entries = resolveTrees(project, undefined, false, runner).connections;
+    const entries = syncTrees(project, undefined, true, runner).connections;
     expect(
       entries.map((entry) => [sourceName(entry.connection.projectRoot, entry.connection.source), entry.ok]),
     ).toEqual([
@@ -311,7 +321,7 @@ describe("write isolation regressions", () => {
     vi.stubEnv("GIT_DIR", join(other, ".git"));
     vi.stubEnv("GIT_WORK_TREE", other);
     vi.stubEnv("GIT_INDEX_FILE", join(other, ".git/index"));
-    const session = prepareWrite(project, undefined, true);
+    const session = prepareWrite(project);
     writeFileSync(join(session.treeRoot, "decision.md"), node("Decision"));
     expect(finishWrite(session.id, "Record decision").outcome).toBe("committed");
     expect(readFileSync(join(other, ".git/index"))).toEqual(index);
@@ -329,7 +339,7 @@ describe("write isolation regressions", () => {
       runner,
     );
     writeFileSync(join(connected.repository?.root ?? "", "secret.txt"), "not part of snapshot");
-    const result = resolveTrees(project, "context", false, runner);
+    const result = syncTrees(project, "context", true, runner);
     expect(result.connections[0]).toMatchObject({ ok: false, error: { code: "DIRTY_TREE" } });
   });
 });
@@ -341,9 +351,9 @@ describe("source-derived selection", () => {
     const external = scaffoldTree(join(home, "external/docs"), "External");
     connectTree(project, { kind: "directory", path: external });
     expect(() => connection(project, "docs")).toThrow(join(project, "docs"));
-    expect(() => resolveTrees(project, "docs")).toThrow(external);
+    expect(() => syncTrees(project, "docs")).toThrow(external);
     expect(connection(project, external).source).toEqual({ kind: "directory", path: external });
-    expect(resolveTrees(project).connections).toHaveLength(2);
+    expect(syncTrees(project).connections).toHaveLength(2);
     disconnect(project, external);
     expect(connection(project, "docs").source).toEqual({ kind: "directory", path: "docs" });
   });
@@ -355,7 +365,9 @@ describe("source-derived selection", () => {
   });
   it("keeps prepared writes bound to their source after a namesake is connected and the list reordered", () => {
     const { project, home } = fixture();
+    initRepository(project);
     initTree(project, join(project, "docs"));
+    commit(project);
     const session = prepareWrite(project, "docs");
     const external = scaffoldTree(join(home, "external/docs"), "Other docs");
     connectTree(project, { kind: "directory", path: external });
@@ -370,7 +382,7 @@ describe("source-derived selection", () => {
       }),
     );
     writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
-    expect(finishWrite(session.id, "Record choice").outcome).toBe("validated");
+    expect(finishWrite(session.id, "Record choice").outcome).toBe("committed");
     expect(existsSync(join(external, "choice.md"))).toBe(false);
     const next = prepareWrite(project, join(project, "docs"));
     disconnect(project, join(project, "docs"));
