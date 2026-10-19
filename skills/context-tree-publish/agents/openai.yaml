@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Tree Publish"
-  short_description: "Publish durable context privately"
-  default_prompt: "Use $context-tree-publish to create a private GitHub repository for this project's local tree."

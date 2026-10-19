@@ -1,6 +1,6 @@
 {
   "name": "@first-tree-ai/context-tree",
-  "version": "0.1.16",
+  "version": "0.2.0",
   "description": "Durable, structured project context for coding agents: a CLI plus framework-neutral skills.",
   "type": "module",
   "license": "Apache-2.0",
@@ -32,12 +32,11 @@
     "dist",
     "scripts/postinstall.mjs",
     "skills",
-    "templates",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsdown src/cli/index.ts --format esm --out-dir dist/cli --deps.alwaysBundle '/.*/'",
+    "build": "tsdown src/cli/index.ts --format esm --out-dir dist/cli --deps.alwaysBundle \"/.*/\" && tsdown src/contracts/index.ts --format esm --out-dir dist/contracts --dts",
     "check": "biome check .",
     "format": "biome check --write .",
     "typecheck": "tsc --noEmit",
@@ -59,5 +58,12 @@
     "tsdown": "^0.21.4",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
+  },
+  "exports": {
+    "./contracts": {
+      "types": "./dist/contracts/index.d.mts",
+      "import": "./dist/contracts/index.mjs"
+    },
+    "./package.json": "./package.json"
   }
 }

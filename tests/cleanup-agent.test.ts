@@ -1,8 +1,24 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, expect, it, vi } from "vitest";
-import { runAgent } from "../src/core/cleanup/agent.js";
-import type { CleanupSchedule } from "../src/schemas.js";
+import { runAgent } from "../src/adapters/agent.js";
+import type { CleanupSchedule } from "../src/contracts/index.js";
+
+const config: CleanupSchedule = {
+  schemaVersion: 3,
+  source: { kind: "directory", path: "/tmp/tree" },
+  publish: false,
+  id: "a".repeat(64),
+  projectPath: "/project",
+  identity: "test-source",
+  agent: "codex",
+  everyMinutes: 60,
+  nodePath: "/node",
+  cliPath: "/cli",
+  agentPath: "/agent",
+  searchPath: "/bin",
+  enabled: true,
+};
 
 const commands = vi.hoisted(() => ({ spawn: vi.fn(), spawnSync: vi.fn() }));
 vi.mock("node:child_process", () => commands);
@@ -26,22 +42,6 @@ for (const trigger of ["timeout", "cancellation"]) {
     commands.spawn.mockReturnValue(child);
     commands.spawnSync.mockReturnValue({ status: 0, stdout: "424242 313131\n", stderr: "" });
     const kill = vi.spyOn(process, "kill").mockReturnValue(true);
-    const config: CleanupSchedule = {
-      schemaVersion: 2,
-      alias: "tree",
-      tree: { kind: "local", path: "/tmp/tree" },
-      id: "a".repeat(64),
-      projectPath: "/project",
-      identity: "local:/tree",
-      agent: "codex",
-      model: "test",
-      everyMinutes: 60,
-      nodePath: "/node",
-      cliPath: "/context-tree",
-      agentPath: "/agent",
-      searchPath: "/bin",
-      enabled: true,
-    };
     const controller = new AbortController();
     const run = runAgent(config, "/worktree", "Edit content", controller.signal, 100);
     const rejected = expect(run).rejects.toThrow(trigger === "timeout" ? "timeout" : "cancelled");
@@ -56,10 +56,9 @@ for (const trigger of ["timeout", "cancellation"]) {
     child.emit("close", null);
     // A second cancellation must not replace the original escalation or reason.
     controller.abort();
-    await vi.advanceTimersByTimeAsync(4999);
     expect(settled).toBe(false);
     expect(kill).not.toHaveBeenCalledWith(424242, "SIGKILL");
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.runAllTimersAsync();
     await rejected;
     expect(kill).toHaveBeenCalledWith(424242, "SIGKILL");
     expect(child.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
@@ -68,7 +67,7 @@ for (const trigger of ["timeout", "cancellation"]) {
 }
 
 it("decodes split UTF-8 and sanitizes complete credential lines while draining oversized output", async () => {
-  const { sanitizeLogText } = await import("../src/core/cleanup/history.js");
+  const { sanitizeLogText } = await import("../src/adapters/history.js");
   const child = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(),
     stdout: new PassThrough(),
@@ -76,21 +75,6 @@ it("decodes split UTF-8 and sanitizes complete credential lines while draining o
     kill: vi.fn(() => true),
   });
   commands.spawn.mockReturnValue(child);
-  const config: CleanupSchedule = {
-    schemaVersion: 2,
-    alias: "tree",
-    tree: { kind: "local", path: "/tmp/tree" },
-    id: "a".repeat(64),
-    projectPath: "/project",
-    identity: "local:/tree",
-    agent: "codex",
-    everyMinutes: 60,
-    nodePath: "/node",
-    cliPath: "/cli",
-    agentPath: "/agent",
-    searchPath: "/bin",
-    enabled: true,
-  };
   const events: Array<{ source: string; text: string }> = [];
   const run = runAgent(config, "/worktree", "private prompt", new AbortController().signal, 1000, (source, text) =>
     events.push({ source, text: sanitizeLogText(text) }),

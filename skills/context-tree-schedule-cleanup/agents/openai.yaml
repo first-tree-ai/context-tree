@@ -1,4 +1,4 @@
 interface:
-  display_name: "Schedule Context Tree Cleanup"
-  short_description: "Schedule persistent recurring cleanup and publication"
-  default_prompt: "Use $context-tree-schedule-cleanup to schedule cleanup of this project's Context Tree every hour."
+  display_name: "Context Tree Schedule Cleanup"
+  short_description: "Schedule isolated cleanup with a local agent"
+  default_prompt: "Use $context-tree-schedule-cleanup to schedule isolated cleanup with a local agent."

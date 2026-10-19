@@ -7,7 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
-const temporaryRoot = mkdtempSync(join(tmpdir(), "context-tree-package-e2e-"));
+const temporaryRoot = realpathSync(mkdtempSync(join(tmpdir(), "context-tree-package-e2e-")));
 const gitConfig = join(temporaryRoot, "gitconfig");
 writeFileSync(gitConfig, "[init]\n\tdefaultBranch = trunk\n");
 const npmEnvironment = {
@@ -29,11 +29,9 @@ const npmEnvironment = {
 const SKILLS = [
   "context-tree-cleanup",
   "context-tree-connect",
-  "context-tree-create",
-  "context-tree-publish",
+  "context-tree-init",
   "context-tree-read",
   "context-tree-schedule-cleanup",
-  "context-tree-setup",
   "context-tree-write",
 ];
 
@@ -56,7 +54,7 @@ function requirePackagedFile(packageRoot, relativePath) {
 }
 
 /** The JSON contracts are covered by the unit tests; here we only assert the wire shape survives packing. */
-function parseOneLineJson(output, schemaVersion = 1) {
+function parseOneLineJson(output, schemaVersion = 3) {
   const parsed = JSON.parse(output);
   assert.equal(parsed.schemaVersion, schemaVersion, "response must carry its contract schema version");
   return parsed;
@@ -83,11 +81,13 @@ try {
   for (const relativePath of [
     "dist/cli/index.mjs",
     "scripts/postinstall.mjs",
-    "templates/AGENTS.md",
+    "dist/contracts/index.mjs",
+    "dist/contracts/index.d.mts",
     "skills/context-tree-cleanup/references/editorial.md",
   ]) {
     requirePackagedFile(extractedPackage, relativePath);
   }
+  assert.deepEqual(readdirSync(join(extractedPackage, "skills")).sort(), SKILLS);
   for (const skill of SKILLS) {
     requirePackagedFile(extractedPackage, `skills/${skill}/SKILL.md`);
     requirePackagedFile(extractedPackage, `skills/${skill}/agents/openai.yaml`);
@@ -96,16 +96,21 @@ try {
       readFileSync(join(projectRoot, `skills/${skill}/agents/openai.yaml`), "utf8"),
       `packed OpenAI metadata must remain byte-identical for ${skill}`,
     );
-    assert.match(
-      readFileSync(join(extractedPackage, `skills/${skill}/SKILL.md`), "utf8"),
-      /npm install --global @first-tree-ai\/context-tree/u,
-    );
   }
 
   // `files` is an allowlist, so these guard the regressions that could plausibly
   // re-add an entry: shipping the repo docs, emitting a library entry point again,
   // or reintroducing a per-skill launcher script.
-  for (const relativePath of ["docs", "dist/index.mjs", "dist/schemas.mjs", "skills/context-tree-read/scripts"]) {
+  for (const relativePath of [
+    "docs",
+    "templates",
+    "skills/context-tree-setup",
+    "skills/context-tree-create",
+    "skills/context-tree-publish",
+    "dist/index.mjs",
+    "dist/schemas.mjs",
+    "skills/context-tree-read/scripts",
+  ]) {
     assert.equal(
       existsSync(join(extractedPackage, relativePath)),
       false,
@@ -114,7 +119,7 @@ try {
   }
 
   const manifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
-  assert.equal(manifest.exports, undefined, "the package must expose only its bin");
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ["./contracts", "./package.json"]);
   const extractedVersion = runNode(join(extractedPackage, "dist/cli/index.mjs"), extractedPackage, ["--version"]);
   assert.equal(extractedVersion.status, 0);
   assert.equal(extractedVersion.stdout, `${manifest.version}\n`);
@@ -151,7 +156,6 @@ try {
     env: { ...npmEnvironment, npm_config_global: "true" },
   });
   assert.equal(nestedPostinstall.status, 0, "postinstall must never fail an install");
-  assert.match(nestedPostinstall.stdout, /run `context-tree install`/u);
   assert.equal(
     existsSync(join(temporaryRoot, ".claude", "skills")),
     false,
@@ -173,7 +177,6 @@ try {
     env: { ...npmEnvironment, npm_config_global: "true" },
   });
   assert.equal(globalPostinstall.status, 0, "postinstall must never fail an install");
-  assert.match(globalPostinstall.stdout, new RegExp(`installed ${SKILLS.length} skills for claude`, "u"));
   requirePackagedFile(temporaryRoot, ".claude/skills/context-tree-cleanup/references/editorial.md");
   for (const skill of SKILLS) {
     const installedSkill = join(temporaryRoot, ".claude", "skills", skill, "SKILL.md");
@@ -219,45 +222,41 @@ try {
   assert.equal(version.status, 0);
   assert.equal(version.stdout, `${manifest.version}\n`);
 
-  const created = runCli(cliPath, consumerRoot, ["create", "--project-path", ".", "--json"]);
-  assert.equal(created.status, 0);
+  const created = runCli(cliPath, consumerRoot, ["init", "docs", "--json"]);
+  assert.equal(created.status, 0, created.stdout + created.stderr);
   const createdResult = parseOneLineJson(created.stdout);
-  const treePath = createdResult.treePath;
-  assert.match(createdResult.commitSha, /^[0-9a-f]{40}$/u, "create must report the scaffold commit");
-  assert.equal("pointer" in createdResult, false);
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    assert.equal(lstatSync(join(consumerRoot, name), { throwIfNoEntry: false }), undefined);
+  const treePath = createdResult.treeRoot;
+  assert.equal(treePath, join(consumerRoot, "docs"));
+  for (const name of ["AGENTS.md", "CLAUDE.md", ".git"]) {
+    assert.equal(existsSync(join(consumerRoot, name)), false);
+    assert.equal(existsSync(join(treePath, name)), false);
   }
-
-  const packagedTemplates = readdirSync(join(extractedPackage, "templates"));
-  assert.equal(packagedTemplates.includes("AGENTS.md"), true);
-  assert.equal(packagedTemplates.includes("agents.md"), false);
-  assert.equal(lstatSync(join(treePath, "CLAUDE.md")).isSymbolicLink(), true);
-  assert.equal(readlinkSync(join(treePath, "CLAUDE.md")), "AGENTS.md");
-  assert.equal(readFileSync(join(treePath, ".git/HEAD"), "utf8"), "ref: refs/heads/trunk\n");
-  assert.match(
-    readFileSync(join(treePath, ".github/workflows/validate-context-tree.yml"), "utf8"),
-    /branches: \["trunk"\]/u,
-  );
-
   const resolved = runCli(cliPath, consumerRoot, ["resolve", "--json"]);
   assert.equal(resolved.status, 0);
-  assert.equal(parseOneLineJson(resolved.stdout, 2).connections[0].tree.path, treePath);
+  assert.equal(parseOneLineJson(resolved.stdout).connections[0].treeRoot, treePath);
+  const session = parseOneLineJson(runCli(cliPath, consumerRoot, ["prepare-write"]).stdout);
+  const finished = runCli(cliPath, consumerRoot, ["finish-write", session.id]);
+  assert.equal(finished.status, 0);
+  assert.equal(parseOneLineJson(finished.stdout).outcome, "validated");
 
-  const added = runCli(cliPath, consumerRoot, [
-    "create",
-    "--name",
-    "additional-context",
-    "--as",
-    "additional",
-    "--json",
-  ]);
+  const contractsConsumer = join(consumerRoot, "contracts.mjs");
+  writeFileSync(
+    contractsConsumer,
+    `import { projectConfigSchema, SCHEMA_VERSION } from "@first-tree-ai/context-tree/contracts";
+if (SCHEMA_VERSION !== 3) throw new Error("wrong version");
+projectConfigSchema.parse({schemaVersion: 3, trees: [{kind: "directory", path: "docs"}]});
+`,
+  );
+  const imported = runNode(contractsConsumer, consumerRoot, []);
+  assert.equal(imported.status, 0, imported.stderr);
+
+  const added = runCli(cliPath, consumerRoot, ["init", "additional", "--json"]);
   assert.equal(added.status, 0);
-  const multiple = parseOneLineJson(runCli(cliPath, consumerRoot, ["resolve", "--json"]).stdout, 2);
+  const multiple = parseOneLineJson(runCli(cliPath, consumerRoot, ["resolve", "--json"]).stdout);
   assert.equal(multiple.connections.length, 2);
-  const selected = parseOneLineJson(runCli(cliPath, consumerRoot, ["sync", "--tree", "additional"]).stdout, 2);
+  const selected = parseOneLineJson(runCli(cliPath, consumerRoot, ["sync", "--tree", "additional"]).stdout);
   assert.equal(selected.connections.length, 1);
-  assert.equal(selected.connections[0].alias, "additional");
+  assert.equal(selected.connections[0].connection.source.path, "additional");
   assert.equal(selected.connections[0].ok, true);
   const detached = runCli(cliPath, consumerRoot, ["disconnect", "--tree", "additional", "--json"]);
   assert.equal(detached.status, 0);

@@ -1,427 +1,253 @@
 import { resolve } from "node:path";
 import { Command, CommanderError, Option } from "commander";
-import {
-  cleanupLogs,
-  cleanupStatus,
-  recordCleanupActivity,
-  removeCleanup,
-  runCleanup,
-  scheduleCleanup,
-} from "../core/cleanup/index.js";
-import { connectProject, disconnectProject, listManagedTrees, resolveConnection } from "../core/connections.js";
-import { createProject } from "../core/create.js";
-import {
-  type InstallSkillsOptions,
-  installSkills,
-  type UninstallSkillsOptions,
-  uninstallSkills,
-} from "../core/install.js";
-import { ContextTreeError } from "../core/internal/errors.js";
-import { sanitizeCommandOutput } from "../core/internal/git.js";
-import { readPackageVersion } from "../core/internal/packaged-resource.js";
-import { publishProject } from "../core/publish.js";
-import { readTree } from "../core/read.js";
-import { syncProject } from "../core/sync.js";
-import { verifyTree } from "../core/verify.js";
-import { finishContextWrite, prepareContextWrite, preparedConnection } from "../core/write.js";
-import {
-  CLI_ERROR_CODES,
-  type ContextTreeCliErrorEnvelope,
-  cleanupRunResultSchema,
-  SCHEMA_VERSION,
-  skillHostSchema,
-} from "../schemas.js";
-import {
-  formatConnect,
-  formatCreate,
-  formatList,
-  formatPublish,
-  formatRead,
-  formatResolve,
-  formatVerify,
-} from "./format.js";
+import { sanitizeCommandOutput } from "../adapters/git.js";
+import { installSkills, uninstallSkills } from "../adapters/install.js";
+import { readPackageVersion } from "../adapters/package.js";
+import { CLI_ERROR_CODES, SCHEMA_VERSION, skillHostSchema, treeSourceSchema } from "../contracts/index.js";
+import { ContextTreeError } from "../errors.js";
+import { cleanupLogs, cleanupStatus, removeCleanup, runCleanup, scheduleCleanup } from "../operations/cleanup.js";
+import { connection, disconnect } from "../operations/connections.js";
+import { connectTree, directorySource, initTree, resolveTrees } from "../operations/trees.js";
+import { abortWrite, finishWrite, prepareWrite } from "../operations/write.js";
+import { sourceSelector } from "../sources/identity.js";
+import { projectRoot } from "../sources/project.js";
+import { resolveSource } from "../sources/resolve.js";
+import { readTree } from "../tree/read.js";
+import { verifyTree } from "../tree/verify.js";
+import { formatRead, formatVerify } from "./format.js";
 
-type ContextTreeCliIo = {
-  cwd: () => string;
-  stdout: (value: string) => void;
-  stderr?: (value: string) => void;
-};
-
-const defaultIo: ContextTreeCliIo = {
+type CliIo = { cwd: () => string; stdout: (text: string) => void; stderr?: (text: string) => void };
+type Selection = { projectPath: string; tree?: string; json?: boolean };
+const defaultIo: CliIo = {
   cwd: () => process.cwd(),
-  stderr: (value) => process.stderr.write(value),
-  stdout: (value) => process.stdout.write(value),
+  stdout: (text) => process.stdout.write(text),
+  stderr: (text) => process.stderr.write(text),
 };
+const MACHINE_COMMANDS = new Set(["sync", "prepare-write", "finish-write", "abort-write", "install", "uninstall"]);
 
-/** Commands that default to human-readable text and accept --json to restore JSON. */
-const TEXT_DEFAULT_COMMANDS = new Set([
-  "create",
-  "connect",
-  "disconnect",
-  "list",
-  "resolve",
-  "publish",
-  "read",
-  "verify",
-  "cleanup",
-]);
-
-function line(io: ContextTreeCliIo, value: string): void {
-  io.stdout(`${value}\n`);
-}
-
-function errline(io: ContextTreeCliIo, value: string): void {
-  (io.stderr ?? ((text) => process.stderr.write(text)))(`${value}\n`);
-}
-
-function emit<T>(io: ContextTreeCliIo, json: boolean, result: T, format: (value: T) => string): void {
-  line(io, json ? JSON.stringify(result) : format(result));
-}
-
-const jsonOption = ["--json", "print machine-readable JSON (versioned schema) instead of text"] as const;
-
-function createContextTreeCli(io: ContextTreeCliIo = defaultIo): Command {
-  const activities: Parameters<typeof recordCleanupActivity>[0][] = [];
+export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo = defaultIo): Promise<number> {
+  let exitCode = 0;
+  const emit = (value: unknown, json: boolean | undefined, text: string): void =>
+    io.stdout(`${json ? JSON.stringify(value) : text}\n`);
+  const project = (options: Selection): string => resolve(io.cwd(), options.projectPath);
+  const select = (command: Command): Command =>
+    command
+      .option("--project-path <path>", "project directory", ".")
+      .option("--tree <name-or-source>", "directory or repository name, or exact source selector");
+  const json = (command: Command): Command => command.option("--json", "print the versioned JSON result");
   const program = new Command()
     .name("context-tree")
-    .description("Create, connect, list, read, write, and publish Context Trees.")
-    .addHelpCommand(false)
+    .description("Structured context in directories and Git repositories.")
     .version(readPackageVersion())
     .exitOverride()
     .configureOutput({ writeErr: () => undefined, writeOut: io.stdout });
 
-  program
-    .command("create")
-    .option("--name <name>", "managed tree name")
-    .option("--as <alias>", "project-local connection alias")
-    .description("Create and connect one uniquely named managed Context Tree for the current project.")
-    .option("--project-path <path>", "project directory", ".")
-    .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string; tree?: string; name?: string; as?: string }) => {
-      const result = createProject(resolve(io.cwd(), options.projectPath), undefined, {
-        name: options.name,
-        alias: options.as,
-      });
-      activities.push({ treePath: result.treePath });
-      emit(io, options.json, result, formatCreate);
-    });
-
-  program
-    .command("connect")
-    .option("--as <alias>", "project-local connection alias")
-    .description("Connect the project by managed tree name, GitHub OWNER/REPO, or exact disk path.")
-    .argument("[name-or-repository]", "managed tree name or GitHub OWNER/REPO")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree-path <path>", "exact Context Tree Git root to connect in place")
-    .option(...jsonOption)
-    .action(
-      (
-        target: string | undefined,
-        options: { json: boolean; projectPath: string; tree?: string; treePath?: string; as?: string },
-      ) => {
-        const projectPath = resolve(io.cwd(), options.projectPath);
-        if (target !== undefined && options.treePath !== undefined) {
-          throw new Error("Connect requires exactly one of a name/repository or --tree-path.");
-        }
-        if (target !== undefined) {
-          const result = connectProject({ projectPath, target, alias: options.as });
-          activities.push({ projectPath, tree: result.alias });
-          emit(io, options.json, result, formatConnect);
-          return;
-        }
-        if (options.treePath !== undefined) {
-          const result = connectProject({
-            projectPath,
-            alias: options.as,
-            treePath: resolve(io.cwd(), options.treePath),
-          });
-          activities.push({ projectPath, tree: result.alias });
-          emit(io, options.json, result, formatConnect);
-          return;
-        }
-        throw new Error("Connect requires a managed tree name, GitHub OWNER/REPO, or --tree-path.");
-      },
-    );
-
-  program
-    .command("disconnect")
-    .option("--all", "remove all project connections")
-    .description("Remove this project's connection, preserving its Context Tree and repository.")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string; tree?: string }) => {
-      emit(io, options.json, disconnectProject(resolve(io.cwd(), options.projectPath), undefined, options), (result) =>
-        result.disconnected ? "Context Tree disconnected." : "No Context Tree connection.",
-      );
-    });
-
-  program
-    .command("list")
-    .description("List valid clean managed Context Trees.")
-    .option(...jsonOption)
-    .action((options: { json: boolean }) => {
-      emit(io, options.json, listManagedTrees(), formatList);
-    });
-
-  program
-    .command("resolve")
-    .description("Resolve the connected Context Tree for a project.")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .option(...jsonOption)
-    .action((options: { json: boolean; projectPath: string; tree?: string }) => {
+  json(
+    program
+      .command("init")
+      .argument("[path]", "tree directory", "context")
+      .option("--project-path <path>", "project directory", "."),
+  )
+    .description("Initialize tree content and a project connection; leave Git to the host.")
+    .action((path: string, options: Selection) => {
+      const result = initTree(project(options), resolve(io.cwd(), path));
       emit(
-        io,
+        { schemaVersion: SCHEMA_VERSION, ...result },
         options.json,
-        resolveConnection(resolve(io.cwd(), options.projectPath), undefined, options.tree),
-        formatResolve,
+        `Initialized ${sourceSelector(result.connection.projectRoot, result.connection.source)}: ${result.treeRoot}\nCommit the files through your project's normal workflow.`,
       );
     });
-
-  program
-    .command("sync")
-    .description("Synchronize the connected Context Tree for a project.")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .action((options: { projectPath: string; tree?: string }) => {
-      const projectPath = resolve(io.cwd(), options.projectPath);
-      const result = syncProject(projectPath, undefined, options.tree);
-      line(io, JSON.stringify(result));
-      activities.push(...result.connections.filter((c) => c.ok).map((c) => ({ projectPath, tree: c.alias })));
-      if (result.connections.some((c) => !c.ok)) process.exitCode = 1;
+  json(
+    program
+      .command("connect")
+      .argument("[repository]", "GitHub OWNER/REPO; omit for a directory")
+      .option("--project-path <path>", "project directory", ".")
+      .option("--path <path>", "directory, or repository-relative subtree", ".")
+      .option("--ref <branch>", "required target branch for a Git source"),
+  )
+    .description("Declare an existing directory or a managed Git source.")
+    .action((repository: string | undefined, options: Selection & { path: string; ref?: string }) => {
+      if (!repository && options.ref) throw new Error("--ref applies only to Git sources.");
+      const root = projectRoot(project(options));
+      const source = treeSourceSchema.parse(
+        repository
+          ? { kind: "git", repository, path: options.path, ref: options.ref }
+          : directorySource(root, resolve(io.cwd(), options.path)),
+      );
+      const result = connectTree(root, source);
+      emit(
+        { schemaVersion: SCHEMA_VERSION, ...result },
+        options.json,
+        `Connected ${sourceSelector(result.connection.projectRoot, result.connection.source)}: ${result.treeRoot}`,
+      );
     });
-
-  program
-    .command("prepare-write")
-    .description("Prepare an isolated Context Tree worktree for a write.")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .action((options: { projectPath: string; tree?: string }) => {
-      const result = prepareContextWrite(resolve(io.cwd(), options.projectPath), undefined, options.tree);
-      activities.push({ projectPath: result.connection.projectPath, tree: result.connection.alias });
-      line(io, JSON.stringify(result));
+  json(select(program.command("disconnect")))
+    .description("Remove one declaration; retain content and write sessions.")
+    .action((options: Selection) => {
+      disconnect(project(options), options.tree);
+      emit({ schemaVersion: SCHEMA_VERSION, disconnected: true }, options.json, "Disconnected.");
     });
-
+  for (const name of ["resolve", "sync"]) {
+    const command = select(program.command(name));
+    if (name === "resolve") json(command);
+    command
+      .description(
+        name === "sync"
+          ? "Fetch Git sources and open verified snapshots; directory sources stay in place."
+          : "Resolve declared trees without network access.",
+      )
+      .action((options: Selection) => {
+        const result = resolveTrees(project(options), options.tree, name === "sync");
+        if (result.connections.some((entry) => !entry.ok)) exitCode = 1;
+        emit(
+          result,
+          name === "sync" || options.json,
+          result.connections
+            .map(
+              (entry) =>
+                `${sourceSelector(entry.connection.projectRoot, entry.connection.source)}: ${entry.ok ? `${entry.treeRoot}${entry.dirty ? " (working changes)" : ""}` : entry.error.message}`,
+            )
+            .join("\n"),
+        );
+      });
+  }
+  for (const name of ["read", "verify"]) {
+    const command = json(select(program.command(name))).option(
+      "--tree-path <path>",
+      "explicit content root instead of a connection",
+    );
+    if (name === "read") command.argument("[path]", "tree-relative node", ".");
+    const action = (path: string, options: Selection & { treePath?: string }): void => {
+      if (options.treePath && options.tree) throw new Error("Choose --tree or --tree-path.");
+      const root = options.treePath
+        ? resolve(io.cwd(), options.treePath)
+        : resolveSource(connection(project(options), options.tree)).treeRoot;
+      if (name === "read") {
+        const result = readTree(root, path);
+        emit(result, options.json, formatRead(result));
+      } else {
+        const result = verifyTree(root);
+        if (!result.ok) exitCode = 1;
+        emit(result, options.json, formatVerify(result));
+      }
+    };
+    if (name === "read") command.action(action);
+    else command.action((options: Selection & { treePath?: string }) => action(".", options));
+  }
+  select(program.command("prepare-write"))
+    .option("--isolated", "prepare a review branch for a directory source")
+    .description("Return an edit session and its exact tree root.")
+    .action((options: Selection & { isolated?: boolean }) => {
+      const result = prepareWrite(project(options), options.tree, options.isolated);
+      emit(result, true, "");
+    });
   program
     .command("finish-write")
-    .description("Commit all pending changes in a prepared worktree and publish them.")
-    .requiredOption("--worktree-path <path>", "prepared worktree path")
-    .requiredOption("--message <message>", "commit message for the pending changes")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .action((options: { message: string; projectPath: string; worktreePath: string; tree?: string }) => {
-      let activity: Parameters<typeof recordCleanupActivity>[0] | undefined;
-      try {
-        const connection = preparedConnection(resolve(io.cwd(), options.worktreePath));
-        activity = { projectPath: connection.projectPath, tree: connection.alias };
-      } catch {
-        /* finish reports validation errors */
-      }
-      line(
-        io,
-        JSON.stringify(
-          finishContextWrite({
-            tree: options.tree,
-            message: options.message,
-            projectPath: resolve(io.cwd(), options.projectPath),
-            worktreePath: resolve(io.cwd(), options.worktreePath),
-          }),
-        ),
-      );
-      if (activity) activities.push(activity);
-    });
-
+    .argument("<session-id>")
+    .option("--message <message>", "managed commit message", "Update Context Tree")
+    .option("--publish", "push a managed Git session to its prepared target branch")
+    .description("Validate workspace edits, or commit an isolated session; publishing is explicit.")
+    .action((id: string, options: { message: string; publish?: boolean }) =>
+      emit(finishWrite(id, options.message, options.publish), true, ""),
+    );
   program
-    .command("publish")
-    .description("Publish the local tree as a new private GitHub repository.")
-    .argument("[repository]", "GitHub OWNER/REPO override; defaults to the authenticated account and tree name")
-    .option("--project-path <path>", "project directory", ".")
-    .option("--tree <alias>", "select a project connection")
-    .option(...jsonOption)
-    .action((repository: string | undefined, options: { json: boolean; projectPath: string; tree?: string }) => {
-      emit(
-        io,
-        options.json,
-        publishProject(resolve(io.cwd(), options.projectPath), { repository, tree: options.tree }),
-        formatPublish,
-      );
+    .command("abort-write")
+    .argument("<session-id>")
+    .description("Release a session without discarding any edits.")
+    .action((id: string) => {
+      abortWrite(id);
+      emit({ schemaVersion: SCHEMA_VERSION, released: true }, true, "");
     });
-
-  program
-    .command("read")
-    .description("Read an indexed Context Tree directory or Markdown leaf.")
-    .argument("[path]", "tree-relative path", ".")
-    .option("--tree-path <path>", "Context Tree root", ".")
-    .option(...jsonOption)
-    .action((path: string, options: { json: boolean; treePath: string }) => {
-      const treePath = resolve(io.cwd(), options.treePath);
-      if (!verifyTree(treePath).ok) {
-        throw new ContextTreeError(
-          CLI_ERROR_CODES.invalidTree,
-          `Refusing to read an invalid Context Tree; run context-tree verify --tree-path ${treePath}.`,
-        );
-      }
-      emit(io, options.json, readTree(treePath, path), formatRead);
-      activities.push({ treePath });
-    });
-
-  program
-    .command("verify")
-    .description("Validate Context Tree structure and safety.")
-    .option("--tree-path <path>", "Context Tree root", ".")
-    .option(...jsonOption)
-    .action((options: { json: boolean; treePath: string }) => {
-      const result = verifyTree(resolve(io.cwd(), options.treePath));
-      emit(io, options.json, result, formatVerify);
-      if (!result.ok) process.exitCode = 1;
-    });
-
-  program
-    .command("install")
-    .description("Install the packaged Context Tree skills into each agent's skill directory.")
-    .option("--host <host>", "restrict to one host: claude, codex, pi, or all", "all")
-    .option("--project <path>", "install below this project root instead of the home directory")
-    .action((options: { host: string; project?: string }) => {
-      const request: InstallSkillsOptions = {};
-      if (options.host !== "all") request.hosts = [skillHostSchema.parse(options.host)];
-      if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
-      line(io, JSON.stringify(installSkills(request)));
-    });
-
-  program
-    .command("uninstall")
-    .description("Remove packaged Context Tree skills from each agent's skill directory.")
-    .option("--host <host>", "restrict to one host: claude, codex, pi, or all", "all")
-    .option("--project <path>", "remove below this project root instead of the home directory")
-    .action((options: { host: string; project?: string }) => {
-      const request: UninstallSkillsOptions = {};
-      if (options.host !== "all") request.hosts = [skillHostSchema.parse(options.host)];
-      if (options.project !== undefined) request.projectPath = resolve(io.cwd(), options.project);
-      line(io, JSON.stringify(uninstallSkills(request)));
-    });
-
-  const cleanup = program.command("cleanup").description("Schedule and manage CLI-based Context Tree cleanup.");
-  for (const operation of ["schedule", "status", "remove", "run", "logs"]) {
-    const command = cleanup
-      .command(operation)
-      .option("--project-path <path>", "project directory", ".")
-      .option("--tree <alias>", "select a project connection")
-      .option(...jsonOption);
-    if (operation === "schedule")
+  for (const name of ["install", "uninstall"]) {
+    program
+      .command(name)
+      .option("--host <host>", "claude, codex, pi, or all", "all")
+      .option("--project <path>", "project skill destination")
+      .action((options: { host: string; project?: string }) => {
+        const request = {
+          ...(options.host === "all" ? {} : { hosts: [skillHostSchema.parse(options.host)] }),
+          ...(options.project ? { projectPath: resolve(io.cwd(), options.project) } : {}),
+        };
+        emit(name === "install" ? installSkills(request) : uninstallSkills(request), true, "");
+      });
+  }
+  const cleanup = program.command("cleanup").description("Schedule editorial work through isolated write sessions.");
+  for (const name of ["schedule", "status", "remove", "run", "logs"]) {
+    const command = json(select(cleanup.command(name)));
+    if (name === "schedule")
       command
         .requiredOption("--agent <agent>", "codex, claude, or pi")
-        .option("--model <model>", "explicit model override")
-        .option("--every <duration>", "positive whole-minute interval, e.g. 30m or 1h", "1h");
-    if (operation === "logs")
-      command.option("--list", "list recorded runs").option("--run <run-id>", "select a recorded run");
-    if (operation === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
+        .option("--model <model>", "host model override")
+        .option("--every <interval>", "e.g. 30m, 2h, 1d", "2h")
+        .option("--publish", "authorize publication to the managed Git target on each run");
+    if (name === "run") command.addOption(new Option("--schedule-id <id>").hideHelp());
+    if (name === "logs") command.option("--list", "list runs").option("--run <id>", "run ID");
     command.action(
-      async (options: {
-        tree?: string;
-        projectPath: string;
-        json: boolean;
-        agent?: string;
-        model?: string;
-        every?: string;
-        scheduleId?: string;
-        list?: boolean;
-        run?: string;
-      }) => {
-        const projectPath = resolve(io.cwd(), options.projectPath);
-        if (operation === "logs") {
-          const result = cleanupLogs(projectPath, options);
-          emit(io, options.json, result, (value) => {
-            if (!value.runs.length)
-              return `No cleanup logs recorded for project ${projectPath}.\nUse --project-path <path> to query another project's Context Tree.`;
-            if (options.list)
-              return value.runs
-                .map(
-                  (run) =>
-                    `${run.runId}  ${new Date(run.startedAt).toISOString()}  ${run.agent}/${run.model ?? "agent default"}  ${run.terminal?.outcome ?? "incomplete"}${run.truncated ? "  truncated" : ""}`,
-                )
-                .join("\n");
-            return value.events
-              .map((event) => `[${new Date(event.at).toISOString()}] [${event.source}] ${event.text}`)
-              .join("\n");
-          });
-          return;
-        }
-        if (operation === "run") {
-          const result = await runCleanup(projectPath, options.scheduleId, {}, options.tree);
-          const wireResult = cleanupRunResultSchema.parse({ schemaVersion: SCHEMA_VERSION, ...result });
+      async (
+        options: Selection & {
+          agent?: string;
+          model?: string;
+          every?: string;
+          publish?: boolean;
+          scheduleId?: string;
+          list?: boolean;
+          run?: string;
+        },
+      ) => {
+        if (name === "run") {
+          const result = await runCleanup(project(options), options.tree, options.scheduleId);
+          if (["failed", "cancelled", "publication-uncertain"].includes(result.outcome)) exitCode = 1;
           emit(
-            io,
+            { schemaVersion: SCHEMA_VERSION, ...result },
             options.json,
-            wireResult,
-            (value) =>
-              `Cleanup: ${value.outcome}.${value.message ? ` ${value.message}` : ""}${value.worktreePath ? `\n  Worktree: ${value.worktreePath}` : ""}${value.sha ? `\n  Commit: ${value.sha}` : ""}`,
+            `Cleanup: ${result.outcome}${result.message ? ` — ${result.message}` : ""}${result.worktreePath ? `\nReview: ${result.worktreePath}` : ""}`,
           );
-          if (["failed", "cancelled", "publication-uncertain"].includes(result.outcome)) process.exitCode = 1;
-          return;
+        } else if (name === "logs") {
+          const result = cleanupLogs(project(options), options);
+          emit(
+            result,
+            options.json,
+            options.list
+              ? result.runs.map((run) => `${run.runId}: ${run.terminal?.outcome ?? "running"}`).join("\n")
+              : result.events.map((event) => `[${event.source}] ${event.text}`).join("\n"),
+          );
+        } else {
+          const result =
+            name === "schedule"
+              ? scheduleCleanup({
+                  projectPath: project(options),
+                  agent: options.agent ?? "",
+                  every: options.every ?? "2h",
+                  publish: options.publish ?? false,
+                  ...(options.tree ? { tree: options.tree } : {}),
+                  ...(options.model ? { model: options.model } : {}),
+                })
+              : name === "remove"
+                ? removeCleanup(project(options), options.tree)
+                : cleanupStatus(project(options), options.tree);
+          emit(
+            result,
+            options.json,
+            result.schedule
+              ? `${sourceSelector(result.schedule.projectPath, result.schedule.source)}: ${result.schedule.enabled ? "scheduled" : "disabled"}, every ${result.schedule.everyMinutes}m, ${result.schedule.publish ? "publish" : "review branch"}\nLatest: ${result.latest?.outcome ?? "none"}`
+              : "No cleanup schedule.",
+          );
         }
-        const result =
-          operation === "schedule"
-            ? scheduleCleanup({ ...options, projectPath, agent: options.agent ?? "" })
-            : operation === "remove"
-              ? removeCleanup(projectPath, undefined, options.tree)
-              : cleanupStatus(projectPath, undefined, options.tree);
-        emit(io, options.json, result, (value) => {
-          const config = value.schedule;
-          if (!config) return "No cleanup schedule.";
-          return [
-            `Cleanup ${config.enabled ? "scheduled" : "removed"}.`,
-            `  Registered: ${value.registered}; running: ${value.running}`,
-            `  Project: ${config.projectPath}`,
-            `  Every: ${config.everyMinutes} minutes`,
-            `  Agent: ${config.agent}; model: ${config.model ?? "agent default"}`,
-            `  Last activity: ${value.lastActivity === null ? "missing" : new Date(value.lastActivity).toISOString()}`,
-            `  Inactivity: ${value.inactive ? "cleanup prevented (no activity within 24 hours)" : "cleanup permitted"}`,
-            `  Latest: ${value.latest?.outcome ?? "none"}${value.latest?.message ? ` — ${value.latest.message}` : ""}`,
-            ...(value.latest?.worktreePath ? [`  Worktree: ${value.latest.worktreePath}`] : []),
-          ].join("\n");
-        });
       },
     );
   }
-  program.hook("postAction", () => {
-    for (const activity of activities) recordCleanupActivity(activity);
-    activities.length = 0;
-  });
-
-  return program;
-}
-
-export async function runContextTreeCli(
-  argv: string[] = process.argv,
-  io: ContextTreeCliIo = defaultIo,
-): Promise<number> {
-  const program = createContextTreeCli(io);
   try {
     await program.parseAsync(argv);
-    return typeof process.exitCode === "number" && process.exitCode !== 0 ? process.exitCode : 0;
+    return exitCode;
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
-    const code = error instanceof ContextTreeError ? error.code : CLI_ERROR_CODES.failed;
-    const message = sanitizeCommandOutput(error instanceof Error ? error.message : String(error));
-    if (usesTextErrors(argv)) {
-      errline(io, `context-tree: ${message}`);
-    } else {
-      const envelope: ContextTreeCliErrorEnvelope = {
-        error: { code, message },
-        ok: false,
-        schemaVersion: SCHEMA_VERSION,
-      };
-      line(io, JSON.stringify(envelope));
-    }
-    process.exitCode = 1;
+    const detail = {
+      code: error instanceof ContextTreeError ? error.code : CLI_ERROR_CODES.failed,
+      message: sanitizeCommandOutput(error instanceof Error ? error.message : "Operation failed."),
+    };
+    if (argv.includes("--json") || MACHINE_COMMANDS.has(argv[2] ?? ""))
+      emit({ schemaVersion: SCHEMA_VERSION, ok: false, error: detail }, true, "");
+    else (io.stderr ?? io.stdout)(`context-tree: ${detail.message}\n`);
     return 1;
   }
-}
-
-/** A text-default command failing without --json reports a human-readable line on stderr. */
-function usesTextErrors(argv: string[]): boolean {
-  if (argv.includes("--json")) return false;
-  const subcommand = argv.slice(2).find((token) => !token.startsWith("-"));
-  return subcommand !== undefined && TEXT_DEFAULT_COMMANDS.has(subcommand);
 }

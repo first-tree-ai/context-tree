@@ -26,8 +26,8 @@ Both channels run behind the `test` job. A red CI run publishes nothing.
 consumer with scripts enabled, and asserts that a local install writes no
 skills, that a global `postinstall` places all six at mode `0644` for a host
 that exists while skipping one that does not, and that the repository docs, a
-library entry point, and per-skill launcher scripts stay out of the tarball. It
-then drives the create/resolve/install/verify/read lifecycle against the
+internal library entry points, and per-skill launcher scripts stay out of the tarball. It
+then drives the init/resolve/write/install/verify/read lifecycle and the public contracts export against the
 installed CLI and removes everything it created.
 
 This is the only tarball check CI runs. It asserts the packed file list entry by

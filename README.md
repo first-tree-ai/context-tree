@@ -1,93 +1,118 @@
 # Context Tree
 
-Project memory for coding agents. Save decisions, constraints, and their rationale
-in a separate Git repository so your agent can use them in future sessions.
-Keep it local or share it through a private GitHub repository.
+Durable, indexed project context for coding agents. A tree is a directory of Markdown files. It can live in `opentag/docs/`, a standalone folder, or a subtree of a shared Git repository.
 
-Works with **Codex, Claude Code, and Pi**.
-
-## Install
-
-Requires **Node.js 22.13+** and **Git**.
-
-```bash
+```sh
 npm install --global @first-tree-ai/context-tree
+cd opentag
+context-tree init docs
+context-tree read
 ```
 
-This installs the CLI and skills for your installed agents. Restart your agent
-to load the skills.
+Initialization creates `docs/NODE.md` and `.context-tree.json`. Commit them through the project's normal workflow. Git repositories, project instructions, and CI remain owned by the host project.
 
-## Use it
+## Sources and connections
 
-From your project directory:
+A project declares tree sources in `.context-tree.json`:
 
-```bash
-context-tree create
+```json
+{
+  "schemaVersion": 3,
+  "trees": [
+    { "kind": "directory", "path": "docs" },
+    {
+      "kind": "git",
+      "repository": "acme/knowledge",
+      "path": "engineering",
+      "ref": "main"
+    }
+  ]
+}
 ```
 
-This creates a local tree under `~/.context-tree/trees` and connects it to your
-project. Then ask your agent:
+Directory sources read the current workspace. Relative paths are portable across clones and worktrees; absolute paths attach external local directories. Git sources use an explicit GitHub repository, subtree, and branch. Git handles authentication through the host's credentials.
 
-> Read the Context Tree before planning this change.
-
-> Save our decision to use a single writer, including why we rejected multiple writers.
-
-The agent reads relevant context and commits updates. For GitHub trees, it also
-pushes changes.
-
-To invoke skills directly, use `$context-tree-read` in Codex,
-`/context-tree-read` in Claude Code, or `/skill:context-tree-read` in Pi.
-Replace `read` with `write` or `cleanup` to save or tidy context.
-
-## Share a tree
-
-Sign in with `gh auth login`, then publish to a new private GitHub repository:
-
-```bash
-context-tree publish OWNER/REPO
+```sh
+context-tree connect --path docs
+context-tree connect acme/knowledge --path engineering --ref main
+context-tree resolve --json                  # offline discovery
+context-tree sync                            # refresh remote snapshots
+context-tree read --tree knowledge
+context-tree read architecture --tree docs
+context-tree verify --tree docs
+context-tree disconnect --tree knowledge
 ```
 
-Connect from another project or machine:
+Resolution finds the nearest project configuration without crossing the current Git checkout boundary. Without a configuration, commands use the Git root or the supplied directory. With one tree, omit `--tree`. With several, use the directory or repository name: `--tree docs` or `--tree knowledge`. Names are derived, never stored. If a name is ambiguous, the error lists exact selectors: an absolute directory path or a URL such as `https://github.com/acme/knowledge/tree/main/engineering`. These URLs select existing connections; they do not add new ones. `resolve` and `sync` report each source independently.
 
-```bash
-context-tree connect OWNER/REPO
+`sync` returns a `treeRoot` pinned to a commit for each remote source. Use `read --tree-path <treeRoot>` for a consistent multi-step read. Directory sources expose live content and report whether their subtree has working changes.
+
+## Writing
+
+```sh
+context-tree prepare-write --tree docs
+# Edit only the returned treeRoot; retain the returned id.
+context-tree finish-write <id>
 ```
 
-You can also connect a local tree by name or path:
+For a directory source, this validates your edits. Context Tree does not stage, commit, or push the host's files.
 
-```bash
-context-tree list
-context-tree connect my-project-context-tree
-context-tree connect --tree-path /absolute/path/to/tree
+For a review branch, use `prepare-write --isolated`. The subtree must be committed and clean; unrelated project edits can remain. Git sources always use isolated worktrees. `finish-write <id> --message "Record architecture decision"` validates and commits only that subtree, retaining a branch and worktree for review. The result includes the session ID and path. Merge a directory-source review branch through the host's normal Git workflow.
+
+For a managed Git source, explicitly publish with:
+
+```sh
+context-tree finish-write <id> --publish
 ```
 
-A project can use several trees. Name connections with `--as <alias>` and select
-one with `--tree <alias>` when writing or publishing.
+Publication pushes to the prepared branch without force. A rejected push preserves the session and commit. Reconcile against the latest source in a fresh session. Managed sessions reject changed connections, unexpected branches or commits, and any edited path outside their subtree, including pre-staged, renamed, and untracked files. Do not commit manually inside a managed worktree.
 
-## Maintain it
+`abort-write <id>` removes workspace metadata or an empty isolated preparation. It never discards edits or retained commits. Review worktrees remain until integrated and explicitly removed with Git; there is no automatic garbage collection of user work.
 
-Ask your agent to run `context-tree-cleanup`, or schedule regular cleanup:
+## Content format
 
-```bash
-context-tree cleanup schedule --agent codex --every 2h
-context-tree cleanup status
-context-tree cleanup remove
+Every content directory has a `NODE.md` index. Every Markdown document has a nonempty YAML `title`. Only the root requires `schemaVersion: 1` and a nonempty body:
+
+```markdown
+---
+schemaVersion: 1
+title: OpenTag
+description: Product decisions and engineering context
+---
+
+# OpenTag
+
+Start with the product and architecture indexes.
 ```
 
-Schedules support Codex, Claude Code, and Pi on macOS and Linux. The agent CLI
-must be installed and authenticated, and the machine must be awake.
+Optional `soft_links` are tree-root-relative references. Markdown links are relative to their document. `members/<member>/` holds member-specific context. Content must use real files and directories; symlinks are unsupported. Repository infrastructure is excluded from editorial content. See the [specification](docs/specification.md) for exact boundaries and contracts.
 
-## Other commands
+## Skills and recurring cleanup
 
-```bash
-context-tree resolve                # show this project's connections
-context-tree disconnect             # disconnect the sole tree without deleting it
-context-tree install                # install skills for a newly added agent
-context-tree uninstall              # remove Context Tree skills
-context-tree --help
+The package includes six portable skills: `init`, `connect`, `read`, `write`, `cleanup`, and `schedule-cleanup`, each prefixed `context-tree-`. A direct global npm install installs them for detected hosts. Local dependency installation leaves home directories alone.
+
+```sh
+context-tree install                         # detected Claude, Codex, and Pi hosts
+context-tree install --host codex --project .
+context-tree uninstall
+context-tree cleanup schedule --tree docs --agent codex --every 2h
+context-tree cleanup status --tree docs
+context-tree cleanup logs --tree docs
+context-tree cleanup remove --tree docs
 ```
 
-In OpenTag, select a tree in **Agent settings → Context Tree**.
+Cleanup uses an isolated write session and produces a review branch by default. For managed Git sources, `cleanup schedule ... --publish` authorizes recurring publication. The scheduler is local (launchd on macOS, systemd user timers on Linux), requires a committed Git repository and an installed agent, and skips already processed tree content. Failed work is retained. Removing a schedule disables it and unregisters the job; logs and review work remain.
 
-See the [CLI specification](docs/specification.md) for command contracts and
-integration details.
+## Integration and development
+
+CLI JSON and project configuration use schema version **3**; document metadata uses version **1**. Import runtime schemas and derived types from `@first-tree-ai/context-tree/contracts`. Old configuration and commands are unsupported; there is no migration layer.
+
+Human-facing commands accept `--json`. `sync`, `prepare-write`, `finish-write`, `abort-write`, `install`, and `uninstall` always emit JSON. Failures return a nonzero exit code and sanitized details. `--project-path` selects a project; `read` and `verify` also accept `--tree-path` for direct content access.
+
+```sh
+pnpm install
+pnpm check
+pnpm typecheck
+pnpm test
+pnpm check:package
+```
