@@ -1,87 +1,16 @@
 ---
 name: context-tree-schedule-cleanup
-description: Create or update a persistent local host task that runs Context Tree cleanup and publishes changes. Use when the user requests recurring cleanup or changes its cadence.
-license: Apache-2.0
-compatibility: Requires Node.js 22.13+ and the context-tree CLI with connection schema version 2.
-metadata:
-  author: first-tree-ai
+description: Create, inspect, update, or remove a persistent local host schedule for Context Tree cleanup. Use when the user asks for recurring cleanup or changes its cadence.
 ---
 
-# Schedule Context Tree Cleanup
+# Context Tree Schedule Cleanup
 
-Scheduling authorizes recurring cleanup across shared content and all member
-directories and publication without repeated approval. Scheduling alone never
-runs cleanup immediately. Use the installed CLI on PATH; if missing, report
-`npm install --global @first-tree-ai/context-tree` and stop.
+Inspect `context-tree cleanup status --tree <name-or-source> --json` first. Reuse the requested connection and host agent (`codex`, `claude`, or `pi`); inspect local availability instead of inventing a model or executable. A schedule requires a committed Git repository.
 
-1. Keep the original project's stable absolute path. If replacing a previously
-   created Codex desktop Scheduled task or Claude Desktop routine, cancel that
-   desktop task using its existing controls before creating the CLI schedule.
-   The CLI cannot discover or cancel old desktop tasks. Do not create a duplicate
-   while cancellation is unconfirmed.
-2. Select the requested installed agent, or the current host's CLI: `codex`,
-   `claude`, or `pi`. Use the requested model if supplied; otherwise keep CLI
-   defaults. Use a positive whole-minute cadence such as `30m`, `1h`, or `1d`;
-   default to every hour. Do not silently approximate unsupported schedules.
-3. Run `context-tree cleanup schedule --project-path "<absolute-project-path>" --tree "<alias>" --agent <codex-claude-or-pi> --every <duration> --json`.
-   Add `--model <model>` only for an explicit override. Quote real arguments
-   safely. Connection or scheduler errors stop without setup or repair.
-4. Read back `context-tree cleanup status --project-path "<absolute-project-path>" --tree "<alias>" --json`.
-   Report registration, project, cadence, agent/model, last activity, and latest
-   outcome. One schedule per tree is shared across projects and both hosts on
-   this machine; repeating schedule updates it without an immediate cleanup.
-5. For cancellation run `context-tree cleanup remove --project-path "<absolute-project-path>" --tree "<alias>" --json`.
-   This disables future runs and stops the active native scheduled process and
-   its children. Repeated removal succeeds. Unfinished worktrees remain; already
-   published changes remain published. Publication already underway may have
-   completed; report uncertainty without rollback or retries.
+Create or update with `context-tree cleanup schedule --tree <name-or-source> --agent <agent> --every 2h --json`. Include `--model` only for an explicitly selected model. Include `--publish` only when recurring pushes to this managed Git source are authorized. Otherwise each substantive cleanup retains a review branch. Directory sources always produce review branches.
 
-`context-tree cleanup run --project-path "<absolute-project-path>" --tree "<alias>" --json` runs
-one pass with the saved configuration when explicitly requested. It still checks
-activity, unchanged commits, and overlap. Do not run it merely when scheduling.
+The CLI installs a local launchd or systemd user job, prepares isolated sessions, and invokes the packaged editorial rules. Do not create another scheduler. Unchanged tree content is skipped after a successful pass; unrelated code commits do not trigger another cleanup. Source, branch, or schedule changes stop a running pass.
 
-macOS uses user LaunchAgents; Linux uses systemd user timers/services. No desktop
-app, daemon, root installation, or Linux lingering is required. The machine must
-be awake and the user scheduler available; timing follows the native scheduler.
-Defaults are `gpt-5.6-luna` with low reasoning effort for Codex and
-`claude-haiku-4-5` for Claude, using existing CLI authentication. Pi uses its
-configured default model. Pi runs ephemeral with extensions disabled; `--model`
-may also name a `provider/model`. Do not change credentials, bypass permissions,
-silently switch models, or retry publication.
+Use `cleanup run --tree <name-or-source> --json` for an explicitly requested immediate run, `cleanup logs --tree <name-or-source> --json` to inspect output, and `cleanup remove --tree <name-or-source> --json` to disable and unregister the job. Report cadence, agent, publication policy, and retained work when relevant.
 
-Initial scheduling starts a 24-hour activity window. Successful ordinary create,
-connect, sync, read, prepare-write, and finish-write use refreshes activity for
-scheduled trees. Background cleanup and status never refresh it. Missing or old
-activity skips before network or model work; unchanged successfully cleaned
-commits skip the model. Failures preserve worktrees and success checkpoints.
-The runner owns preparation, verification, and publication; the fresh agent
-only edits using the cleanup skill's shared required editorial resource.
-
-Inspect runner history with `context-tree cleanup logs --project-path <project> --tree <alias> --json`.
-Use `--list` for newest-first summaries or `--run <run-id>` for a particular run;
-these selectors are mutually exclusive. The versioned result includes summaries
-and the selected run's labeled runner/stdout/stderr events. Reads are snapshots,
-do not refresh activity, and do not query the scheduler. Agent output varies by
-CLI. Missing terminal outcomes mean incomplete runs. Outcomes include `runId`
-when history was recorded.
-
-History is local, shared across connected projects, and survives schedule removal.
-Retention is 50 runs (oldest completed runs are pruned; incomplete entries are
-protected), with 5 MiB of serialized output per run and an explicit truncation
-flag. Final outcome metadata survives output truncation. Credentials and terminal
-controls are sanitized; oversized lines are suppressed. Only runner attempts are
-recorded, including inactivity and unchanged skips. Old transcripts and cleanup
-performed directly through a host skill are unavailable.
-
-Select the connection alias from `context-tree resolve --project-path "<project>" --json`.
-Infer the destination from the user's request, relevant indexes, and task context
-when clear; ask when several destinations are plausible. A single connection can
-be selected implicitly. Selecting a destination does not grant write authorization.
-Keep each operation and commit within one tree. Work spanning trees requires
-separate operations with individually reported outcomes; there is no cross-tree
-transaction and no primary tree or implicit precedence.
-
-Several trees may be scheduled per project, with one schedule per tree identity
-across projects. Schedules retain the alias and tree identity. Removed or replaced
-connections make their schedules inactive; explicitly reschedule to change them.
-Activity and logs are scoped to the selected tree.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.

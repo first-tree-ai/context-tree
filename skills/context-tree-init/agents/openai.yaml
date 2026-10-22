@@ -1,0 +1,4 @@
+interface:
+  display_name: "Context Tree Init"
+  short_description: "Initialize a tree inside any project"
+  default_prompt: "Use $context-tree-init to initialize a tree inside any project."

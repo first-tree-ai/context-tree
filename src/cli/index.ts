@@ -2,4 +2,4 @@
 
 import { runContextTreeCli } from "./api.js";
 
-await runContextTreeCli();
+process.exitCode = await runContextTreeCli();

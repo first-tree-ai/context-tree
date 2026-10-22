@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Read"
-  short_description: "Read durable project decisions"
-  default_prompt: "Use $context-tree-read for relevant project decisions, respecting any session opt-out."
+  short_description: "Retrieve relevant context through tree indexes"
+  default_prompt: "Use $context-tree-read to retrieve relevant context through tree indexes."

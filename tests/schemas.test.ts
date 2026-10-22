@@ -1,98 +1,50 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { branchSchema, projectConfigSchema, treeSourceSchema } from "../src/contracts/index.js";
+import { isPathInside } from "../src/tree/path.js";
 
-import { afterEach, describe, expect, it } from "vitest";
-import { readTree } from "../src/core/read.js";
-import { scaffoldTree } from "../src/core/scaffold.js";
-import { verifyTree } from "../src/core/verify.js";
-import {
-  contextTreeCliErrorEnvelopeSchema,
-  contextTreePublishResultSchema,
-  contextTreeReadChildSchema,
-  contextTreeReadNodeSchema,
-  contextTreeReadResultSchema,
-  verifyTreeReportSchema,
-} from "../src/schemas.js";
-
-const temporaryRoots = new Set<string>();
-
-function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "context-tree-schema-"));
-  temporaryRoots.add(root);
-  return root;
-}
-
-function tree(): string {
-  const root = join(tempRoot(), "tree");
-  scaffoldTree({ path: root, name: "context" });
-  return root;
-}
-
-afterEach(() => {
-  for (const root of temporaryRoots) rmSync(root, { force: true, recursive: true });
-  temporaryRoots.clear();
-});
-
-/**
- * The wire contracts are exercised end to end in cli.test.ts, which parses real
- * command output through these schemas. These cases cover only what that cannot:
- * that core results serialize unchanged, and that the two hand-written
- * refinements actually refuse unsafe values.
- */
-describe("JSON schemas", () => {
-  it("parses every core result without changing serialized form", () => {
-    const root = tree();
-    const results: Array<readonly [unknown, { parse: (value: unknown) => unknown }]> = [
-      [verifyTree(root), verifyTreeReportSchema],
-      [readTree(root), contextTreeReadResultSchema],
-    ];
-    for (const [result, schema] of results) expect(schema.parse(result)).toEqual(result);
-    const read = readTree(root);
-    expect(contextTreeReadNodeSchema.parse(read.node)).toEqual(read.node);
-    for (const child of read.children) expect(contextTreeReadChildSchema.parse(child)).toEqual(child);
-  });
-
-  it("refuses credential-bearing publish URLs and malformed repository identities", () => {
-    const result = {
-      branch: "trunk",
-      repository: "acme/service-context",
-      schemaVersion: 1,
-      sha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
-      url: "https://github.com/acme/service-context.git",
-    };
-    expect(contextTreePublishResultSchema.parse(result)).toEqual(result);
+describe("source contracts", () => {
+  it("requires explicit Git branch/subtree and normalizes repository identity", () => {
     expect(
-      contextTreePublishResultSchema.safeParse({ ...result, url: "https://token@github.com/acme/service-context.git" })
-        .success,
-    ).toBe(false);
-    expect(contextTreePublishResultSchema.safeParse({ ...result, repository: "acme" }).success).toBe(false);
+      treeSourceSchema.parse({ kind: "git", repository: "Acme/Knowledge", path: "docs", ref: "team/context" }),
+    ).toEqual({ kind: "git", repository: "acme/knowledge", path: "docs", ref: "team/context" });
+    for (const source of [
+      { kind: "local", path: "/tmp/tree" },
+      { kind: "github", repository: "acme/repo" },
+      { kind: "git", repository: "acme/repo", path: "docs" },
+      { kind: "git", repository: "https://secret@github.com/acme/repo", path: ".", ref: "main" },
+      { kind: "directory", path: "docs", publish: true },
+    ])
+      expect(treeSourceSchema.safeParse(source).success).toBe(false);
   });
-
-  it("accepts every lifecycle error code and rejects retired ones", () => {
-    const codes = [
-      "AMBIGUOUS_CONNECTION",
-      "CONTEXT_TREE_FAILED",
-      "CORRUPT_CONNECTION",
-      "DIRTY_TREE",
-      "GITHUB_AUTH",
-      "INVALID_TREE",
-      "NO_CONNECTION",
-      "PUBLISH_INCOMPLETE",
-      "REPOSITORY_EXISTS",
-      "STALE_CONNECTION",
-      "WRITE_OUTDATED",
-    ];
-    for (const code of codes) {
-      const envelope = { error: { code, message: "failure" }, ok: false, schemaVersion: 1 };
-      expect(contextTreeCliErrorEnvelopeSchema.safeParse(envelope).success, code).toBe(true);
+  it("rejects traversal and Git ref expressions before filesystem or network access", () => {
+    for (const path of ["../docs", "docs/../other", "/docs", "docs//tree", "docs\\tree", ".git/docs", "./docs", ""]) {
+      expect(
+        treeSourceSchema.safeParse({ kind: "git", repository: "acme/tree", path, ref: "main" }).success,
+        path,
+      ).toBe(false);
     }
+    for (const ref of [
+      "HEAD~1",
+      "main:other",
+      "-x",
+      "main.lock",
+      "main..bad",
+      "a/.hidden",
+      "main@{1}",
+      "a//b",
+      "a?b",
+      "",
+    ])
+      expect(branchSchema.safeParse(ref).success, ref).toBe(false);
+    expect(isPathInside("/tree", "/tree/..notes")).toBe(true);
+    expect(isPathInside("/tree", "/tree-other")).toBe(false);
+  });
+  it("rejects old config and unknown fields", () => {
+    expect(projectConfigSchema.safeParse({ schemaVersion: 2, trees: {} }).success).toBe(false);
+    expect(projectConfigSchema.safeParse({ schemaVersion: 3, trees: [], registry: {} }).success).toBe(false);
     expect(
-      contextTreeCliErrorEnvelopeSchema.safeParse({
-        error: { code: "NO_LINK", message: "retired" },
-        ok: false,
-        schemaVersion: 1,
-      }).success,
+      projectConfigSchema.safeParse({ schemaVersion: 3, trees: { "../bad": { kind: "directory", path: "docs" } } })
+        .success,
     ).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -13,18 +14,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installSkills, uninstallSkills } from "../src/core/install.js";
+import { installSkills, uninstallSkills } from "../src/adapters/install.js";
 
-const SKILLS = [
-  "context-tree-cleanup",
-  "context-tree-connect",
-  "context-tree-create",
-  "context-tree-publish",
-  "context-tree-read",
-  "context-tree-schedule-cleanup",
-  "context-tree-setup",
-  "context-tree-write",
-];
+const SKILL_ROOT = resolve(import.meta.dirname, "../skills");
+const SKILLS = readdirSync(SKILL_ROOT).sort();
 const roots = new Set<string>();
 
 function workspace(): string {
@@ -89,15 +82,6 @@ describe("skill installation", () => {
     }
   });
 
-  it("copies the Codex interface metadata alongside each skill into the shared .agents directory", () => {
-    const root = workspace();
-    installSkills({ hosts: ["codex"], projectPath: root });
-    for (const skill of SKILLS) {
-      expect(existsSync(join(root, ".agents", "skills", skill, "agents", "openai.yaml")), skill).toBe(true);
-    }
-    expect(existsSync(join(root, ".codex"))).toBe(false);
-  });
-
   it("installs the shared .agents directory once for codex and pi", () => {
     const root = workspace();
     const result = installSkills({ hosts: ["codex", "pi"], projectPath: root });
@@ -106,25 +90,13 @@ describe("skill installation", () => {
       join(root, ".agents", "skills"),
       join(root, ".agents", "skills"),
     ]);
+    expect(existsSync(join(root, ".codex"))).toBe(false);
+    for (const skill of SKILLS)
+      expect(readFileSync(join(root, ".agents/skills", skill, "agents/openai.yaml"), "utf8")).toBe(
+        readFileSync(join(SKILL_ROOT, skill, "agents/openai.yaml"), "utf8"),
+      );
     for (const skill of SKILLS) {
       expect(existsSync(join(root, ".agents", "skills", skill, "SKILL.md")), skill).toBe(true);
-    }
-  });
-
-  it("installs Pi skills into the cross-agent .agents directory", () => {
-    const root = workspace();
-    const result = installSkills({ hosts: ["pi"], projectPath: root });
-    expect(result.installed).toEqual([{ host: "pi", path: join(root, ".agents", "skills"), skills: SKILLS }]);
-    for (const skill of SKILLS) {
-      expect(existsSync(join(root, ".agents", "skills", skill, "SKILL.md")), skill).toBe(true);
-    }
-  });
-
-  it("installs no launcher script, because skills now call the CLI on PATH", () => {
-    const root = workspace();
-    installSkills({ hosts: ["claude"], projectPath: root });
-    for (const skill of SKILLS) {
-      expect(existsSync(join(root, ".claude", "skills", skill, "scripts")), skill).toBe(false);
     }
   });
 
@@ -137,7 +109,7 @@ describe("skill installation", () => {
     writeFileSync(stray, "stale\n");
 
     installSkills({ hosts: ["claude"], projectPath: root });
-    expect(readFileSync(target, "utf8")).toContain("context-tree sync");
+    expect(readFileSync(target, "utf8")).toBe(readFileSync(join(SKILL_ROOT, "context-tree-read/SKILL.md"), "utf8"));
     expect(existsSync(stray)).toBe(false);
   });
 
@@ -168,44 +140,30 @@ describe("skill installation", () => {
 });
 
 describe("skill removal", () => {
-  it("removes every packaged skill it installed for a named host", () => {
-    const root = workspace();
-    installSkills({ hosts: ["claude"], projectPath: root });
-
-    const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
-
-    expect(result.removed).toEqual([{ host: "claude", path: join(root, ".claude", "skills"), skills: SKILLS }]);
-    expect(result.skipped).toEqual([]);
-    for (const skill of SKILLS) expect(existsSync(join(root, ".claude", "skills", skill))).toBe(false);
-  });
-
-  it("removes a context-tree- skill it did not install", () => {
+  it("removes owned skills while preserving foreign skills and state", () => {
     const root = workspace();
     const owned = join(root, ".claude", "skills", "context-tree-custom");
     mkdirSync(owned, { recursive: true });
+    const foreign = join(root, ".claude/skills/foreign");
+    mkdirSync(foreign);
+    writeFileSync(join(foreign, "SKILL.md"), "keep");
+    const state = join(root, ".context-tree");
+    mkdirSync(state);
 
     const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
 
     expect(result.removed[0]?.skills).toEqual(["context-tree-custom"]);
     expect(existsSync(owned)).toBe(false);
-  });
-
-  it("never touches a skill directory the package does not own", () => {
-    const root = workspace();
-    const foreign = join(root, ".claude", "skills", "someone-elses-skill");
-    mkdirSync(foreign, { recursive: true });
-    writeFileSync(join(foreign, "SKILL.md"), "mine\n");
-
-    uninstallSkills({ hosts: ["claude"], projectPath: root });
-
-    expect(readFileSync(join(foreign, "SKILL.md"), "utf8")).toBe("mine\n");
+    expect(readFileSync(join(foreign, "SKILL.md"), "utf8")).toBe("keep");
+    expect(existsSync(state)).toBe(true);
   });
 
   it("reports nothing to remove for a host that is not installed", () => {
     const root = workspace();
     const result = uninstallSkills({ hosts: ["claude"], projectPath: root });
     expect(result.removed).toEqual([]);
-    expect(result.skipped[0]?.reason).toBe(`${join(root, ".claude")} does not exist; nothing to remove.`);
+    expect(result.skipped).toEqual([expect.objectContaining({ host: "claude" })]);
+    expect(existsSync(join(root, ".claude"))).toBe(false);
   });
 
   it("is idempotent", () => {
@@ -230,17 +188,6 @@ describe("skill removal", () => {
     for (const skill of SKILLS) expect(existsSync(join(root, ".agents", "skills", skill))).toBe(false);
   });
 
-  it("leaves everything outside the host skills directory alone", () => {
-    const root = workspace();
-    const state = join(root, ".context-tree", "trees", "mine");
-    mkdirSync(state, { recursive: true });
-    installSkills({ hosts: ["claude"], projectPath: root });
-
-    uninstallSkills({ hosts: ["claude"], projectPath: root });
-
-    expect(existsSync(state)).toBe(true);
-  });
-
   it("refuses to remove through a symlinked skills directory", () => {
     const root = workspace();
     const outside = join(root, "outside");
@@ -255,4 +202,18 @@ describe("skill removal", () => {
     expect(result.skipped[0]?.reason).toContain("is not a real directory");
     expect(existsSync(owned)).toBe(true);
   });
+});
+
+it("removes obsolete owned skills without traversing symlink targets", () => {
+  const root = workspace();
+  const skills = join(root, ".claude/skills");
+  mkdirSync(join(skills, "context-tree-setup"), { recursive: true });
+  const outside = join(root, "outside");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "keep"), "keep");
+  symlinkSync(outside, join(skills, "context-tree-obsolete"));
+  installSkills({ hosts: ["claude"], projectPath: root });
+  expect(existsSync(join(skills, "context-tree-setup"))).toBe(false);
+  expect(existsSync(join(skills, "context-tree-obsolete"))).toBe(false);
+  expect(readFileSync(join(outside, "keep"), "utf8")).toBe("keep");
 });

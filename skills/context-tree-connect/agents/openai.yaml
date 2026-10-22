@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Connect"
-  short_description: "Connect a project to an existing tree"
-  default_prompt: "Use $context-tree-connect with a managed name, OWNER/REPO, or exact disk path."
+  short_description: "Connect a directory or Git repository subtree"
+  default_prompt: "Use $context-tree-connect to connect a directory or Git repository subtree."

@@ -1,627 +1,212 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runContextTreeCli } from "../src/cli/api.js";
-import { agentArguments, runAgent } from "../src/core/cleanup/agent.js";
+import { describe, expect, it, vi } from "vitest";
+import { statePath } from "../src/adapters/cleanup-state.js";
+import { git } from "../src/adapters/git.js";
+import { CleanupHistory, MAX_LOG_BYTES, readCleanupHistory } from "../src/adapters/history.js";
+import { type CleanupScheduler, nativeScheduler } from "../src/adapters/scheduler.js";
+import { atomicState } from "../src/adapters/state.js";
+import type { CleanupSchedule } from "../src/contracts/index.js";
 import {
-  cleanupLogs,
   cleanupStatus,
   parseCleanupInterval,
-  recordCleanupActivity,
   removeCleanup,
   runCleanup,
   scheduleCleanup,
-} from "../src/core/cleanup/index.js";
-import { type CleanupScheduler, nativeScheduler } from "../src/core/cleanup/scheduler.js";
-import { atomicState, loadSchedule, readState, statePath } from "../src/core/cleanup/store.js";
-import { connectProject, disconnectProject } from "../src/core/connections.js";
-import { createProject } from "../src/core/create.js";
-import { ContextTreeError } from "../src/core/internal/errors.js";
-import { CLI_ERROR_CODES, type CleanupSchedule } from "../src/schemas.js";
+} from "../src/operations/cleanup.js";
+import { disconnect } from "../src/operations/connections.js";
+import { connectTree, initTree } from "../src/operations/trees.js";
+import { loadWriteSession } from "../src/operations/write.js";
+import { commit, initRepository, node, remoteFixture, useFixture } from "./helpers.js";
 
-let home: string;
-let project: string;
-let tree: string;
-let scheduler: CleanupScheduler;
-let config: CleanupSchedule;
-const worktrees = new Set<string>();
-beforeEach(() => {
-  home = realpathSync(mkdtempSync(join(tmpdir(), "context-tree-cleanup-test-")));
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("GIT_CONFIG_GLOBAL", join(home, "gitconfig"));
-  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
-  writeFileSync(
-    join(home, "gitconfig"),
-    "[user]\nname = Test\nemail = test@example.test\n[init]\ndefaultBranch = main\n",
-  );
+const fixture = useFixture();
+const scheduler: CleanupScheduler = {
+  install: () => undefined,
+  remove: () => undefined,
+  status: () => ({ registered: true, running: false }),
+};
+function setup(): CleanupSchedule {
+  const { project, home } = fixture();
+  initRepository(project);
+  initTree(project, join(project, "docs"));
+  commit(project);
   const bin = join(home, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "codex"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
-  writeFileSync(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
-  writeFileSync(join(bin, "pi"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", { mode: 0o700 });
-  vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
-  project = join(home, "project");
-  mkdirSync(project);
-  tree = createProject(project).treePath;
-  let registered = false;
-  scheduler = {
-    status: () => ({ registered, running: false }),
-    install: () => {
-      registered = true;
-    },
-    remove: () => {
-      registered = false;
-    },
-  };
-  const result = scheduleCleanup({ projectPath: project, agent: "codex" }, scheduler);
-  if (!result.schedule) throw new Error("missing schedule");
-  config = result.schedule;
-});
-afterEach(() => {
-  for (const path of worktrees) rmSync(path, { recursive: true, force: true });
-  worktrees.clear();
-  vi.unstubAllEnvs();
-  rmSync(home, { recursive: true, force: true });
-  process.exitCode = 0;
-});
-function remember(path: string): void {
-  worktrees.add(path);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}:${process.env.PATH ?? ""}`);
+  const result = scheduleCleanup({ projectPath: project, agent: "codex", every: "2h", publish: false }, scheduler);
+  if (!result.schedule) throw new Error("Missing schedule");
+  return result.schedule;
 }
-
-describe("cleanup scheduling and activity", () => {
-  it("updates one tree across projects and removes idempotently", () => {
-    const second = join(home, "second");
-    mkdirSync(second);
-    connectProject({ projectPath: second, treePath: tree });
-    const updated = scheduleCleanup(
-      { projectPath: second, agent: "claude", every: "30m", model: "explicit" },
-      scheduler,
-    );
-    expect(updated.schedule?.id).toBe(config.id);
-    expect(updated.schedule?.everyMinutes).toBe(30);
-    expect(updated.schedule?.model).toBe("explicit");
-    expect(updated.latest).toBeNull();
-    expect(cleanupStatus(project, scheduler).registered).toBe(true);
-    expect(removeCleanup(project, scheduler).registered).toBe(false);
-    expect(removeCleanup(project, scheduler).registered).toBe(false);
-  });
-  it("keeps a pi schedule model-agnostic and resolves the pi binary", () => {
-    const result = scheduleCleanup({ projectPath: project, agent: "pi" }, scheduler);
-    expect(result.schedule?.agent).toBe("pi");
-    expect(result.schedule?.model).toBeUndefined();
-    expect(result.schedule?.agentPath).toBe(join(home, "bin", "pi"));
-    expect(agentArguments({ ...config, agent: "pi", model: undefined })).toEqual([
-      "-p",
-      "--tools",
-      "read,edit,write,grep,find,ls",
-      "--no-session",
-      "--no-extensions",
-    ]);
-    expect(agentArguments({ ...config, agent: "pi", model: "anthropic/claude-haiku-4-5" })).toEqual([
-      "-p",
-      "--tools",
-      "read,edit,write,grep,find,ls",
-      "--no-session",
-      "--no-extensions",
-      "--model",
-      "anthropic/claude-haiku-4-5",
-    ]);
-  });
-  it("validates cadence", () => {
-    expect(parseCleanupInterval()).toBe(60);
-    expect(parseCleanupInterval("2d")).toBe(2880);
-    for (const value of ["0m", "1.5h", "20s", "-1m", "999999999h"]) expect(() => parseCleanupInterval(value)).toThrow();
-  });
-  it("records successful foreground CLI reads, but not background activity or status", async () => {
-    atomicState(statePath(config.id, "activity"), 1);
-    cleanupStatus(project, scheduler);
-    expect(readState(statePath(config.id, "activity"))).toBe(1);
-    const stdout = vi.fn();
-    expect(
-      await runContextTreeCli(["node", "context-tree", "read", "--tree-path", tree, "--json"], {
-        cwd: () => project,
-        stdout,
-      }),
-    ).toBe(0);
-    expect(readState(statePath(config.id, "activity"))).not.toBe(1);
-    atomicState(statePath(config.id, "activity"), 1);
-    vi.stubEnv("CONTEXT_TREE_CLEANUP", "1");
-    recordCleanupActivity({ projectPath: project });
-    expect(readState(statePath(config.id, "activity"))).toBe(1);
-  });
-  it("fails closed on symlinked state and activity errors never break CLI use", () => {
-    const path = statePath(config.id, "activity");
-    rmSync(path);
-    symlinkSync(join(home, "gitconfig"), path);
-    expect(() => cleanupStatus(project, scheduler)).toThrow();
-    expect(() => recordCleanupActivity({ projectPath: project })).not.toThrow();
-  });
-});
-
-describe("cleanup lifecycle", () => {
-  it("skips inactive or missing activity before sync or model work", async () => {
-    const sync = vi.fn();
-    const agent = vi.fn();
-    atomicState(statePath(config.id, "activity"), 1);
-    expect((await runCleanup(project, undefined, { sync, agent })).outcome).toBe("inactive");
-    rmSync(statePath(config.id, "activity"));
-    expect((await runCleanup(project, undefined, { sync, agent })).outcome).toBe("inactive");
-    expect(sync).not.toHaveBeenCalled();
-    expect(agent).not.toHaveBeenCalled();
-  });
-  it("records no-op inspection then skips unchanged snapshots without model or activity refresh", async () => {
-    const oldActivity = readState(statePath(config.id, "activity"));
-    const agent = vi.fn(async (_config, path: string) => {
-      remember(path);
+describe("cleanup through isolated sessions", () => {
+  it("retains a review branch, preserves host edits, and skips the same input subtree", async () => {
+    const config = setup();
+    const { project } = fixture();
+    writeFileSync(join(project, "code.ts"), "host changes\n");
+    const agent = vi.fn(async (_config, root: string) => {
+      writeFileSync(join(root, "decision.md"), node("Decision"));
     });
-    expect((await runCleanup(project, undefined, { agent })).outcome).toBe("noop");
-    expect((await runCleanup(project, undefined, { agent })).outcome).toBe("unchanged");
+    const result = await runCleanup(project, undefined, undefined, { agent });
+    expect(result.outcome).toBe("committed");
+    expect(result.sessionId).toBeTruthy();
+    expect(readFileSync(join(project, "code.ts"), "utf8")).toBe("host changes\n");
+    expect(existsSync(join(project, "docs/decision.md"))).toBe(false);
+    const session = loadWriteSession(result.sessionId ?? "");
+    expect(session.commit).toBe(result.sha);
+    expect(readCleanupHistory(config.id).runs[0]?.terminal?.outcome).toBe("committed");
+    commit(project, "Unrelated code edit");
+    expect((await runCleanup(project, undefined, undefined, { agent })).outcome).toBe("unchanged");
     expect(agent).toHaveBeenCalledTimes(1);
-    expect(readState(statePath(config.id, "activity"))).toBe(oldActivity);
+    expect(removeCleanup(project, undefined, scheduler).schedule?.enabled).toBe(false);
+    expect((await runCleanup(project, undefined, undefined, { agent })).outcome).toBe("inactive");
   });
-  it("publishes one valid edit through the real lifecycle", async () => {
-    const result = await runCleanup(project, undefined, {
-      agent: async (_config, path) => {
-        remember(path);
-        const file = join(path, "NODE.md");
-        writeFileSync(file, `${readFileSync(file, "utf8")}\nA durable constraint.\n`);
+  it("validates no-op runs, refuses infrastructure edits, and retains failed work", async () => {
+    const config = setup();
+    const { project } = fixture();
+    const result = await runCleanup(project, undefined, undefined, { agent: async () => undefined });
+    expect(result.outcome).toBe("noop");
+    rmSync(statePath(config.id, "success"));
+    const invalid = await runCleanup(project, undefined, undefined, {
+      agent: async (_config, root) => {
+        writeFileSync(join(root, "AGENTS.md"), "Unwanted instructions");
+      },
+    });
+    expect(invalid.outcome).toBe("failed");
+    expect(readFileSync(join(invalid.worktreePath ?? "", "AGENTS.md"), "utf8")).toContain("Unwanted");
+    expect(cleanupStatus(project, undefined, scheduler).latest?.outcome).toBe("failed");
+  });
+  it("cancels when the schedule changes before completion and does not stage", async () => {
+    const config = setup();
+    const { project } = fixture();
+    const result = await runCleanup(project, undefined, undefined, {
+      agent: async (_config, root) => {
+        writeFileSync(join(root, "decision.md"), node("Decision"));
+        atomicState(statePath(config.id, "config"), { ...config, enabled: false });
+      },
+    });
+    expect(result.outcome).toBe("failed");
+    expect(result.message).toMatch(/cancelled|changed/);
+    const session = loadWriteSession(result.sessionId ?? "");
+    expect(git(session.worktreeRoot ?? "", ["diff", "--cached", "--name-only"])).toBe("");
+  });
+  it("publishes only when the schedule explicitly authorizes a managed Git source", async () => {
+    setup();
+    const { project, home } = fixture();
+    const remote = remoteFixture(home);
+    connectTree(project, { kind: "git", repository: "acme/context", path: "docs", ref: "main" }, remote.runner);
+    scheduleCleanup(
+      { projectPath: project, tree: "context", agent: "codex", every: "1d", publish: true },
+      scheduler,
+      remote.runner,
+    );
+    const result = await runCleanup(project, "context", undefined, {
+      runner: remote.runner,
+      agent: async (_config, root) => {
+        writeFileSync(join(root, "decision.md"), node("Decision"));
       },
     });
     expect(result.outcome).toBe("published");
-    expect(readFileSync(join(tree, "NODE.md"), "utf8")).toContain("A durable constraint.");
-    expect(readState(statePath(config.id, "success"))).toBe(result.sha);
+    expect(git(remote.remote, ["rev-parse", "main"])).toBe(result.sha);
+    expect(() =>
+      scheduleCleanup({ projectPath: project, tree: "docs", agent: "codex", every: "1d", publish: true }, scheduler),
+    ).toThrow(/Directory/);
   });
-  for (const failure of ["infra", "symlink", "invalid", "auth", "staged"]) {
-    it(`preserves worktree and checkpoint after ${failure}`, async () => {
-      const result = await runCleanup(project, undefined, {
-        agent: async (_config, path) => {
-          remember(path);
-          if (failure === "auth") throw new Error("Authentication failed");
-          if (failure === "infra") writeFileSync(join(path, "AGENTS.md"), "changed");
-          if (failure === "symlink") symlinkSync(join(home, "gitconfig"), join(path, "bad.md"));
-          if (failure === "invalid") writeFileSync(join(path, "NODE.md"), "invalid");
-          if (failure === "staged") {
-            writeFileSync(join(path, "NODE.md"), "staged");
-            spawnSync("git", ["-C", path, "add", "NODE.md"]);
-          }
-        },
-      });
-      expect(result.outcome).toBe("failed");
-      expect(result.worktreePath && existsSync(result.worktreePath)).toBe(true);
-      expect(readState(statePath(config.id, "success"))).toBeUndefined();
-    });
-  }
-  it("rejects a changed connection after model completion", async () => {
-    const other = join(home, "other");
-    mkdirSync(other);
-    const otherTree = createProject(other).treePath;
-    const finish = vi.fn();
-    const result = await runCleanup(project, undefined, {
-      finish,
-      agent: async (_config, path) => {
-        remember(path);
-        disconnectProject(project);
-        connectProject({ projectPath: project, treePath: otherTree, alias: config.alias });
-      },
-    });
-    expect(result.outcome).toBe("failed");
-    expect(finish).not.toHaveBeenCalled();
-    expect(removeCleanup(project, scheduler).schedule?.enabled).toBe(false);
-  });
-  it("prevents overlap and removal cancels remaining lifecycle steps", async () => {
-    const finish = vi.fn();
-    const result = await runCleanup(project, undefined, {
-      finish,
-      agent: async (_config, path) => {
-        remember(path);
-        await expect(runCleanup(project)).rejects.toThrow("already running");
-        removeCleanup(project, scheduler);
-      },
-    });
-    expect(result.outcome).toBe("cancelled");
-    expect(finish).not.toHaveBeenCalled();
-    expect(result.worktreePath && existsSync(result.worktreePath)).toBe(true);
-  });
-  it("does not retry outdated or uncertain publication and leaves checkpoint unchanged", async () => {
-    for (const outdated of [true, false]) {
-      const finish = vi.fn(() => {
-        throw outdated
-          ? new ContextTreeError(CLI_ERROR_CODES.writeOutdated, "advanced")
-          : new Error("push disconnected");
-      });
-      const result = await runCleanup(project, undefined, {
-        finish,
-        agent: async (_config, path) => {
-          remember(path);
-          const file = join(path, "NODE.md");
-          writeFileSync(file, `${readFileSync(file, "utf8")}\nConstraint.\n`);
-        },
-      });
-      expect(result.outcome).toBe(outdated ? "failed" : "publication-uncertain");
-      expect(finish).toHaveBeenCalledTimes(1);
-      expect(readState(statePath(config.id, "success"))).toBeUndefined();
-    }
-  });
-  it("executes fake CLI, and reports nonzero exits and timeout", async () => {
-    expect(config.agentPath).toBe(join(home, "bin", "codex"));
-    await expect(runAgent(config, project, "editorial", new AbortController().signal, 5000)).resolves.toBeUndefined();
-    writeFileSync(config.agentPath, "#!/bin/sh\nexit 9\n");
-    await expect(runAgent(config, project, "editorial", new AbortController().signal, 5000)).rejects.toThrow("failed");
-    writeFileSync(config.agentPath, "#!/bin/sh\ncat >/dev/null\nsleep 20\n");
-    await expect(runAgent(config, project, "editorial", new AbortController().signal, 20)).rejects.toThrow("timeout");
-    expect(agentArguments(config)).toContain("workspace-write");
-    expect(agentArguments({ ...config, agent: "claude" })).toContain("acceptEdits");
-  }, 15000);
-});
-
-for (const platform of ["darwin", "linux"]) {
-  it(`${platform} adapter writes isolated native jobs, never starts cleanup on install, and stops on removal`, () => {
-    const calls: string[][] = [];
-    const native = nativeScheduler(platform, home, (_command, args) => {
-      calls.push(args);
-      return { status: 0, stdout: "", stderr: "" };
-    });
-    native.install(config);
-    const name = `ai.context-tree.cleanup.${config.id}`;
-    const file =
-      platform === "darwin"
-        ? join(home, "Library", "LaunchAgents", `${name}.plist`)
-        : join(home, ".config", "systemd", "user", `${name}.service`);
-    const content = readFileSync(file, "utf8");
-    expect(content).toContain(platform === "darwin" ? "context-tree-cleanup" : config.cliPath);
-    if (platform === "darwin") {
-      expect(content).toContain("<key>RunAtLoad</key><false/>");
-      expect(content).toContain(`<key>StartInterval</key><integer>${config.everyMinutes * 60}</integer>`);
-      expect(content).toContain(`<key>WorkingDirectory</key><string>${config.projectPath}</string>`);
-      expect(content).toContain(`<key>PATH</key><string>${config.searchPath}</string>`);
-    }
-    expect(content).not.toContain("dangerously");
-    expect(calls.flat()).not.toContain("kickstart");
-    expect(calls.some((args) => args.includes("start") && args.includes(`${name}.service`))).toBe(false);
-    native.remove(config);
-    expect(existsSync(file)).toBe(false);
-    expect(calls.flat()).toContain(platform === "darwin" ? "bootout" : "stop");
-    expect(loadSchedule(config.id).id).toBe(config.id);
-  });
-}
-
-describe("macOS cleanup launcher", () => {
-  it("finishes removal after a bootout error only when the job is confirmed absent", () => {
-    for (const registered of [true, false]) {
-      const adapter = nativeScheduler("darwin", home, (_command, args) => {
-        if (args[0] === "bootout") return { status: 5, stdout: "", stderr: "Boot-out failed: 5: Input/output error" };
-        return registered
-          ? { status: 0, stdout: "state = waiting", stderr: "" }
-          : { status: 113, stdout: "", stderr: "Could not find service" };
-      });
-      if (registered) expect(() => adapter.remove(config)).toThrow("Native cleanup scheduler operation failed");
-      else expect(() => adapter.remove(config)).not.toThrow();
-    }
-  });
-
-  const launcherPath = (): string =>
-    join(home, ".context-tree", "cleanup", "launchers", config.id, "context-tree-cleanup");
-  const native = (): CleanupScheduler => nativeScheduler("darwin", home, () => ({ status: 0, stdout: "", stderr: "" }));
-
-  it("executes exact quoted arguments and preserves exit status across reinstall and removal", () => {
-    const special = "spaces ' $HOME $(exit 99) ; & < > \"";
-    const bin = join(home, special);
-    mkdirSync(bin);
-    const command = join(bin, "fake node");
-    writeFileSync(command, '#!/bin/sh\nprintf "%s\\0" "$@"\nexit 37\n', { mode: 0o700 });
-    const updated = { ...config, nodePath: command, cliPath: join(bin, "cli"), projectPath: join(bin, "project") };
-    const adapter = native();
-    for (let i = 0; i < 2; i++) {
-      adapter.install(updated);
-      const launcher = launcherPath();
-      expect(statSync(launcher).mode & 0o777).toBe(0o700);
-      const result = spawnSync(launcher, [], { encoding: "utf8" });
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(37);
-      expect(result.stdout.split("\0")).toEqual([
-        updated.cliPath,
-        "cleanup",
-        "run",
-        "--schedule-id",
-        config.id,
-        "--project-path",
-        updated.projectPath,
-        "--json",
-        "",
-      ]);
-    }
-    adapter.remove(updated);
-    expect(existsSync(join(launcherPath(), ".."))).toBe(false);
-    adapter.remove(updated);
-  });
-
-  it.each(["launchers", "schedule", "file"])("rejects a symlinked %s on install and removal", (kind) => {
-    const parent = join(home, ".context-tree", "cleanup", "launchers");
-    const schedule = join(parent, config.id);
-    const target = join(home, "outside");
-    if (kind === "file") writeFileSync(target, "untouched");
-    else mkdirSync(target);
-    if (kind !== "launchers") mkdirSync(parent);
-    if (kind === "file") mkdirSync(schedule);
-    symlinkSync(target, kind === "launchers" ? parent : kind === "schedule" ? schedule : launcherPath());
-    const adapter = native();
-    expect(() => adapter.install(config)).toThrow(/symlink|Unsafe/u);
-    expect(() => adapter.remove(config)).toThrow(/symlink|Unsafe/u);
-    if (kind === "file") expect(readFileSync(target, "utf8")).toBe("untouched");
-  });
-
-  it("preserves unrelated files in a launcher directory on removal", () => {
-    const adapter = native();
-    adapter.install(config);
-    const other = join(launcherPath(), "..", "other");
-    writeFileSync(other, "keep");
-    adapter.remove(config);
-    expect(existsSync(launcherPath())).toBe(false);
-    expect(readFileSync(other, "utf8")).toBe("keep");
+  it("accepts bounded intervals only", () => {
+    expect(parseCleanupInterval("2h")).toBe(120);
+    for (const value of ["0m", "1.5h", "366d", "1s", "-1h"]) expect(() => parseCleanupInterval(value)).toThrow();
   });
 });
-
-describe("cleanup history", () => {
-  it.each([false, true])("recovers unfinished initialization (events created: %s)", async (eventsCreated) => {
-    const { cleanupLogs } = await import("../src/core/cleanup/index.js");
-    const runId = "00000000-0000-4000-8000-000000000000";
-    const path = join(home, ".context-tree", "cleanup", "logs", config.id, runId);
-    mkdirSync(path, { recursive: true });
-    if (eventsCreated) writeFileSync(join(path, "events.jsonl"), "");
-    expect(cleanupLogs(project).runs).toEqual([]);
-    expect(() => cleanupLogs(project, { run: runId })).toThrow("Unknown cleanup run ID");
-    atomicState(statePath(config.id, "activity"), 1);
-    const outcome = await runCleanup(project);
-    expect(outcome.outcome).toBe("inactive");
-    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(outcome);
-    expect(existsSync(path)).toBe(true);
+describe("native schedules and bounded history", () => {
+  it("quotes macOS launchers literally and preserves unrelated launcher files", () => {
+    const config = setup();
+    const script = join(fixture().home, "agent ' $HOME $(exit 99).mjs");
+    writeFileSync(script, "process.stdout.write(JSON.stringify(process.argv.slice(2))); process.exitCode = 37;\n");
+    const native = nativeScheduler("darwin", fixture().home, () => ({ status: 0, stdout: "", stderr: "" }));
+    const altered = { ...config, cliPath: script, projectPath: "/project ' $HOME $(exit 99)" };
+    native.install(altered);
+    const dir = join(fixture().home, ".context-tree/cleanup/launchers", config.id);
+    const launcher = join(dir, "context-tree-cleanup");
+    const result = spawnSync(launcher, { encoding: "utf8" });
+    expect(result.status).toBe(37);
+    expect(JSON.parse(result.stdout)).toEqual([
+      "cleanup",
+      "run",
+      "--schedule-id",
+      config.id,
+      "--project-path",
+      altered.projectPath,
+      "--json",
+    ]);
+    writeFileSync(join(dir, "unrelated"), "keep");
+    native.remove(altered);
+    expect(existsSync(launcher)).toBe(false);
+    expect(existsSync(join(dir, "unrelated"))).toBe(true);
   });
-  it("still rejects unsafe or corrupt initialization entries", async () => {
-    const { readCleanupHistory } = await import("../src/core/cleanup/history.js");
-    const path = join(home, ".context-tree", "cleanup", "logs", config.id, "00000000-0000-4000-8000-000000000000");
-    mkdirSync(path, { recursive: true });
-    const metadata = join(path, "metadata");
-    symlinkSync(join(home, "missing-metadata"), metadata);
-    expect(() => readCleanupHistory(config.id)).toThrow("regular file");
-    rmSync(metadata);
-    writeFileSync(metadata, "{}");
-    expect(() => readCleanupHistory(config.id)).toThrow();
-    rmSync(path, { recursive: true });
-    symlinkSync(home, path);
-    expect(() => readCleanupHistory(config.id)).toThrow();
+  it("rejects symlink scheduler destinations", () => {
+    const config = setup();
+    const { home } = fixture();
+    mkdirSync(join(home, "Library"));
+    symlinkSync(home, join(home, "Library/LaunchAgents"));
+    const native = nativeScheduler("darwin", home, () => ({ status: 0, stdout: "", stderr: "" }));
+    expect(() => native.install(config)).toThrow(/symlink/);
   });
-  it("records synchronization before Git runs and preserves its failure in history", async () => {
-    const { cleanupLogs } = await import("../src/core/cleanup/index.js");
-    const agent = vi.fn();
-    const result = await runCleanup(project, undefined, {
-      agent,
-      sync: () => {
-        expect(cleanupStatus(project, scheduler).latest).toMatchObject({
-          outcome: "running",
-          message: "Synchronizing Context Tree.",
-        });
-        expect(cleanupLogs(project).events.at(-1)?.text).toBe("Synchronizing Context Tree.");
-        throw new Error("Command timed out after 120000 ms.");
-      },
-    });
-    expect(result.outcome).toBe("failed");
-    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(result);
-    expect(cleanupLogs(project).events.at(-1)?.text).toContain("timed out");
-    expect(existsSync(statePath(config.id, "lock"))).toBe(false);
-    expect(agent).not.toHaveBeenCalled();
-  });
-  it("records skips, shares history, preserves removed schedules and activity", async () => {
-    const { cleanupLogs } = await import("../src/core/cleanup/index.js");
-    expect(cleanupLogs(project).runs).toEqual([]);
-    atomicState(statePath(config.id, "activity"), 1);
-    const outcome = await runCleanup(project);
-    expect(outcome.outcome).toBe("inactive");
-    expect(outcome.runId).toBeDefined();
-    const second = join(home, "second-history");
-    mkdirSync(second);
-    connectProject({ projectPath: second, treePath: tree });
-    expect(cleanupLogs(second)).toEqual(cleanupLogs(project));
-    removeCleanup(project, scheduler);
-    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(outcome);
-    expect(cleanupLogs(project, { list: true }).events).toEqual([]);
-    expect(readState(statePath(config.id, "activity"))).toBe(1);
-    expect(() => cleanupLogs(project, { run: "../escape" })).toThrow();
-    expect(() => cleanupLogs(project, { run: "00000000-0000-4000-8000-000000000000" })).toThrow("Unknown");
-    expect(() => cleanupLogs(project, { list: true, run: outcome.runId ?? "" })).toThrow("mutually exclusive");
-  });
-  it("caps output, retains terminal metadata, prunes completed history and rejects symlinks", async () => {
-    const { CleanupHistory, MAX_LOG_BYTES, readCleanupHistory } = await import("../src/core/cleanup/history.js");
+  it("caps output, redacts secrets, preserves incomplete runs, and bounds finished history", () => {
+    const config = setup();
     const incomplete = new CleanupHistory(config);
-    expect(readCleanupHistory(config.id).runs[0]?.terminal).toBeUndefined();
-    const log = new CleanupHistory(config);
-    for (let i = 0; i < 600; i++) log.event("stdout", "x".repeat(10000));
-    log.finish({ at: Date.now(), outcome: "failed", runId: log.runId });
-    const path = join(home, ".context-tree", "cleanup", "logs", config.id, log.runId, "events.jsonl");
-    expect(statSync(path).size).toBeLessThanOrEqual(MAX_LOG_BYTES);
-    expect(
-      readCleanupHistory(config.id, { run: log.runId }).runs.find((run) => run.runId === log.runId)?.truncated,
-    ).toBe(true);
-    for (let i = 0; i < 51; i++) {
-      const entry = new CleanupHistory(config);
-      entry.finish({ at: Date.now(), outcome: "noop" });
-    }
+    const history = new CleanupHistory(config);
+    history.event("stdout", "Authorization: Bearer very-secret\u001b[31m");
+    history.event("stdout", "x".repeat(MAX_LOG_BYTES));
+    history.finish({ at: Date.now(), outcome: "noop" });
+    const logs = readCleanupHistory(config.id, { run: history.runId });
+    expect(logs.events[0]?.text).toContain("<redacted>");
+    expect(logs.events[0]?.text).not.toContain("very-secret");
+    expect(logs.runs.find((run) => run.runId === history.runId)?.truncated).toBe(true);
+    const root = join(fixture().home, ".context-tree/cleanup/logs", config.id);
+    expect(statSync(join(root, history.runId, "events.jsonl")).size).toBeLessThan(MAX_LOG_BYTES);
+    const unfinishedDirectory = join(root, randomUUID());
+    mkdirSync(unfinishedDirectory);
+    for (let i = 0; i < 55; i++) new CleanupHistory(config).finish({ at: Date.now(), outcome: "noop" });
     const runs = readCleanupHistory(config.id, { list: true }).runs;
     expect(runs).toHaveLength(50);
     expect(runs.some((run) => run.runId === incomplete.runId)).toBe(true);
-    const events = join(home, ".context-tree", "cleanup", "logs", config.id, incomplete.runId, "events.jsonl");
+    expect(existsSync(unfinishedDirectory)).toBe(true);
+  });
+  it("rejects symlinked event files", () => {
+    const config = setup();
+    const history = new CleanupHistory(config);
+    const events = join(fixture().home, ".context-tree/cleanup/logs", config.id, history.runId, "events.jsonl");
     rmSync(events);
-    symlinkSync(join(home, "gitconfig"), events);
-    expect(() => readCleanupHistory(config.id, { run: incomplete.runId })).toThrow();
-    expect(() => incomplete.event("stdout", "unsafe")).toThrow();
-    expect(readFileSync(join(home, "gitconfig"), "utf8")).not.toContain("unsafe");
-  });
-  it("formats empty, list and selected JSON/text logs without refreshing activity", async () => {
-    const invoke = async (args: string[]): Promise<string> => {
-      let stdout = "";
-      let stderr = "";
-      await runContextTreeCli(["node", "context-tree", "cleanup", "logs", ...args], {
-        cwd: () => project,
-        stdout: (value) => {
-          stdout += value;
-        },
-        stderr: (value) => {
-          stderr += value;
-        },
-      });
-      expect(stderr).toBe("");
-      return stdout;
-    };
-    expect(await invoke([])).toBe(
-      `No cleanup logs recorded for project ${project}.\nUse --project-path <path> to query another project's Context Tree.\n`,
-    );
-    atomicState(statePath(config.id, "activity"), 1);
-    const result = await runCleanup(project);
-    expect(await invoke(["--list"])).toContain(result.runId);
-    const otherProject = join(home, "other-project");
-    mkdirSync(otherProject);
-    createProject(otherProject);
-    expect(await invoke(["--project-path", otherProject])).toContain(
-      `No cleanup logs recorded for project ${otherProject}.`,
-    );
-    expect(await invoke(["--project-path", project, "--list"])).toContain(result.runId);
-    const output = await invoke(["--run", result.runId ?? "", "--json"]);
-    expect(output.trim().split("\n")).toHaveLength(1);
-    expect(JSON.parse(output).events.map((event: { source: string }) => event.source)).toEqual(["runner", "runner"]);
-    expect(readState(statePath(config.id, "activity"))).toBe(1);
+    symlinkSync(join(fixture().home, "gitconfig"), events);
+    expect(() => history.event("stdout", "hello")).toThrow(/store cleanup logs/);
+    expect(() => readCleanupHistory(config.id)).toThrow();
   });
 });
 
-it("stops before publication on log failure and preserves the worktree", async () => {
-  const { cleanupLogs } = await import("../src/core/cleanup/index.js");
-  const finish = vi.fn();
-  const result = await runCleanup(project, undefined, {
-    agent: async (_config, worktree, _prompt, _signal, _timeout, output) => {
-      remember(worktree);
-      const runId = cleanupLogs(project).selectedRunId;
-      const events = join(home, ".context-tree", "cleanup", "logs", config.id, runId ?? "", "events.jsonl");
-      rmSync(events);
-      symlinkSync(join(home, "gitconfig"), events);
-      output?.("stdout", "agent output");
+it("keeps schedules attached to full sources after a namesake is connected, including removal after disconnect", async () => {
+  const config = setup();
+  const { project, home } = fixture();
+  const other = join(home, "other");
+  initRepository(other);
+  initTree(other, join(other, "docs"));
+  commit(other);
+  connectTree(project, { kind: "directory", path: join(other, "docs") });
+  const second = scheduleCleanup(
+    { projectPath: project, tree: join(other, "docs"), agent: "codex", every: "1d", publish: false },
+    scheduler,
+  );
+  expect(second.schedule?.id).not.toBe(config.id);
+  expect(() => cleanupStatus(project, "docs", scheduler)).toThrow(/exact source/);
+  const result = await runCleanup(project, undefined, config.id, {
+    agent: async (_config, root) => {
+      writeFileSync(join(root, "cleaned.md"), node("Cleaned"));
     },
-    finish,
   });
-  expect(result.outcome).toBe("failed");
-  expect(finish).not.toHaveBeenCalled();
-  expect(existsSync(result.worktreePath ?? "")).toBe(true);
-  expect(readState(statePath(config.id, "latest"))).toMatchObject({ outcome: "failed", runId: result.runId });
+  expect(result.outcome).toBe("committed");
+  const session = loadWriteSession(result.sessionId ?? "");
+  expect(session.connection.source).toEqual({ kind: "directory", path: "docs" });
+  disconnect(project, join(project, "docs"));
+  expect(removeCleanup(project, join(project, "docs"), scheduler).schedule?.enabled).toBe(false);
+  expect(cleanupStatus(project, join(other, "docs"), scheduler).schedule?.enabled).toBe(true);
 });
-
-it("keeps multiple schedules, activity, logs, and removal independent", async () => {
-  createProject(project, undefined, { name: "product", alias: "product" });
-  const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
-  if (!second) throw new Error("missing second schedule");
-  expect(second.id).not.toBe(config.id);
-  expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
-  atomicState(statePath(config.id, "activity"), 10);
-  atomicState(statePath(second.id, "activity"), 20);
-  recordCleanupActivity({ projectPath: project, tree: "product" });
-  expect(readState(statePath(config.id, "activity"))).toBe(10);
-  expect(readState(statePath(second.id, "activity"))).toBeGreaterThan(20);
-  const result = await runCleanup(project, undefined, { agent: async (_config, path) => remember(path) }, "product");
-  expect(result.outcome).toBe("noop");
-  expect(readState(statePath(config.id, "latest"))).toBeUndefined();
-  removeCleanup(project, scheduler, "product");
-  expect(loadSchedule(config.id).enabled).toBe(true);
-  expect(loadSchedule(second.id).enabled).toBe(false);
-});
-
-it("makes removed or replaced scheduled connections inactive", async () => {
-  disconnectProject(project);
-  expect(cleanupStatus(project, scheduler, config.alias).inactive).toBe(true);
-  const agent = vi.fn();
-  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
-  createProject(project, undefined, { name: "replacement", alias: config.alias });
-  expect((await runCleanup(project, config.id, { agent })).outcome).toBe("inactive");
-  expect(agent).not.toHaveBeenCalled();
-  expect(loadSchedule(config.id).tree.path).toBe(tree);
-});
-
-it("records CLI connect activity across checkouts of one GitHub repository", async () => {
-  const git = (path: string, args: string[]): void => {
-    const result = spawnSync("git", ["-C", path, ...args], { encoding: "utf8" });
-    expect(result.status, result.stderr).toBe(0);
-  };
-  const remoteProject = join(home, "remote-project");
-  mkdirSync(remoteProject);
-  const remoteTree = createProject(remoteProject).treePath;
-  git(remoteTree, ["remote", "add", "origin", "https://github.com/example/shared.git"]);
-  disconnectProject(remoteProject);
-  connectProject({ projectPath: remoteProject, treePath: remoteTree, alias: "shared" });
-  const shared = scheduleCleanup({ projectPath: remoteProject, agent: "codex" }, scheduler).schedule;
-  if (!shared) throw new Error("missing shared schedule");
-  const checkout = join(home, "checkout");
-  git(home, ["clone", remoteTree, checkout]);
-  git(checkout, ["remote", "set-url", "origin", "https://github.com/example/shared.git"]);
-  atomicState(statePath(shared.id, "activity"), 1);
-  atomicState(statePath(config.id, "activity"), 2);
-  expect(
-    await runContextTreeCli(["node", "context-tree", "connect", "--tree-path", checkout, "--as", "second", "--json"], {
-      cwd: () => project,
-      stdout: vi.fn(),
-    }),
-  ).toBe(0);
-  expect(readState(statePath(shared.id, "activity"))).toBeGreaterThan(1);
-  expect(readState(statePath(config.id, "activity"))).toBe(2);
-});
-
-it("refreshes only successful entries during partial CLI sync", async () => {
-  const secondTree = createProject(project, undefined, { name: "product", alias: "product" }).treePath;
-  const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
-  if (!second) throw new Error("missing second schedule");
-  writeFileSync(join(secondTree, "NODE.md"), "invalid");
-  atomicState(statePath(config.id, "activity"), 1);
-  atomicState(statePath(second.id, "activity"), 2);
-  expect(
-    await runContextTreeCli(["node", "context-tree", "sync"], {
-      cwd: () => project,
-      stdout: vi.fn(),
-    }),
-  ).toBe(1);
-  expect(readState(statePath(config.id, "activity"))).toBeGreaterThan(1);
-  expect(readState(statePath(second.id, "activity"))).toBe(2);
-});
-
-it.each([false, true])(
-  "implicitly selects the remaining connection with a retained schedule (disabled: %s)",
-  async (disabled) => {
-    createProject(project, undefined, { name: "product", alias: "product" });
-    const second = scheduleCleanup({ projectPath: project, agent: "codex", tree: "product" }, scheduler).schedule;
-    if (!second) throw new Error("missing second schedule");
-    expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
-    expect(() => cleanupLogs(project)).toThrow(/--tree/);
-    expect(() => removeCleanup(project, scheduler)).toThrow(/--tree/);
-    await expect(runCleanup(project)).rejects.toThrow(/--tree/);
-    if (disabled) removeCleanup(project, scheduler, config.alias);
-    disconnectProject(project, undefined, { tree: config.alias });
-    atomicState(statePath(second.id, "activity"), 1);
-    expect(cleanupStatus(project, scheduler).schedule?.id).toBe(second.id);
-    const result = await runCleanup(project);
-    expect(result.outcome).toBe("inactive");
-    expect(cleanupLogs(project).runs[0]?.terminal).toEqual(result);
-    expect(cleanupLogs(project, { tree: config.alias }).runs).toEqual([]);
-    expect(cleanupStatus(project, scheduler, config.alias).schedule?.id).toBe(config.id);
-    expect(removeCleanup(project, scheduler).schedule?.id).toBe(second.id);
-    expect(loadSchedule(config.id).enabled).toBe(!disabled);
-    expect(removeCleanup(project, scheduler, config.alias).schedule?.id).toBe(config.id);
-    disconnectProject(project);
-    expect(cleanupStatus(project, scheduler, "product").schedule?.id).toBe(second.id);
-    expect(() => cleanupStatus(project, scheduler)).toThrow(/--tree/);
-  },
-);

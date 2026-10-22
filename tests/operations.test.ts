@@ -1,613 +1,462 @@
-import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { type CommandRunner, git, gitRaw } from "../src/adapters/git.js";
+import { readState, withLock } from "../src/adapters/state.js";
+import { SCHEMA_VERSION } from "../src/contracts/index.js";
+import { connection, connections, disconnect } from "../src/operations/connections.js";
+import { connectTree, initTree, syncTrees } from "../src/operations/trees.js";
+import { abortWrite, finishWrite, loadWriteSession, prepareWrite } from "../src/operations/write.js";
+import { connectionIdentity, sourceName, sourceSelector } from "../src/sources/identity.js";
+import { projectRoot } from "../src/sources/project.js";
+import { resolveSource } from "../src/sources/resolve.js";
+import { readTree } from "../src/tree/read.js";
+import { scaffoldTree } from "../src/tree/scaffold.js";
+import { verifyTree } from "../src/tree/verify.js";
+import { commit, initRepository, node, remoteFixture, useFixture } from "./helpers.js";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  connectProject,
-  disconnectProject,
-  listManagedTrees,
-  managedTreesRoot,
-  resolveConnection,
-} from "../src/core/connections.js";
-import { createProject } from "../src/core/create.js";
-import { type CommandRunner, defaultRunner } from "../src/core/internal/git.js";
-import { publishProject } from "../src/core/publish.js";
-import { readTree } from "../src/core/read.js";
-import { scaffoldTree } from "../src/core/scaffold.js";
-import { syncConnection, syncProject } from "../src/core/sync.js";
-import { finishContextWrite, prepareContextWrite } from "../src/core/write.js";
+const fixture = useFixture();
+const gitSource = { kind: "git", repository: "acme/context", path: "docs", ref: "main" } as const;
 
-const roots = new Set<string>();
-const originalHome = process.env.HOME;
-const originalGitConfigGlobal = process.env.GIT_CONFIG_GLOBAL;
-const originalGitConfigNoSystem = process.env.GIT_CONFIG_NOSYSTEM;
-
-function temporaryRoot(): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "context-tree-operations-")));
-  roots.add(root);
-  return root;
-}
-
-beforeEach(() => {
-  const home = temporaryRoot();
-  const config = join(home, "gitconfig");
-  writeFileSync(config, "[init]\n\tdefaultBranch = trunk\n[user]\n\tname = Test\n\temail = test@example.test\n");
-  process.env.HOME = home;
-  process.env.GIT_CONFIG_GLOBAL = config;
-  process.env.GIT_CONFIG_NOSYSTEM = "1";
-});
-
-afterEach(() => {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
-  else process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal;
-  if (originalGitConfigNoSystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
-  else process.env.GIT_CONFIG_NOSYSTEM = originalGitConfigNoSystem;
-  for (const root of roots) rmSync(root, { force: true, recursive: true });
-  roots.clear();
-});
-
-function git(root: string, args: string[]): string {
-  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error(result.stderr);
-  return result.stdout.trim();
-}
-
-function project(name = "service"): string {
-  const path = join(temporaryRoot(), name);
-  mkdirSync(path);
-  return path;
-}
-
-function addLeaf(root: string, name: string): void {
-  writeFileSync(join(root, `${name}.md`), `---\ntitle: "${name}"\n---\n\n# ${name}\n`);
-}
-
-/** Age a prepared worktree past the abandonment threshold. */
-function backdate(path: string): void {
-  const past = Date.now() / 1000 - 48 * 60 * 60;
-  utimesSync(path, past, past);
-}
-
-function writeBranches(treePath: string): string {
-  return git(treePath, ["for-each-ref", "--format=%(refname:short)", "refs/heads/context-tree/write/"]);
-}
-
-function githubRunner(remote: string, log: string[][] = []): CommandRunner {
-  return (command, args) => {
-    log.push([command, ...args]);
-    if (command === "git" && args.slice(-3).join(" ") === "remote get-url origin") {
-      const actual = defaultRunner(command, args);
-      return actual.status === 0 ? { status: 0, stderr: "", stdout: "https://github.com/acme/context.git\n" } : actual;
-    }
-    if (command === "git" && args.includes("clone")) {
-      return defaultRunner(
-        command,
-        args.map((arg) => (arg === "https://github.com/acme/context.git" ? remote : arg)),
-      );
-    }
-    return defaultRunner(command, args);
-  };
-}
-
-function bareTree(): { remote: string; seed: string } {
-  const root = temporaryRoot();
-  const seed = join(root, "seed");
-  scaffoldTree({ name: "context", path: seed });
-  const remote = join(root, "remote.git");
-  git(root, ["init", "--quiet", "--bare", remote]);
-  git(seed, ["push", "--quiet", remote, "trunk"]);
-  return { remote, seed };
-}
-
-describe("local lifecycle", () => {
-  it("runs create, resolve, sync, prepare, edit, finish, and read", () => {
-    const currentProject = project();
-    const initialized = createProject(currentProject);
-    expect(resolveConnection(currentProject).connections[0]?.tree).toEqual({
-      kind: "local",
-      path: initialized.treePath,
+describe("directory sources", () => {
+  it("initializes embedded content without changing Git state or project instructions", () => {
+    const { project } = fixture();
+    initRepository(project);
+    writeFileSync(join(project, "AGENTS.md"), "Keep me");
+    const head = git(project, ["rev-parse", "HEAD"]);
+    const result = initTree(project, join(project, "docs"));
+    expect(result.connection.source).toEqual({ kind: "directory", path: "docs" });
+    expect(readState(join(project, ".context-tree.json"))).toEqual({
+      schemaVersion: SCHEMA_VERSION,
+      trees: [{ kind: "directory", path: "docs" }],
     });
-    expect(syncProject(currentProject)).toMatchObject({
-      connections: [{ ok: true, branch: "trunk", tree: { kind: "local" } }],
-    });
-
-    const prepared = prepareContextWrite(currentProject);
-    expect(prepared).toMatchObject({
-      connection: expect.any(Object),
-      schemaVersion: 2,
-      worktreePath: expect.any(String),
-    });
-    addLeaf(prepared.worktreePath, "runtime");
-    const finished = finishContextWrite({
-      message: "Write runtime context",
-      projectPath: currentProject,
-      worktreePath: prepared.worktreePath,
-    });
-    expect(finished).toMatchObject({ branch: "trunk", schemaVersion: 1, sha: expect.stringMatching(/^[a-f\d]{40}$/u) });
-    expect(existsSync(prepared.worktreePath)).toBe(false);
-    expect(readTree(initialized.treePath, "runtime.md").node.body).toContain("# runtime");
+    expect(git(project, ["rev-parse", "HEAD"])).toBe(head);
+    expect(git(project, ["diff", "--cached", "--name-only"])).toBe("");
+    expect(readFileSync(join(project, "AGENTS.md"), "utf8")).toBe("Keep me");
+    expect(existsSync(join(project, "docs/.git"))).toBe(false);
+    expect(existsSync(join(project, "docs/AGENTS.md"))).toBe(false);
+    expect(existsSync(join(project, "docs/.github"))).toBe(false);
   });
-
-  it("is idempotent and additively connects managed local connections", () => {
-    const currentProject = project();
-    const first = createProject(currentProject);
-    expect(createProject(currentProject)).toMatchObject({ created: false, treePath: first.treePath });
-    const otherProject = project("other");
-    const other = createProject(otherProject).treePath;
-    expect(connectProject({ projectPath: currentProject, target: "other-context-tree" }).tree).toEqual({
-      kind: "local",
-      path: realpathSync(other),
-    });
+  it("supports standalone directories without Git", () => {
+    const { project } = fixture();
+    const result = initTree(project, project);
+    expect(result.repository).toBeNull();
+    writeFileSync(join(result.treeRoot, "choice.md"), node("Choice"));
+    expect(verifyTree(result.treeRoot).ok).toBe(true);
+    expect(() => prepareWrite(project)).toThrow(/committed Git repository/u);
+    expect(existsSync(join(project, ".git"))).toBe(false);
   });
-
-  it("treats duplicate project records as CORRUPT_CONNECTION", () => {
-    const currentProject = realpathSync(project());
-    const initialized = createProject(currentProject);
-    const record = { projectPath: currentProject, tree: { kind: "local", path: initialized.treePath } } as const;
+  it("reads and edits dirty docs without staging or publishing unrelated host work", () => {
+    const { project } = fixture();
+    initRepository(project);
+    initTree(project, join(project, "docs"));
+    commit(project);
+    writeFileSync(join(project, "code.ts"), "staged code\n");
+    git(project, ["add", "code.ts"]);
+    writeFileSync(join(project, "docs/choice.md"), node("Uncommitted choice"));
+    const index = gitRaw(project, ["diff", "--cached"]);
+    expect(syncTrees(project).connections[0]).toMatchObject({ ok: true, dirty: true });
+    const tree = resolveSource(connection(project));
+    writeFileSync(join(tree.treeRoot, "choice.md"), node("Revised choice"));
+    expect(verifyTree(tree.treeRoot).ok).toBe(true);
+    expect(gitRaw(project, ["diff", "--cached"])).toBe(index);
+    expect(readTree(join(project, "docs"), "choice.md").node.body).toContain("Revised");
+  });
+  it("resolves relative declarations inside each worktree", () => {
+    const { home, project } = fixture();
+    initRepository(project);
+    initTree(project, join(project, "docs"));
+    commit(project);
+    const worktree = join(home, "branch");
+    git(project, ["worktree", "add", "--quiet", "-b", "feature", worktree]);
+    expect(resolveSource(connection(worktree)).treeRoot).toBe(join(worktree, "docs"));
+    expect(projectRoot(join(worktree, "docs"))).toBe(worktree);
+    expect(connection(project).projectRoot).not.toBe(connection(worktree).projectRoot);
+  });
+  it("attaches external local directories explicitly without owning their Git workflow", () => {
+    const { home, project } = fixture();
+    const tree = scaffoldTree(join(home, "external"), "External");
+    connectTree(project, { kind: "directory", path: tree });
+    expect(resolveSource(connection(project)).treeRoot).toBe(tree);
+  });
+  it("preserves existing content when initialization fails", () => {
+    const { project } = fixture();
+    mkdirSync(join(project, "docs"));
+    writeFileSync(join(project, "docs/README.md"), "# Existing docs");
+    expect(() => initTree(project, join(project, "docs"))).toThrow(/format/u);
+    expect(readFileSync(join(project, "docs/README.md"), "utf8")).toBe("# Existing docs");
+    expect(existsSync(join(project, "docs/NODE.md"))).toBe(false);
+    expect(existsSync(join(project, ".context-tree.json"))).toBe(false);
+  });
+  it("rejects symlink roots, intermediate symlinks, and escaping declarations", () => {
+    const { project, home } = fixture();
+    const tree = scaffoldTree(join(home, "external"), "External");
+    symlinkSync(tree, join(project, "docs"));
+    expect(() => connectTree(project, { kind: "directory", path: "docs" })).toThrow(/symlink/u);
+    mkdirSync(join(tree, "nested"));
+    symlinkSync(tree, join(project, "link"));
+    expect(() => initTree(project, join(project, "link/nested/tree"))).toThrow(/symlink/u);
     writeFileSync(
-      join(process.env.HOME ?? "", ".context-tree", "connections.json"),
-      `${JSON.stringify({ connections: [record, record], schemaVersion: 2 })}\n`,
+      join(project, ".context-tree.json"),
+      JSON.stringify({ schemaVersion: 3, trees: [{ kind: "directory", path: "../external" }] }),
     );
-    expect(() => resolveConnection(currentProject)).toThrow(expect.objectContaining({ code: "CORRUPT_CONNECTION" }));
+    expect(() => connections(project)).toThrow(expect.objectContaining({ code: "INVALID_CONFIG" }));
   });
-
-  it("removes newly created tree files after a partial create failure", () => {
-    const currentProject = project();
-    const runner: CommandRunner = (command, args) => {
-      if (command === "git" && args.includes("commit")) return { status: 1, stderr: "commit failed", stdout: "" };
-      return defaultRunner(command, args);
-    };
-    expect(() => createProject(currentProject, runner)).toThrow(/commit failed/u);
-    const trees = join(process.env.HOME ?? "", ".context-tree", "trees");
-    expect(readdirSync(trees)).toEqual([]);
+  it("rejects old configuration and does not read the removed global registry", () => {
+    const { home, project } = fixture();
+    mkdirSync(join(home, ".context-tree"));
+    writeFileSync(join(home, ".context-tree/connections.json"), '{"schemaVersion":2,"connections":[]}');
+    expect(() => connections(project)).toThrow(expect.objectContaining({ code: "NO_CONNECTION" }));
+    writeFileSync(join(project, ".context-tree.json"), '{"schemaVersion":2,"connections":[]}');
+    expect(() => connections(project)).toThrow(expect.objectContaining({ code: "INVALID_CONFIG" }));
   });
-
-  it("rejects an occupied create name until the project explicitly connects to it", () => {
-    const first = project("service");
-    const tree = createProject(first);
-    const second = project("service");
-    expect(() => createProject(second)).toThrow(/connect service-context-tree/u);
-    connectProject({ projectPath: second, target: "service-context-tree" });
-    expect(createProject(second)).toMatchObject({ created: false, treePath: tree.treePath });
-  });
-});
-
-describe("managed tree listing", () => {
-  it("returns an empty list without creating the managed directory", () => {
-    expect(listManagedTrees()).toEqual({ schemaVersion: 1, trees: [] });
-    expect(existsSync(join(process.env.HOME ?? "", ".context-tree", "trees"))).toBe(false);
-  });
-
-  it("excludes unsafe, invalid, and symlinked candidates from the listing", () => {
-    const currentProject = project();
-    const tree = createProject(currentProject);
-
-    const unsafe = join(managedTreesRoot(), "unsafe");
-    scaffoldTree({ name: "unsafe", path: unsafe });
-    git(unsafe, ["remote", "add", "origin", "https://token@github.com/acme/unsafe.git"]);
-
-    const invalid = join(managedTreesRoot(), "invalid");
-    scaffoldTree({ name: "invalid", path: invalid });
-    writeFileSync(join(invalid, "NODE.md"), '---\nschemaVersion: 1\ntitle: "Broken"\n---\n');
-    git(invalid, ["add", "--all"]);
-    git(invalid, ["commit", "--quiet", "-m", "break"]);
-
-    const outside = join(temporaryRoot(), "outside");
-    scaffoldTree({ name: "outside", path: outside });
-    symlinkSync(outside, join(managedTreesRoot(), "alias"), "dir");
-
-    expect(listManagedTrees()).toEqual({
-      schemaVersion: 1,
-      trees: [{ name: "service-context-tree", tree: { kind: "local", path: tree.treePath } }],
-    });
-  });
-});
-
-describe("disk-path connections", () => {
-  it("connects a GitHub-backed disk tree in place and persists it", () => {
-    const { remote } = bareTree();
-    const currentProject = project();
-    const runner = githubRunner(remote, []);
-    const checkout = join(temporaryRoot(), "checkout");
-    git(temporaryRoot(), ["clone", "--quiet", remote, checkout]);
-    const connected = connectProject({ projectPath: currentProject, treePath: checkout }, runner);
-    expect(connected.tree).toEqual({
-      kind: "github",
-      path: realpathSync(checkout),
-      repository: "acme/context",
-    });
-    expect(resolveConnection(currentProject).connections[0]?.tree).toEqual(connected.tree);
-  });
-
-  it("rejects symlinked and unsafe-origin disk paths", () => {
-    const root = temporaryRoot();
-    const currentProject = project();
-    const outside = join(root, "outside");
-    scaffoldTree({ name: "outside", path: outside });
-    symlinkSync(outside, join(root, "alias"), "dir");
-    expect(() => connectProject({ projectPath: currentProject, treePath: join(root, "alias") })).toThrow(
-      /symlink component/u,
-    );
-    git(outside, ["remote", "add", "origin", "https://token@github.com/acme/outside.git"]);
-    expect(() => connectProject({ projectPath: currentProject, treePath: outside })).toThrow(/credential-free/u);
-  });
-});
-
-describe("abandoned write reclamation", () => {
-  it("reclaims a stale preparation that was never edited", () => {
-    const currentProject = project();
-    const treePath = createProject(currentProject).treePath;
-    const abandoned = prepareContextWrite(currentProject);
-    expect(writeBranches(treePath)).not.toBe("");
-
-    backdate(abandoned.worktreePath);
-    const current = prepareContextWrite(currentProject);
-    expect(existsSync(abandoned.worktreePath)).toBe(false);
-    expect(writeBranches(treePath).split("\n")).toEqual([`context-tree/write/${basename(current.worktreePath)}`]);
-
-    // Reclamation stays invisible in the contract and leaves the new write usable.
-    expect(current).toMatchObject({
-      connection: expect.any(Object),
-      schemaVersion: 2,
-      worktreePath: expect.any(String),
-    });
-    addLeaf(current.worktreePath, "survivor");
-    expect(
-      finishContextWrite({
-        message: "Write after reclamation",
-        projectPath: currentProject,
-        worktreePath: current.worktreePath,
-      }),
-    ).toMatchObject({ branch: "trunk" });
-  });
-
-  it("preserves a stale preparation that holds pending edits", () => {
-    const currentProject = project();
-    createProject(currentProject);
-    const editing = prepareContextWrite(currentProject);
-    addLeaf(editing.worktreePath, "in-progress");
-    backdate(editing.worktreePath);
-
-    prepareContextWrite(currentProject);
-    expect(existsSync(join(editing.worktreePath, "in-progress.md"))).toBe(true);
-  });
-
-  it("preserves a fresh preparation so concurrent writes survive", () => {
-    const currentProject = project();
-    const treePath = createProject(currentProject).treePath;
-    const concurrent = prepareContextWrite(currentProject);
-
-    prepareContextWrite(currentProject);
-    expect(existsSync(concurrent.worktreePath)).toBe(true);
-    expect(writeBranches(treePath).split("\n")).toHaveLength(2);
-  });
-});
-
-describe("GitHub lifecycle", () => {
-  it("clones, syncs the checked-out branch, and pushes one direct write", () => {
-    const { remote } = bareTree();
-    const currentProject = project();
-    const log: string[][] = [];
-    const runner = githubRunner(remote, log);
-    const connected = connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
-    expect(connected.tree).toMatchObject({ kind: "github", repository: "acme/context" });
-    // An identical reconnect is idempotent, without changing project instructions.
-    expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner)).toEqual({
-      ...connected,
-    });
-    expect(syncConnection(currentProject, runner).branch).toBe("trunk");
-    const prepared = prepareContextWrite(currentProject, runner);
-    addLeaf(prepared.worktreePath, "published");
-    const finished = finishContextWrite(
-      { message: "Write published context", projectPath: currentProject, worktreePath: prepared.worktreePath },
-      runner,
-    );
-    expect(finished.branch).toBe("trunk");
-    expect(git(remote, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
-    expect(log).toContainEqual(["git", "-C", connected.tree.path, "pull", "--ff-only", "origin", "trunk"]);
-    expect(log).toContainEqual([
-      "git",
-      "-C",
-      prepared.worktreePath,
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "--quiet",
-      "-m",
-      "Write published context",
-    ]);
-    expect(log).toContainEqual(["git", "-C", prepared.worktreePath, "push", "origin", "HEAD:refs/heads/trunk"]);
-    expect(log.flat()).not.toContain("--force");
-  });
-
-  it("returns WRITE_OUTDATED and preserves a rejected worktree", () => {
-    const { remote } = bareTree();
-    const currentProject = project();
-    const runner = githubRunner(remote);
-    connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
-    const prepared = prepareContextWrite(currentProject, runner);
-    addLeaf(prepared.worktreePath, "outdated");
-
-    const peer = join(temporaryRoot(), "peer");
-    git(temporaryRoot(), ["clone", "--quiet", remote, peer]);
-    addLeaf(peer, "concurrent");
-    git(peer, ["add", "--all"]);
-    git(peer, ["commit", "--quiet", "-m", "Concurrent"]);
-    git(peer, ["push", "--quiet", "origin", "trunk"]);
-
-    expect(() =>
-      finishContextWrite(
-        { message: "Write outdated context", projectPath: currentProject, worktreePath: prepared.worktreePath },
-        runner,
-      ),
-    ).toThrow(expect.objectContaining({ code: "WRITE_OUTDATED" }));
-    expect(existsSync(prepared.worktreePath)).toBe(true);
-
-    // Its commit is unmerged, so reclamation must leave it alone however stale it looks.
-    backdate(prepared.worktreePath);
-    const retry = prepareContextWrite(currentProject, runner);
-    expect(existsSync(prepared.worktreePath)).toBe(true);
-    expect(retry.worktreePath).not.toBe(prepared.worktreePath);
-  });
-
-  it("rejects a foreign prepared worktree", () => {
-    const first = project("first");
-    const second = project("second");
-    createProject(first);
-    createProject(second);
-    const foreign = prepareContextWrite(second);
-    addLeaf(foreign.worktreePath, "foreign");
-    expect(() =>
-      finishContextWrite({ message: "Foreign", projectPath: first, worktreePath: foreign.worktreePath }),
-    ).toThrow(/No connection named|removed or replaced/u);
-  });
-
-  it("allocates a GitHub checkout without colliding with a local tree", () => {
-    const currentProject = project();
-    const local = createProject(currentProject);
-    const occupied = join(managedTreesRoot(), "context");
-    scaffoldTree({ name: "context", path: occupied });
-    const { remote } = bareTree();
-    const runner = githubRunner(remote);
-    const connected = connectProject({ projectPath: currentProject, target: "acme/context" }, runner);
-    expect(connected.tree.path).not.toBe(occupied);
-    expect(existsSync(local.treePath)).toBe(true);
-    expect(connectProject({ projectPath: currentProject, target: "acme/context" }, runner).tree.path).toBe(
-      connected.tree.path,
-    );
-  });
-
-  it("rejects unsafe origins and symlinked managed names", () => {
-    const currentProject = project();
-    const unsafe = join(managedTreesRoot(), "unsafe");
-    scaffoldTree({ name: "unsafe", path: unsafe });
-    git(unsafe, ["remote", "add", "origin", "https://token@github.com/acme/unsafe.git"]);
-    expect(() => connectProject({ projectPath: currentProject, target: "unsafe" })).toThrow(/credential-free/u);
-
-    const outside = join(temporaryRoot(), "outside");
-    scaffoldTree({ name: "outside", path: outside });
-    symlinkSync(outside, join(managedTreesRoot(), "alias"), "dir");
-    expect(() => connectProject({ projectPath: currentProject, target: "alias" })).toThrow(/unsafe destination/u);
-  });
-
-  it("removes only the destination created by a failed clone", () => {
-    const currentProject = project();
-    const marker = join(managedTreesRoot(), "keep");
-    mkdirSync(marker);
-    const runner: CommandRunner = (command, args) => {
-      if (command === "git" && args.includes("clone")) return { status: 1, stderr: "clone failed", stdout: "" };
-      return defaultRunner(command, args);
-    };
-    expect(() => connectProject({ projectPath: currentProject, target: "acme/context" }, runner)).toThrow(
-      /clone failed/u,
-    );
-    expect(existsSync(join(managedTreesRoot(), "context"))).toBe(false);
-    expect(existsSync(marker)).toBe(true);
-  });
-});
-
-// Cleanup uses the ordinary lifecycle. Exercise both publication routes with
-// real Git divergence; the GitHub runner substitutes an isolated bare remote.
-describe.each(["local", "github"] as const)("%s cleanup concurrency", (kind) => {
-  it.each(["ordinary write", "cleanup"])("preserves an intervening %s and the rejected cleanup", (winner) => {
-    const currentProject = project();
-    const remote = kind === "github" ? bareTree().remote : undefined;
-    const runner = remote === undefined ? defaultRunner : githubRunner(remote);
-    const treePath =
-      remote === undefined
-        ? createProject(currentProject).treePath
-        : connectProject({ projectPath: currentProject, target: "acme/context" }, runner).tree.path;
-    const cleanup = prepareContextWrite(currentProject, runner);
-    const peer = prepareContextWrite(currentProject, runner);
-    addLeaf(cleanup.worktreePath, "cleanup-attempt");
-    addLeaf(peer.worktreePath, "winner");
-    const finished = finishContextWrite(
-      {
-        projectPath: currentProject,
-        worktreePath: peer.worktreePath,
-        message: winner,
-      },
-      runner,
-    );
-    expect(existsSync(peer.worktreePath)).toBe(false);
-    expect(() =>
-      finishContextWrite(
-        {
-          projectPath: currentProject,
-          worktreePath: cleanup.worktreePath,
-          message: "Cleanup rejected snapshot",
-        },
-        runner,
-      ),
-    ).toThrow(expect.objectContaining({ code: "WRITE_OUTDATED" }));
-    expect(git(remote ?? treePath, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
-    expect(git(remote ?? treePath, ["show", "trunk:winner.md"])).toContain("# winner");
-    expect(git(cleanup.worktreePath, ["show", "HEAD:cleanup-attempt.md"])).toContain("# cleanup-attempt");
-    expect(git(cleanup.worktreePath, ["status", "--porcelain"])).toBe("");
-
-    backdate(cleanup.worktreePath);
-    const fresh = prepareContextWrite(currentProject, runner);
-    expect(existsSync(cleanup.worktreePath)).toBe(true);
-    expect(readTree(fresh.worktreePath, "winner.md").node.body).toContain("# winner");
-    expect(existsSync(join(fresh.worktreePath, "cleanup-attempt.md"))).toBe(false);
-    // A no-op cleanup leaves this preparation unfinished and creates no commit.
-    expect(git(fresh.worktreePath, ["rev-parse", "HEAD"])).toBe(finished.sha);
-    backdate(fresh.worktreePath);
-    prepareContextWrite(currentProject, runner);
-    expect(existsSync(fresh.worktreePath)).toBe(false);
-    expect(existsSync(cleanup.worktreePath)).toBe(true);
-    expect(git(remote ?? treePath, ["rev-parse", "refs/heads/trunk"])).toBe(finished.sha);
-  });
-});
-
-it("disconnects idempotently without validating or deleting the tree", () => {
-  const currentProject = project();
-  const created = createProject(currentProject);
-  writeFileSync(join(created.treePath, "NODE.md"), "invalid");
-  expect(disconnectProject(currentProject)).toEqual({ schemaVersion: 1, disconnected: true });
-  expect(disconnectProject(currentProject)).toEqual({ schemaVersion: 1, disconnected: false });
-  expect(existsSync(created.treePath)).toBe(true);
-  expect(() => resolveConnection(currentProject)).toThrow(expect.objectContaining({ code: "NO_CONNECTION" }));
-});
-
-it("keeps equal repository names under different owners separate", () => {
-  const { remote } = bareTree();
-  const runner: CommandRunner = (command, args) => {
-    if (command === "git" && args.includes("clone")) {
-      const url = args[args.length - 2];
-      const destination = args[args.length - 1];
-      const result = defaultRunner(
-        command,
-        args.map((arg) => (arg === url ? remote : arg)),
+  it("serializes configuration updates and makes repeated connections idempotent", () => {
+    const { project } = fixture();
+    initTree(project, join(project, "docs"));
+    const second = scaffoldTree(join(project, "handbook"), "Handbook");
+    withLock(join(project, ".context-tree.json.lock"), () => {
+      expect(() => connectTree(project, { kind: "directory", path: second })).toThrow(
+        expect.objectContaining({ code: "BUSY" }),
       );
-      if (result.status === 0 && destination && url)
-        defaultRunner("git", ["-C", destination, "remote", "set-url", "origin", url]);
-      return result;
-    }
-    return defaultRunner(command, args);
-  };
-  const first = connectProject({ projectPath: project("one"), target: "one/memory" }, runner);
-  const second = connectProject({ projectPath: project("two"), target: "two/memory" }, runner);
-  expect(first.tree.path).not.toBe(second.tree.path);
-  expect(connectProject({ projectPath: project("three"), target: "one/memory" }, runner).tree.path).toBe(
-    first.tree.path,
-  );
+    });
+    connectTree(project, { kind: "directory", path: "handbook" });
+    expect(() => connection(project)).toThrow(expect.objectContaining({ code: "AMBIGUOUS_CONNECTION" }));
+    connectTree(project, { kind: "directory", path: "docs" });
+    expect(connections(project)).toHaveLength(2);
+    disconnect(project, "docs");
+    expect(connection(project).source).toEqual({ kind: "directory", path: "handbook" });
+    expect(existsSync(join(project, "docs/NODE.md"))).toBe(true);
+  });
 });
 
-describe("multiple equal connections", () => {
-  it("creates named trees, rejects collisions and duplicates, and disconnects selectively", () => {
-    const current = project();
-    const company = createProject(current, undefined, { name: "company", alias: "company" });
-    const product = createProject(current, undefined, { name: "product", alias: "product" });
-    expect(createProject(current, undefined, { name: "product", alias: "product" }).created).toBe(false);
-    expect(connectProject({ projectPath: current, target: "product", alias: "product" }).tree.path).toBe(
-      product.treePath,
+describe("isolated writes", () => {
+  function setup(): string {
+    const { project } = fixture();
+    initRepository(project);
+    initTree(project, join(project, "docs"));
+    commit(project);
+    return project;
+  }
+  it("creates a review branch without changing the host checkout or index", () => {
+    const project = setup();
+    writeFileSync(join(project, "code.ts"), "staged code");
+    git(project, ["add", "code.ts"]);
+    const head = git(project, ["rev-parse", "HEAD"]);
+    const staged = gitRaw(project, ["diff", "--cached"]);
+    const session = prepareWrite(project);
+    expect(session.treeRoot).toBe(join(session.worktreeRoot, "docs"));
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    const result = finishWrite(session.id, "Record choice");
+    expect(result).toMatchObject({ outcome: "committed", sessionId: session.id });
+    expect(git(project, ["rev-parse", "HEAD"])).toBe(head);
+    expect(gitRaw(project, ["diff", "--cached"])).toBe(staged);
+    expect(existsSync(join(project, "docs/choice.md"))).toBe(false);
+    expect(finishWrite(session.id, "Retry").sha).toBe(result.sha);
+    expect(() => finishWrite(session.id, "No push", true)).toThrow(/host's Git workflow/u);
+    expect(() => abortWrite(session.id)).toThrow(/contains work/u);
+  });
+  it.each(["unstaged", "staged", "untracked", "ignored", "rename"])("rejects %s changes outside the tree", (kind) => {
+    const project = setup();
+    if (kind === "ignored") {
+      writeFileSync(join(project, ".gitignore"), "secret.txt\n");
+      commit(project);
+    }
+    const session = prepareWrite(project);
+    const root = session.worktreeRoot;
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    if (kind === "rename") renameSync(join(root, "code.ts"), join(session.treeRoot, "code.md"));
+    else
+      writeFileSync(
+        join(root, kind === "ignored" ? "secret.txt" : kind === "untracked" ? "new.txt" : "code.ts"),
+        "outside",
+      );
+    if (kind === "staged") git(root, ["add", "code.ts"]);
+    expect(() => finishWrite(session.id, "Reject outside edits")).toThrow(
+      expect.objectContaining({ code: "OUTSIDE_TREE" }),
     );
-    expect(resolveConnection(current).connections.map((c) => c.alias)).toEqual(["company", "product"]);
-    expect(() => connectProject({ projectPath: current, target: "product", alias: "company" })).toThrow(/alias/);
-    expect(() => connectProject({ projectPath: current, target: "product", alias: "duplicate" })).toThrow(
-      /another alias/,
-    );
-    expect(() => prepareContextWrite(current)).toThrow(/--tree/);
-    expect(() => publishProject(current)).toThrow(/--tree/);
-    expect(() => disconnectProject(current)).toThrow(/--tree/);
-    disconnectProject(current, undefined, { tree: "company" });
-    expect(existsSync(company.treePath)).toBe(true);
-    const prepared = prepareContextWrite(current);
-    roots.add(prepared.worktreePath);
-    expect(prepared.connection.alias).toBe("product");
-    disconnectProject(current, undefined, { all: true });
-    expect(() => resolveConnection(current)).toThrow(/No Context Tree/);
+    expect(git(root, ["rev-parse", "HEAD"])).toBe(session.repository.sha);
+    expect(existsSync(session.treeRoot)).toBe(true);
   });
-
-  it("discovers and synchronizes healthy trees alongside an unavailable one", () => {
-    const current = project();
-    const company = createProject(current, undefined, { name: "company" });
-    const product = createProject(current, undefined, { name: "product" });
-    renameSync(company.treePath, `${company.treePath}-moved`);
-    expect(resolveConnection(current).connections.map((c) => [c.alias, c.ok])).toEqual([
-      ["company", false],
-      ["product", true],
-    ]);
-    const sync = syncProject(current);
-    expect(sync.connections).toMatchObject([
-      { alias: "company", ok: false, error: { code: "STALE_CONNECTION" } },
-      { alias: "product", ok: true, branch: "trunk", sha: product.commitSha },
-    ]);
-    expect(syncProject(current, undefined, "product").connections).toHaveLength(1);
+  it("rejects branch changes and replaced connections", () => {
+    const project = setup();
+    const session = prepareWrite(project);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    git(project, ["switch", "--quiet", "-c", "other"]);
+    expect(() => finishWrite(session.id, "Wrong branch")).toThrow(/branch changed/u);
+    git(project, ["switch", "--quiet", "main"]);
+    disconnect(project, "docs");
+    expect(() => finishWrite(session.id, "Removed")).toThrow(expect.objectContaining({ code: "NO_CONNECTION" }));
+    expect(existsSync(session.treeRoot)).toBe(true);
   });
-
-  it("writes only the selected tree and retains other connections", () => {
-    const current = project();
-    const company = createProject(current, undefined, { name: "company" });
-    const product = createProject(current, undefined, { name: "product" });
-    const prepared = prepareContextWrite(current, undefined, "product");
-    addLeaf(prepared.worktreePath, "decision");
-    finishContextWrite({ projectPath: current, worktreePath: prepared.worktreePath, message: "Record decision" });
-    expect(existsSync(join(product.treePath, "decision.md"))).toBe(true);
-    expect(git(company.treePath, ["rev-parse", "HEAD"])).toBe(company.commitSha);
-    expect(resolveConnection(current).connections).toHaveLength(2);
+  it("rejects agent-created commits and invalid tree content", () => {
+    const project = setup();
+    const session = prepareWrite(project);
+    writeFileSync(join(session.treeRoot, "bad.md"), "# No metadata");
+    expect(() => finishWrite(session.id, "Invalid")).toThrow(expect.objectContaining({ code: "INVALID_TREE" }));
+    writeFileSync(join(session.treeRoot, "bad.md"), node("Valid"));
+    commit(session.worktreeRoot);
+    expect(() => finishWrite(session.id, "Already committed")).toThrow(/Git state changed/u);
   });
-
-  it.each([false, true])("preserves an uncommitted preparation after removal or replacement (%s)", (replace) => {
-    const current = project();
-    createProject(current, undefined, { name: "original", alias: "chosen" });
-    const prepared = prepareContextWrite(current);
-    roots.add(prepared.worktreePath);
-    addLeaf(prepared.worktreePath, "decision");
-    const head = git(prepared.worktreePath, ["rev-parse", "HEAD"]);
-    disconnectProject(current);
-    if (replace) createProject(current, undefined, { name: "replacement", alias: "chosen" });
-    expect(() =>
-      finishContextWrite({ projectPath: current, worktreePath: prepared.worktreePath, message: "Must not commit" }),
-    ).toThrow();
-    expect(git(prepared.worktreePath, ["rev-parse", "HEAD"])).toBe(head);
-    expect(existsSync(join(prepared.worktreePath, "decision.md"))).toBe(true);
+  it("requires a clean subtree for isolated writes", () => {
+    const project = setup();
+    writeFileSync(join(project, "docs/choice.md"), node("Pending"));
+    expect(() => prepareWrite(project)).toThrow(expect.objectContaining({ code: "DIRTY_TREE" }));
   });
+  it("releases empty sessions and never discards pending edits", () => {
+    const project = setup();
+    const empty = prepareWrite(project);
+    expect(finishWrite(empty.id, "Empty").outcome).toBe("unchanged");
+    expect(existsSync(empty.treeRoot)).toBe(false);
+    const dirty = prepareWrite(project);
+    writeFileSync(join(dirty.treeRoot, "choice.md"), node("Choice"));
+    expect(() => abortWrite(dirty.id)).toThrow(/contains work/u);
+    expect(lstatSync(dirty.treeRoot).isDirectory()).toBe(true);
+    const emptyAbort = prepareWrite(project);
+    abortWrite(emptyAbort.id);
+    expect(existsSync(emptyAbort.treeRoot)).toBe(false);
+    expect(existsSync(join(project, "docs/NODE.md"))).toBe(true);
+  });
+});
 
-  it("publishes a shared checkout across projects while preserving aliases and unrelated trees", () => {
-    const first = project("first");
-    const second = project("second");
-    const shared = createProject(first, undefined, { name: "shared", alias: "company" });
-    createProject(first, undefined, { name: "unrelated", alias: "product" });
-    connectProject({ projectPath: second, treePath: shared.treePath, alias: "organization" });
+describe("managed Git subtrees", () => {
+  it("keeps repository identity across transport URL rewrites during sync and publication", () => {
+    const { home, project } = fixture();
+    const remote = remoteFixture(home);
     const runner: CommandRunner = (command, args) =>
-      command === "gh" ? { status: 0, stdout: "", stderr: "" } : defaultRunner(command, args);
-    publishProject(first, { tree: "company", repository: "acme/shared" }, runner);
-    expect(resolveConnection(first).connections).toMatchObject([
-      { alias: "company", tree: { kind: "github", repository: "acme/shared" } },
-      { alias: "product", tree: { kind: "local" } },
-    ]);
-    expect(resolveConnection(second).connections).toMatchObject([
-      { alias: "organization", tree: { kind: "github", repository: "acme/shared" } },
+      remote.runner(command, ["-c", "url.http://github.com/.insteadOf=https://github.com/", ...args]);
+    const connected = connectTree(project, gitSource, runner);
+    const root = connected.repository?.root;
+    if (!root) throw new Error("Expected a repository cache");
+    expect(git(root, ["remote", "get-url", "origin"], { runner })).toBe("http://github.com/acme/context.git");
+    expect(git(root, ["config", "--local", "--get", "remote.origin.url"], { runner })).toBe(
+      "https://github.com/acme/context.git",
+    );
+    expect(syncTrees(project, undefined, false, runner).connections[0]?.ok).toBe(true);
+    const session = prepareWrite(project, undefined, runner);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    const result = finishWrite(session.id, "Record choice", true, runner);
+    expect(result.outcome).toBe("published");
+    expect(git(remote.remote, ["show", "main:docs/choice.md"])).toContain("Choice");
+  });
+  it("rejects a changed stored origin and preserves unpublished work", () => {
+    const { home, project } = fixture();
+    const { runner } = remoteFixture(home);
+    const connected = connectTree(project, gitSource, runner);
+    const root = connected.repository?.root;
+    if (!root) throw new Error("Expected a repository cache");
+    const session = prepareWrite(project, undefined, runner);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    git(root, ["remote", "set-url", "origin", "https://github.com/acme/other.git"]);
+    expect(syncTrees(project, undefined, true, runner).connections[0]).toMatchObject({
+      ok: false,
+      error: expect.objectContaining({ message: "Repository cache identity changed." }),
+    });
+    expect(() => finishWrite(session.id, "Record choice", true, runner)).toThrow(/Remote identity changed/u);
+    expect(readFileSync(join(session.treeRoot, "choice.md"), "utf8")).toContain("Choice");
+    expect(loadWriteSession(session.id).commit).not.toBeNull();
+  });
+  it("uses cached snapshots offline and fetches the target branch during sync", () => {
+    const { home, project } = fixture();
+    const { runner, seed, remote, calls } = remoteFixture(home);
+    connectTree(project, gitSource, runner);
+    const fetchCount = (): number => calls.filter((args) => args.includes("fetch")).length;
+    const before = fetchCount();
+    writeFileSync(join(seed, "docs/choice.md"), node("New"));
+    commit(seed);
+    git(seed, ["push", remote, "main"]);
+    const cached = syncTrees(project, undefined, true, runner).connections[0];
+    expect(cached?.ok).toBe(true);
+    if (!cached?.ok) throw new Error("Expected cached tree");
+    expect(fetchCount()).toBe(before);
+    expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
+    const fresh = syncTrees(project, undefined, false, runner).connections[0];
+    expect(fresh?.ok).toBe(true);
+    if (!fresh?.ok) throw new Error("Expected refreshed tree");
+    expect(fetchCount()).toBe(before + 1);
+    expect(readTree(fresh.treeRoot, "choice.md").node.body).toContain("New");
+    expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
+  });
+  it("shares repository storage while distinguishing subtree and ref identities", () => {
+    const { home, project } = fixture();
+    const { runner, seed, remote, calls } = remoteFixture(home);
+    git(seed, ["branch", "feature"]);
+    git(seed, ["push", remote, "feature"]);
+    connectTree(project, gitSource, runner);
+    connectTree(project, { ...gitSource, path: "handbook" }, runner);
+    connectTree(project, { ...gitSource, ref: "feature" }, runner);
+    expect(new Set(connections(project).map(connectionIdentity)).size).toBe(3);
+    expect(calls.filter((args) => args.includes("clone"))).toHaveLength(1);
+    const docs = resolveSource(connection(project, sourceSelector(project, gitSource)), false, runner);
+    const handbook = resolveSource(
+      connection(project, sourceSelector(project, { ...gitSource, path: "handbook" })),
+      false,
+      runner,
+    );
+    expect(docs.repository?.root).toBe(handbook.repository?.root);
+    expect(docs.treeRoot).not.toBe(handbook.treeRoot);
+  });
+  it("commits only the selected subtree and publishes only when explicitly requested", () => {
+    const { home, project } = fixture();
+    const { runner, remote } = remoteFixture(home);
+    connectTree(project, gitSource, runner);
+    const before = git(remote, ["rev-parse", "main"]);
+    const session = prepareWrite(project, undefined, runner);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    const retained = finishWrite(session.id, "Record choice", false, runner);
+    expect(git(remote, ["rev-parse", "main"])).toBe(before);
+    expect(retained.outcome).toBe("committed");
+    const result = finishWrite(session.id, "Publish saved commit", true, runner);
+    expect(result.outcome).toBe("published");
+    expect(git(remote, ["rev-parse", "main"])).toBe(retained.sha);
+    expect(git(remote, ["diff", "--name-only", before, "main"])).toBe("docs/choice.md");
+    expect(existsSync(session.treeRoot)).toBe(false);
+  });
+  it("preserves a committed session on concurrent publication and allows a fresh semantic retry", () => {
+    const { home, project } = fixture();
+    const { runner, remote } = remoteFixture(home);
+    connectTree(project, gitSource, runner);
+    const first = prepareWrite(project, undefined, runner);
+    const second = prepareWrite(project, undefined, runner);
+    writeFileSync(join(first.treeRoot, "first.md"), node("First"));
+    writeFileSync(join(second.treeRoot, "second.md"), node("Second"));
+    const winner = finishWrite(first.id, "First", true, runner);
+    expect(() => finishWrite(second.id, "Second", true, runner)).toThrow(
+      expect.objectContaining({ code: "WRITE_OUTDATED" }),
+    );
+    expect(loadWriteSession(second.id).commit).not.toBeNull();
+    expect(existsSync(second.treeRoot)).toBe(true);
+    expect(git(remote, ["rev-parse", "main"])).toBe(winner.sha);
+    const retry = prepareWrite(project, undefined, runner);
+    expect(readTree(retry.treeRoot, "first.md").node.body).toContain("First");
+  });
+  it("returns independent failures without hiding healthy sources", () => {
+    const { home, project } = fixture();
+    const { runner } = remoteFixture(home);
+    connectTree(project, gitSource, runner);
+    initTree(project, join(project, "local"));
+    writeFileSync(join(project, "local/NODE.md"), "broken");
+    const entries = syncTrees(project, undefined, true, runner).connections;
+    expect(
+      entries.map((entry) => [sourceName(entry.connection.projectRoot, entry.connection.source), entry.ok]),
+    ).toEqual([
+      ["context", true],
+      ["local", false],
     ]);
   });
+});
 
-  it("rejects unsupported stored formats without deleting or rewriting them", () => {
-    const current = project();
-    createProject(current);
-    const path = join(process.env.HOME ?? "", ".context-tree", "connections.json");
-    const original = '{"schemaVersion":1,"connections":[]}\n';
-    writeFileSync(path, original);
-    expect(() => connectProject({ projectPath: current, target: "service-context-tree" })).toThrow(
-      /unsupported or corrupt/,
+describe("write isolation regressions", () => {
+  it("ignores inherited Git checkout and index overrides", () => {
+    const { project, home } = fixture();
+    initRepository(project);
+    initTree(project, join(project, "docs"));
+    commit(project);
+    const other = join(home, "other");
+    initRepository(other);
+    const index = readFileSync(join(other, ".git/index"));
+    vi.stubEnv("GIT_DIR", join(other, ".git"));
+    vi.stubEnv("GIT_WORK_TREE", other);
+    vi.stubEnv("GIT_INDEX_FILE", join(other, ".git/index"));
+    const session = prepareWrite(project);
+    writeFileSync(join(session.treeRoot, "decision.md"), node("Decision"));
+    expect(finishWrite(session.id, "Record decision").outcome).toBe("committed");
+    expect(readFileSync(join(other, ".git/index"))).toEqual(index);
+    expect(existsSync(join(project, "docs/decision.md"))).toBe(false);
+  });
+  it("rejects a mutated remote snapshot, including ignored files", () => {
+    const { project, home } = fixture();
+    const { runner, seed, remote } = remoteFixture(home);
+    writeFileSync(join(seed, ".gitignore"), "secret.txt\n");
+    commit(seed);
+    git(seed, ["push", remote, "main"]);
+    const connected = connectTree(
+      project,
+      { kind: "git", repository: "acme/context", path: "docs", ref: "main" },
+      runner,
     );
-    expect(readFileSync(path, "utf8")).toBe(original);
+    writeFileSync(join(connected.repository?.root ?? "", "secret.txt"), "not part of snapshot");
+    const result = syncTrees(project, "context", true, runner);
+    expect(result.connections[0]).toMatchObject({ ok: false, error: { code: "DIRTY_TREE" } });
+  });
+});
+
+describe("source-derived selection", () => {
+  it("reports same-name directories and accepts their full paths without assigning names", () => {
+    const { project, home } = fixture();
+    initTree(project, join(project, "docs"));
+    const external = scaffoldTree(join(home, "external/docs"), "External");
+    connectTree(project, { kind: "directory", path: external });
+    expect(() => connection(project, "docs")).toThrow(join(project, "docs"));
+    expect(() => syncTrees(project, "docs")).toThrow(external);
+    expect(connection(project, external).source).toEqual({ kind: "directory", path: external });
+    expect(syncTrees(project).connections).toHaveLength(2);
+    disconnect(project, external);
+    expect(connection(project, "docs").source).toEqual({ kind: "directory", path: "docs" });
+  });
+  it("derives the name of a project-root tree from the actual directory", () => {
+    const { project } = fixture();
+    initTree(project, project);
+    expect(connection(project, "project").source).toEqual({ kind: "directory", path: "." });
+    expect(connection(project, project)).toEqual(connection(project));
+  });
+  it("keeps prepared writes bound to their source after a namesake is connected and the list reordered", () => {
+    const { project, home } = fixture();
+    initRepository(project);
+    initTree(project, join(project, "docs"));
+    commit(project);
+    const session = prepareWrite(project, "docs");
+    const external = scaffoldTree(join(home, "external/docs"), "Other docs");
+    connectTree(project, { kind: "directory", path: external });
+    writeFileSync(
+      join(project, ".context-tree.json"),
+      JSON.stringify({
+        schemaVersion: 3,
+        trees: [
+          { kind: "directory", path: external },
+          { kind: "directory", path: "docs" },
+        ],
+      }),
+    );
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    expect(finishWrite(session.id, "Record choice").outcome).toBe("committed");
+    expect(existsSync(join(external, "choice.md"))).toBe(false);
+    const next = prepareWrite(project, join(project, "docs"));
+    disconnect(project, join(project, "docs"));
+    expect(() => finishWrite(next.id, "Must not select namesake")).toThrow(/No matching/);
+  });
+  it("distinguishes Git repositories, subtrees, and refs without ambiguous URL encodings", () => {
+    const { project } = fixture();
+    const sources = [
+      gitSource,
+      { ...gitSource, repository: "other/context" },
+      { ...gitSource, path: "handbook" },
+      { ...gitSource, ref: "feature/docs" },
+      { ...gitSource, ref: "feature", path: "docs/docs" },
+    ];
+    writeFileSync(join(project, ".context-tree.json"), JSON.stringify({ schemaVersion: 3, trees: sources }));
+    expect(() => connection(project, "context")).toThrow("https://github.com/other/context/tree/main/docs");
+    expect(new Set(sources.map((source) => sourceSelector(project, source))).size).toBe(sources.length);
+    for (const source of sources) expect(connection(project, sourceSelector(project, source)).source).toEqual(source);
+    expect(sourceSelector(project, { ...gitSource, ref: "feature/docs" })).toBe(
+      "https://github.com/acme/context/tree/feature%2Fdocs/docs",
+    );
+  });
+  it("rejects alias maps, null configuration, and duplicate sources", () => {
+    const { project } = fixture();
+    for (const config of [
+      null,
+      { schemaVersion: 3, trees: { docs: { kind: "directory", path: "docs" } } },
+      {
+        schemaVersion: 3,
+        trees: [
+          { kind: "directory", path: "docs" },
+          { kind: "directory", path: join(project, "docs") },
+        ],
+      },
+      { schemaVersion: 3, trees: [gitSource, { ...gitSource, repository: "Acme/Context" }] },
+    ]) {
+      writeFileSync(join(project, ".context-tree.json"), JSON.stringify(config));
+      expect(() => connections(project)).toThrow(/Invalid|Duplicate/);
+    }
   });
 });

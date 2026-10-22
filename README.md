@@ -1,93 +1,51 @@
 # Context Tree
 
-Project memory for coding agents. Save decisions, constraints, and their rationale
-in a separate Git repository so your agent can use them in future sessions.
-Keep it local or share it through a private GitHub repository.
+A shared project notebook for you and your coding agent.
 
-Works with **Codex, Claude Code, and Pi**.
+Keep decisions, constraints, and useful lessons in Markdown files alongside your code. Each folder has an index, so an agent can find the context it needs without reading every document.
 
-## Install
+A tree can live inside an existing repository, in a standalone folder, or in a shared GitHub repository.
 
-Requires **Node.js 22.13+** and **Git**.
+## Get started
 
-```bash
+```sh
 npm install --global @first-tree-ai/context-tree
+cd my-project
+context-tree init docs
 ```
 
-This installs the CLI and skills for your installed agents. Restart your agent
-to load the skills.
+This creates a tree in `docs/` and connects it to your project.
 
-## Use it
+Read its index:
 
-From your project directory:
-
-```bash
-context-tree create
+```sh
+context-tree read
 ```
 
-This creates a local tree under `~/.context-tree/trees` and connects it to your
-project. Then ask your agent:
+Edit the Markdown yourself or ask your agent to update it. Check your changes with `context-tree verify`, then commit them with your code.
 
-> Read the Context Tree before planning this change.
+## Use with your agent
 
-> Save our decision to use a single writer, including why we rejected multiple writers.
+The package includes skills for Claude Code, Codex, and Pi. Global installation adds them for detected hosts; restart your agent to pick them up.
 
-The agent reads relevant context and commits updates. For GitHub trees, it also
-pushes changes.
+Ask your agent:
 
-To invoke skills directly, use `$context-tree-read` in Codex,
-`/context-tree-read` in Claude Code, or `/skill:context-tree-read` in Pi.
-Replace `read` with `write` or `cleanup` to save or tidy context.
+> Read the project context before starting. When you're done, record any useful decisions.
 
-## Share a tree
+You can also ask it to tidy the tree or schedule regular cleanup. Cleanup consolidates duplicates and improves organization, leaving changes on a separate branch for review by default.
 
-Sign in with `gh auth login`, then publish to a new private GitHub repository:
+## Connect an existing tree
 
-```bash
-context-tree publish OWNER/REPO
+```sh
+context-tree connect --path docs
 ```
 
-Connect from another project or machine:
+To share knowledge across projects, connect a tree from GitHub:
 
-```bash
-context-tree connect OWNER/REPO
+```sh
+context-tree connect acme/knowledge --path docs --ref main
 ```
 
-You can also connect a local tree by name or path:
+Use `context-tree sync` to fetch updates. With multiple trees, select one by its directory or repository name, such as `context-tree read --tree knowledge`.
 
-```bash
-context-tree list
-context-tree connect my-project-context-tree
-context-tree connect --tree-path /absolute/path/to/tree
-```
-
-A project can use several trees. Name connections with `--as <alias>` and select
-one with `--tree <alias>` when writing or publishing.
-
-## Maintain it
-
-Ask your agent to run `context-tree-cleanup`, or schedule regular cleanup:
-
-```bash
-context-tree cleanup schedule --agent codex --every 2h
-context-tree cleanup status
-context-tree cleanup remove
-```
-
-Schedules support Codex, Claude Code, and Pi on macOS and Linux. The agent CLI
-must be installed and authenticated, and the machine must be awake.
-
-## Other commands
-
-```bash
-context-tree resolve                # show this project's connections
-context-tree disconnect             # disconnect the sole tree without deleting it
-context-tree install                # install skills for a newly added agent
-context-tree uninstall              # remove Context Tree skills
-context-tree --help
-```
-
-In OpenTag, select a tree in **Agent settings → Context Tree**.
-
-See the [CLI specification](docs/specification.md) for command contracts and
-integration details.
+See `context-tree --help` for commands and the [specification](docs/specification.md) for technical details.

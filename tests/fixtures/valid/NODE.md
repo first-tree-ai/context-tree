@@ -1,8 +1,8 @@
 ---
 schemaVersion: 1
-title: "Legacy Tree"
+title: "Project Context"
 ---
 
-# Legacy Tree
+# Project Context
 
 Canonical durable context and shared working memory relevant across domains.
