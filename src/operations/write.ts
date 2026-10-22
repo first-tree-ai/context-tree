@@ -177,7 +177,7 @@ export function finishWrite(id: string, message: string, publish = false, runner
     const source = session.connection.source;
     if (source.kind !== "git") throw new Error("Only Git sources can be published.");
     // Remote identity and the exact target ref are rechecked; no force push or branch inference.
-    const origin = git(root, ["remote", "get-url", "origin"], { runner });
+    const origin = git(root, ["config", "--local", "--get", "remote.origin.url"], { runner });
     if (origin !== `https://github.com/${source.repository}.git`)
       throw new Error("Remote identity changed; worktree preserved.");
     try {

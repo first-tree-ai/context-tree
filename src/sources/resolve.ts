@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync, rmSync } from "node:fs";
+import { lstatSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { type CommandRunner, git, gitRaw, optionalGit } from "../adapters/git.js";
 import { stateDirectory, withLock } from "../adapters/state.js";
@@ -63,17 +63,21 @@ export function managedRepository(
     const expected = `https://github.com/${githubRepositoryIdentitySchema.parse(source.repository)}.git`;
     if (!lstatSync(root, { throwIfNoEntry: false })) {
       if (!sync) throw new Error("Git source is not cached; run context-tree sync.");
+      // A killed clone must never become the canonical repository cache. This staging
+      // directory cannot contain a published snapshot or a user's write session.
+      const staging = `${root}.clone`;
+      rmSync(staging, { recursive: true, force: true });
       try {
-        git(parent, ["clone", "--bare", "--quiet", "--", expected, root], { runner });
-      } catch (error) {
-        rmSync(root, { recursive: true, force: true });
-        throw error;
+        git(parent, ["clone", "--bare", "--quiet", "--", expected, staging], { runner });
+        renameSync(staging, root);
+      } finally {
+        rmSync(staging, { recursive: true, force: true });
       }
     }
     realDirectoryWithoutSymlinks(root, "Repository cache");
     if (
       git(root, ["rev-parse", "--is-bare-repository"], { runner }) !== "true" ||
-      git(root, ["remote", "get-url", "origin"], { runner }) !== expected
+      git(root, ["config", "--local", "--get", "remote.origin.url"], { runner }) !== expected
     )
       throw new Error("Repository cache identity changed.");
     const ref = `refs/remotes/origin/${source.ref}`;

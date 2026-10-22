@@ -27,6 +27,8 @@ Directory resolution returns the real content root and, when available, reposito
 
 Managed Git resolution uses one bare cache per repository and detached snapshots keyed by repository and commit. `sync` fetches the exact declared branch. `sync --offline` requires a cached ref and performs no network access. A snapshot's identity and cleanliness are checked before reuse. Symlinked roots and nested repository ownership are rejected. `sync` validates fetched tree content. The returned snapshot path is stable across later refreshes.
 
+Cache reuse and publication check the repository's locally stored origin URL. Host Git URL rewrites may change the transport without changing that stored identity.
+
 `sync` returns `{ schemaVersion, connections }`. Each entry is either `{ ok: true, connection, treeRoot, repository, dirty }` or `{ ok: false, connection, error }`. Configuration failure fails the whole request; individual source failure preserves successful results.
 
 ## Write sessions
@@ -49,7 +51,7 @@ Normal shared content and `members/` content are indexed equally but have differ
 
 ## Machine state and cleanup
 
-`~/.context-tree/` holds repository caches, snapshots, worktrees, write-session records, and cleanup schedules/history. It holds no project connection registry. State paths reject symlinks; writes use temporary files and atomic replacement. Locks fail closed on contention. After a process crash, inspect retained work and confirm no process owns a lock before manually removing that lock directory. Caches and snapshots have no automatic eviction.
+`~/.context-tree/` holds repository caches, snapshots, worktrees, write-session records, and cleanup schedules/history. It holds no project connection registry. State paths reject symlinks; writes use temporary files and atomic replacement. Locks record their owner process and reject live contention; an interrupted owner's lock can be reclaimed after that process exits. Repository clones stage separately and become canonical only after completion. Caches and snapshots have no automatic eviction.
 
 Cleanup composes the same isolated preparation and completion operations. A schedule pins a source and branch and stores its explicit publication policy. One schedule owns a logical source/branch on a machine. It captures executable paths and launches through launchd or systemd user timers. Changed schedule/source/branch state cancels the agent. Cleanup restricts edits to normal and member Markdown content, validates through the normal write flow, and retains failures. Successful input subtree digests prevent unrelated code commits from retriggering cleanup. Logs are bounded and credential-redacted.
 

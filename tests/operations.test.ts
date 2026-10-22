@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { git, gitRaw } from "../src/adapters/git.js";
+import { type CommandRunner, git, gitRaw } from "../src/adapters/git.js";
 import { readState, withLock } from "../src/adapters/state.js";
 import { SCHEMA_VERSION } from "../src/contracts/index.js";
 import { connection, connections, disconnect } from "../src/operations/connections.js";
@@ -219,6 +219,42 @@ describe("isolated writes", () => {
 });
 
 describe("managed Git subtrees", () => {
+  it("keeps repository identity across transport URL rewrites during sync and publication", () => {
+    const { home, project } = fixture();
+    const remote = remoteFixture(home);
+    const runner: CommandRunner = (command, args) =>
+      remote.runner(command, ["-c", "url.http://github.com/.insteadOf=https://github.com/", ...args]);
+    const connected = connectTree(project, gitSource, runner);
+    const root = connected.repository?.root;
+    if (!root) throw new Error("Expected a repository cache");
+    expect(git(root, ["remote", "get-url", "origin"], { runner })).toBe("http://github.com/acme/context.git");
+    expect(git(root, ["config", "--local", "--get", "remote.origin.url"], { runner })).toBe(
+      "https://github.com/acme/context.git",
+    );
+    expect(syncTrees(project, undefined, false, runner).connections[0]?.ok).toBe(true);
+    const session = prepareWrite(project, undefined, runner);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    const result = finishWrite(session.id, "Record choice", true, runner);
+    expect(result.outcome).toBe("published");
+    expect(git(remote.remote, ["show", "main:docs/choice.md"])).toContain("Choice");
+  });
+  it("rejects a changed stored origin and preserves unpublished work", () => {
+    const { home, project } = fixture();
+    const { runner } = remoteFixture(home);
+    const connected = connectTree(project, gitSource, runner);
+    const root = connected.repository?.root;
+    if (!root) throw new Error("Expected a repository cache");
+    const session = prepareWrite(project, undefined, runner);
+    writeFileSync(join(session.treeRoot, "choice.md"), node("Choice"));
+    git(root, ["remote", "set-url", "origin", "https://github.com/acme/other.git"]);
+    expect(syncTrees(project, undefined, true, runner).connections[0]).toMatchObject({
+      ok: false,
+      error: expect.objectContaining({ message: "Repository cache identity changed." }),
+    });
+    expect(() => finishWrite(session.id, "Record choice", true, runner)).toThrow(/Remote identity changed/u);
+    expect(readFileSync(join(session.treeRoot, "choice.md"), "utf8")).toContain("Choice");
+    expect(loadWriteSession(session.id).commit).not.toBeNull();
+  });
   it("uses cached snapshots offline and fetches the target branch during sync", () => {
     const { home, project } = fixture();
     const { runner, seed, remote, calls } = remoteFixture(home);
