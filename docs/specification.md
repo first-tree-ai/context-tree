@@ -25,7 +25,7 @@ Directory identity is its resolved path. Git identity is repository + subtree + 
 
 Directory resolution returns the real content root and, when available, repository root, repository-relative subtree, branch, HEAD, and subtree dirtiness. No repository is required. Reads allow working changes.
 
-Managed Git resolution uses one bare cache per repository and detached snapshots keyed by repository and commit. `sync` fetches the exact declared branch. `sync --offline` requires a cached ref and performs no network access. A snapshot's identity and cleanliness are checked before reuse. Symlinked roots and nested repository ownership are rejected. `sync` validates fetched tree content. The returned snapshot path is stable across later refreshes.
+Managed Git resolution uses one bare cache per repository and detached snapshots keyed by repository, subtree, and commit. Subtree snapshots use cone-mode sparse checkout with a full index; selected content and files immediately inside its ancestor directories are materialized. Creating these snapshots requires Git 2.36 or newer. Repository-root sources use full checkouts. `sync` fetches the exact declared branch. `sync --offline` requires a cached ref and performs no network access. A snapshot's identity and cleanliness are checked before reuse. Symlinked roots and nested repository ownership are rejected. `sync` validates fetched tree content. The returned snapshot path is stable across later refreshes.
 
 Cache reuse and publication check the repository's locally stored origin URL. Host Git URL rewrites may change the transport without changing that stored identity.
 
@@ -35,7 +35,7 @@ Cache reuse and publication check the repository's locally stored origin URL. Ho
 
 Directory content can be edited directly and checked with `verify`; this requires no session or Git repository. The host owns staging and commits for direct edits.
 
-`write prepare` creates an isolated session for either source kind, starting at the resolved committed revision on a unique branch in a separate worktree. The subtree must be clean. A session pins its project connection, content root, and repository state. Session IDs are UUIDs; repository, worktree, and task branch are required.
+`write prepare` creates an isolated session for either source kind, starting at the resolved committed revision on a unique branch in a separate worktree. Managed Git subtrees use the same sparse checkout rules as snapshots; directory sources use full worktrees without changing the host repository's sparse configuration. The subtree must be clean. A session pins its project connection, content root, and repository state. Session IDs are UUIDs; repository, worktree, and task branch are required.
 
 `write finish` checks connection and repository identity, requires the expected branch and HEAD, rejects every pending path outside the tree, validates content, stages only its subtree, and commits. It rechecks the commit and worktree before reporting success. Ignored untracked content is included in boundary checks and cannot silently disappear from a managed commit.
 
