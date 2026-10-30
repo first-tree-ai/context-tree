@@ -13,6 +13,7 @@ import {
 import { ContextTreeError } from "../errors.js";
 import { sourceSelector } from "../sources/identity.js";
 import { directoryRoot, inspectRepository, literalPathspec, resolveSource, validateTree } from "../sources/resolve.js";
+import { addManagedWorktree } from "../sources/worktree.js";
 import { realDirectoryWithoutSymlinks } from "../tree/path.js";
 import { connection } from "./connections.js";
 
@@ -50,7 +51,16 @@ export function prepareWrite(project: string, selector?: string, runner?: Comman
   const id = randomUUID();
   const worktreeRoot = join(stateDirectory("worktrees"), id);
   const taskBranch = `context-tree/write/${id}`;
-  git(repository.root, ["worktree", "add", "--quiet", "-b", taskBranch, worktreeRoot, repository.sha], { runner });
+  const repositoryRoot = selected.source.kind === "git" ? commonDirectory(repository.root, runner) : repository.root;
+  if (selected.source.kind === "git")
+    addManagedWorktree(
+      { root: repositoryRoot, sha: repository.sha },
+      worktreeRoot,
+      repository.directory,
+      taskBranch,
+      runner,
+    );
+  else git(repository.root, ["worktree", "add", "--quiet", "-b", taskBranch, worktreeRoot, repository.sha], { runner });
   const session: WriteSession = {
     schemaVersion: SCHEMA_VERSION,
     id,
@@ -58,7 +68,7 @@ export function prepareWrite(project: string, selector?: string, runner?: Comman
     treeRoot: realDirectoryWithoutSymlinks(join(worktreeRoot, repository.directory), "Editable tree"),
     repository: {
       ...repository,
-      root: selected.source.kind === "git" ? commonDirectory(repository.root, runner) : repository.root,
+      root: repositoryRoot,
     },
     worktreeRoot,
     taskBranch,
