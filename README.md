@@ -46,6 +46,8 @@ To share knowledge across projects, connect a tree from GitHub:
 context-tree connect acme/knowledge --path docs --ref main
 ```
 
+Connecting a Git subtree requires Git 2.36 or newer. Managed snapshots and write sessions check out the selected subtree and its ancestor files; connecting the repository root checks out the full repository.
+
 Use `context-tree sync` to fetch updates. With multiple trees, select one by its directory or repository name, such as `context-tree read --tree knowledge`.
 
 See `context-tree --help` for commands and the [specification](docs/specification.md) for technical details.

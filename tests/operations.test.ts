@@ -292,7 +292,10 @@ describe("managed Git subtrees", () => {
       false,
       runner,
     );
-    expect(docs.repository?.root).toBe(handbook.repository?.root);
+    expect(docs.repository?.root).not.toBe(handbook.repository?.root);
+    expect(git(docs.repository?.root ?? "", ["rev-parse", "--git-common-dir"])).toBe(
+      git(handbook.repository?.root ?? "", ["rev-parse", "--git-common-dir"]),
+    );
     expect(docs.treeRoot).not.toBe(handbook.treeRoot);
   });
   it("commits only the selected subtree and publishes only when explicitly requested", () => {

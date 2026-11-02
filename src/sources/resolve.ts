@@ -14,6 +14,7 @@ import { isPathInside, realDirectoryWithoutSymlinks, toPosixPath } from "../tree
 import { readRootNode } from "../tree/root.js";
 import { verifyTree } from "../tree/verify.js";
 import { identityId } from "./identity.js";
+import { addManagedWorktree } from "./worktree.js";
 
 export function validateTree(root: string): void {
   const report = verifyTree(root);
@@ -92,10 +93,11 @@ function snapshot(
   repository: { root: string; sha: string },
   runner?: CommandRunner,
 ): string {
-  const root = join(stateDirectory("snapshots"), `${identityId(source.repository)}-${repository.sha}`);
+  const key = identityId(JSON.stringify([source.repository.toLowerCase(), source.path]));
+  const root = join(stateDirectory("snapshots"), `${key}-${repository.sha}`);
   return withLock(`${root}.lock`, () => {
     if (!lstatSync(root, { throwIfNoEntry: false })) {
-      git(repository.root, ["worktree", "add", "--quiet", "--detach", root, repository.sha], { runner });
+      addManagedWorktree(repository, root, source.path, undefined, runner);
     }
     const canonical = realDirectoryWithoutSymlinks(root, "Snapshot");
     const common = git(canonical, ["rev-parse", "--path-format=absolute", "--git-common-dir"], { runner });
