@@ -16,11 +16,23 @@ import { CLI_ERROR_CODES } from "../contracts/index.js";
 import { ContextTreeError } from "../errors.js";
 import { realDirectoryWithoutSymlinks } from "../tree/path.js";
 
+/**
+ * Create `path` with mode 0700 unless something already exists there. Another process can create
+ * the same entry between the check and the call; that is not a failure, and callers still validate
+ * whatever entry won the race.
+ */
+export function mkdirUnlessExists(path: string): void {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+}
 export function privateDirectory(path: string): string {
   const absolute = resolve(path);
   if (!lstatSync(absolute, { throwIfNoEntry: false })) {
     privateDirectory(dirname(absolute));
-    mkdirSync(absolute, { mode: 0o700 });
+    mkdirUnlessExists(absolute);
   }
   return realDirectoryWithoutSymlinks(absolute, "State directory");
 }

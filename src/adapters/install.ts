@@ -12,6 +12,7 @@ import {
   type UninstallSkillsResult,
 } from "../contracts/index.js";
 import { readPackageVersion, resolvePackagedResource } from "./package.js";
+import { mkdirUnlessExists } from "./state.js";
 
 /** Home configuration paths detect hosts independently of their skills destinations. */
 const HOST_DIRECTORIES: Record<SkillHost, { config: readonly string[]; skills: string }> = {
@@ -41,11 +42,8 @@ function ensureRealDirectory(root: string, segments: readonly string[]): string 
   let current = root;
   for (const segment of segments) {
     current = join(current, segment);
-    const entry = lstatSync(current, { throwIfNoEntry: false });
-    if (entry === undefined) {
-      mkdirSync(current, { mode: 0o700 });
-      continue;
-    }
+    if (lstatSync(current, { throwIfNoEntry: false }) === undefined) mkdirUnlessExists(current);
+    const entry = lstatSync(current);
     if (entry.isSymbolicLink() || !entry.isDirectory()) {
       throw new Error(`Context Tree skill directory must be a real directory: ${current}`);
     }
