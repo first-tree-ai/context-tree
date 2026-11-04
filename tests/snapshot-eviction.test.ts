@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { git } from "../src/adapters/git.js";
@@ -6,6 +6,7 @@ import { withLock } from "../src/adapters/state.js";
 import { connectTree, syncTrees } from "../src/operations/trees.js";
 import { abortWrite, prepareWrite } from "../src/operations/write.js";
 import { SNAPSHOT_RETENTION_MS, touchSnapshotContaining } from "../src/sources/eviction.js";
+import { readTree } from "../src/tree/read.js";
 import { commit, node, remoteFixture, useFixture } from "./helpers.js";
 
 const fixture = useFixture();
@@ -94,5 +95,31 @@ describe("snapshot eviction", () => {
     age(root, 2 * SNAPSHOT_RETENTION_MS);
     touchSnapshotContaining(project);
     expect(Date.now() - statSync(root).mtimeMs).toBeGreaterThan(SNAPSHOT_RETENTION_MS);
+  });
+
+  it("keeps a snapshot that an explicit read uses while eviction is checking it", () => {
+    const { project, home } = fixture();
+    const { runner, seed, remote } = remoteFixture(home);
+    const first = connectTree(project, source, runner);
+    const firstRoot = first.repository?.root ?? "";
+    advance(seed, remote, "Second");
+    synced(project, runner);
+    age(firstRoot, 2 * SNAPSHOT_RETENTION_MS);
+
+    let paused = false;
+    const pausing: typeof runner = (command, args) => {
+      if (!paused && args[2] === "status" && realpathSync(args[1] ?? "") === firstRoot) {
+        // Eviction is paused after its first use-time check, before removal.
+        paused = true;
+        touchSnapshotContaining(first.treeRoot);
+        expect(() => readTree(first.treeRoot)).not.toThrow();
+      }
+      return runner(command, args);
+    };
+    synced(project, pausing);
+
+    expect(paused).toBe(true);
+    expect(existsSync(join(first.treeRoot, "NODE.md"))).toBe(true);
+    expect(() => readTree(first.treeRoot)).not.toThrow();
   });
 });
