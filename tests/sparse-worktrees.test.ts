@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -76,15 +77,31 @@ describe("managed sparse worktrees", () => {
   });
 
   it("downloads only the selected subtree from a filtering remote", () => {
-    const { project } = fixture();
+    const { home, project } = fixture();
     const { remote } = setup();
     const runner = filteringRunner(remote);
     const tree = connectTree(project, source, runner);
     expect(readFileSync(join(tree.treeRoot, "NODE.md"), "utf8")).toContain("Docs");
     const cache = managedRepository(source, false, runner).root;
     const blob = (path: string): string => git(remote, ["rev-parse", `main:${path}`]);
+    // Inspect only the local object database: lazy fetching is disabled, and the origin is
+    // redirected to a missing local path so an older Git cannot reach the network either.
     const present = (path: string): boolean =>
-      defaultRunner("git", ["-C", cache, "cat-file", "-e", blob(path)]).status === 0;
+      spawnSync(
+        "git",
+        [
+          "-c",
+          `url.file://${join(home, "unreachable.git")}.insteadOf=https://github.com/acme/context.git`,
+          "-c",
+          "protocol.file.allow=always",
+          "-C",
+          cache,
+          "cat-file",
+          "-e",
+          blob(path),
+        ],
+        { env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" },
+      ).status === 0;
     expect(git(cache, ["config", "--get", "remote.origin.promisor"])).toBe("true");
     expect(git(cache, ["config", "--get", "remote.origin.partialclonefilter"])).toBe("tree:0");
     expect(present("docs/NODE.md")).toBe(true);
