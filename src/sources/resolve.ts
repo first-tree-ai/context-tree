@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { type CommandRunner, git, gitRaw, optionalGit } from "../adapters/git.js";
-import { stateDirectory, withLock } from "../adapters/state.js";
+import { atomicState, readState, stateDirectory, withLockWait } from "../adapters/state.js";
 import {
   CLI_ERROR_CODES,
   type Connection,
@@ -54,14 +54,18 @@ export function literalPathspec(directory: string): string {
 }
 
 /** One bare cache per repository; refs and snapshots do not share a working index. */
+/** A fetch younger than this is reused instead of contacting the remote again. */
+export const FETCH_FRESHNESS_MS = 60_000;
+
 export function managedRepository(
   source: Extract<TreeSource, { kind: "git" }>,
   sync: boolean,
   runner?: CommandRunner,
+  maxAgeMs: number = FETCH_FRESHNESS_MS,
 ): { root: string; sha: string } {
   const parent = stateDirectory("repositories");
   const root = join(parent, `${identityId(source.repository)}.git`);
-  return withLock(`${root}.lock`, () => {
+  return withLockWait(`${root}.lock`, () => {
     const expected = `https://github.com/${githubRepositoryIdentitySchema.parse(source.repository)}.git`;
     if (!lstatSync(root, { throwIfNoEntry: false })) {
       if (!sync) throw new Error("Git source is not cached; run context-tree sync.");
@@ -83,10 +87,40 @@ export function managedRepository(
     )
       throw new Error("Repository cache identity changed.");
     const ref = `refs/remotes/origin/${source.ref}`;
-    if (sync) git(root, ["fetch", "--quiet", "--no-tags", "origin", `+refs/heads/${source.ref}:${ref}`], { runner });
+    if (sync && !fetchedRecently(root, ref, maxAgeMs, runner)) {
+      git(root, ["fetch", "--quiet", "--no-tags", "origin", `+refs/heads/${source.ref}:${ref}`], { runner });
+      recordFetch(root, ref);
+    }
     const sha = git(root, ["rev-parse", "--verify", `${ref}^{commit}`], { runner });
     return { root, sha };
   });
+}
+
+/** Fetch times per remote-tracking ref, shared by every process using this cache. */
+function fetchState(root: string): string {
+  return `${root}.fetched.json`;
+}
+function fetchedRecently(root: string, ref: string, maxAgeMs: number, runner?: CommandRunner): boolean {
+  if (maxAgeMs <= 0) return false;
+  let fetched: unknown;
+  try {
+    fetched = readState(fetchState(root));
+  } catch {
+    return false;
+  }
+  const at = fetched && typeof fetched === "object" ? Object.getOwnPropertyDescriptor(fetched, ref)?.value : undefined;
+  if (typeof at !== "number" || !(Date.now() - at < maxAgeMs && at <= Date.now())) return false;
+  return optionalGit(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], runner) !== undefined;
+}
+function recordFetch(root: string, ref: string): void {
+  let fetched: Record<string, unknown> = {};
+  try {
+    const state = readState(fetchState(root));
+    if (state && typeof state === "object" && !Array.isArray(state)) fetched = { ...state };
+  } catch {
+    // An unreadable record is replaced.
+  }
+  atomicState(fetchState(root), { ...fetched, [ref]: Date.now() });
 }
 
 function snapshot(
@@ -96,7 +130,7 @@ function snapshot(
 ): string {
   const key = identityId(JSON.stringify([source.repository.toLowerCase(), source.path]));
   const root = join(stateDirectory("snapshots"), `${key}-${repository.sha}`);
-  return withLock(`${root}.lock`, () => {
+  return withLockWait(`${root}.lock`, () => {
     if (!lstatSync(root, { throwIfNoEntry: false })) {
       addManagedWorktree(repository, root, source.path, undefined, runner);
     }
@@ -117,7 +151,12 @@ function snapshot(
   });
 }
 
-export function resolveSource(connection: Connection, sync = false, runner?: CommandRunner): ResolvedTree {
+export function resolveSource(
+  connection: Connection,
+  sync = false,
+  runner?: CommandRunner,
+  maxAgeMs: number = FETCH_FRESHNESS_MS,
+): ResolvedTree {
   if (connection.source.kind === "directory") {
     const treeRoot = directoryRoot(connection);
     readRootNode(treeRoot);
@@ -131,7 +170,7 @@ export function resolveSource(connection: Connection, sync = false, runner?: Com
     };
   }
   const source = connection.source;
-  const repository = managedRepository(source, sync, runner);
+  const repository = managedRepository(source, sync, runner, maxAgeMs);
   const root = snapshot(source, repository, runner);
   if (sync) evictIdleSnapshots(repository, root, runner);
   const treeRoot = realDirectoryWithoutSymlinks(join(root, source.path), "Tree root");

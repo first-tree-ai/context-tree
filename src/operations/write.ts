@@ -37,7 +37,8 @@ function commonDirectory(root: string, runner?: CommandRunner): string {
 }
 export function prepareWrite(project: string, selector?: string, runner?: CommandRunner): WriteSession {
   const selected = connection(project, selector, runner);
-  const resolved = resolveSource(selected, true, runner);
+  // A write starts from the remote's current head, never from a recently cached fetch.
+  const resolved = resolveSource(selected, true, runner, 0);
   const repository = resolved.repository;
   if (!repository || repository.sha === "unborn")
     throw new Error(

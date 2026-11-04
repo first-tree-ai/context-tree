@@ -1,5 +1,5 @@
 import { type CommandRunner, git } from "../adapters/git.js";
-import { withLock } from "../adapters/state.js";
+import { withLockWait } from "../adapters/state.js";
 
 export function addManagedWorktree(
   repository: { root: string; sha: string },
@@ -8,7 +8,7 @@ export function addManagedWorktree(
   branch?: string,
   runner?: CommandRunner,
 ): void {
-  withLock(`${repository.root}.lock`, () => {
+  withLockWait(`${repository.root}.lock`, () => {
     const sparse = directory !== ".";
     if (sparse) {
       const version = /^git version (\d+)\.(\d+)/u.exec(git(repository.root, ["version"], { runner }));
