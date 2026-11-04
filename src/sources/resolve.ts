@@ -69,7 +69,7 @@ export function managedRepository(
       const staging = `${root}.clone`;
       rmSync(staging, { recursive: true, force: true });
       try {
-        git(parent, ["clone", "--bare", "--quiet", "--", expected, staging], { runner });
+        git(parent, ["clone", "--bare", "--quiet", "--filter=tree:0", "--", expected, staging], { runner });
         renameSync(staging, root);
       } finally {
         rmSync(staging, { recursive: true, force: true });
