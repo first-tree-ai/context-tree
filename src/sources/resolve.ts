@@ -13,6 +13,7 @@ import { ContextTreeError } from "../errors.js";
 import { isPathInside, realDirectoryWithoutSymlinks, toPosixPath } from "../tree/path.js";
 import { readRootNode } from "../tree/root.js";
 import { verifyTree } from "../tree/verify.js";
+import { evictIdleSnapshots, touchSnapshot } from "./eviction.js";
 import { identityId } from "./identity.js";
 import { addManagedWorktree } from "./worktree.js";
 
@@ -111,6 +112,7 @@ function snapshot(
         CLI_ERROR_CODES.dirtyTree,
         "A cached snapshot was modified; it is preserved for recovery.",
       );
+    touchSnapshot(canonical);
     return canonical;
   });
 }
@@ -131,6 +133,7 @@ export function resolveSource(connection: Connection, sync = false, runner?: Com
   const source = connection.source;
   const repository = managedRepository(source, sync, runner);
   const root = snapshot(source, repository, runner);
+  if (sync) evictIdleSnapshots(repository, root, runner);
   const treeRoot = realDirectoryWithoutSymlinks(join(root, source.path), "Tree root");
   if (!isPathInside(root, treeRoot)) throw new Error("Tree escapes repository.");
   // A submodule or nested Git checkout cannot silently change repository ownership.
