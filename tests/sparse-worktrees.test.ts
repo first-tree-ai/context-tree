@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type CommandRunner, git } from "../src/adapters/git.js";
+import { type CommandRunner, defaultRunner, git } from "../src/adapters/git.js";
 import { atomicState, stateDirectory } from "../src/adapters/state.js";
 import { SCHEMA_VERSION, type WriteSession } from "../src/contracts/index.js";
 import { connect, connection } from "../src/operations/connections.js";
@@ -40,8 +40,11 @@ describe("managed sparse worktrees", () => {
     expect(existsSync(join(docs.treeRoot, "../handbook"))).toBe(false);
     expect(existsSync(join(handbook.treeRoot, "../docs"))).toBe(false);
     expect(existsSync(join(docs.treeRoot, "../src"))).toBe(false);
-    expect(existsSync(join(docs.treeRoot, "../code.ts"))).toBe(true);
-    expect(calls.filter((args) => args.includes("clone"))).toHaveLength(1);
+    expect(existsSync(join(docs.treeRoot, "../code.ts"))).toBe(false);
+    expect(readdirSync(join(docs.treeRoot, ".."))).toEqual([".git", "docs"]);
+    const clones = calls.filter((args) => args.includes("clone"));
+    expect(clones).toHaveLength(1);
+    expect(clones[0]).toContain("--filter=blob:none");
     const selected = connection(project, sourceSelector(project, source));
     expect(resolveSource(selected, false, runner).treeRoot).toBe(docs.treeRoot);
   });
@@ -59,6 +62,31 @@ describe("managed sparse worktrees", () => {
     expect(readFileSync(join(session.treeRoot, "NODE.md"), "utf8")).toContain("Selected");
     abortWrite(session.id, runner);
   });
+
+  it("downloads only the selected subtree's blobs from a filtering remote", () => {
+    const { project } = fixture();
+    const { remote } = setup();
+    git(remote, ["config", "uploadpack.allowFilter", "true"]);
+    const runner: CommandRunner = (command, args) =>
+      defaultRunner(command, [
+        "-c",
+        `url.file://${remote}.insteadOf=https://github.com/acme/context.git`,
+        "-c",
+        "protocol.file.allow=always",
+        ...args,
+      ]);
+    const tree = connectTree(project, source, runner);
+    expect(readFileSync(join(tree.treeRoot, "NODE.md"), "utf8")).toContain("Docs");
+    const cache = managedRepository(source, false, runner).root;
+    const blob = (path: string): string => git(remote, ["rev-parse", `main:${path}`]);
+    const present = (path: string): boolean =>
+      defaultRunner("git", ["-C", cache, "cat-file", "-e", blob(path)]).status === 0;
+    expect(git(cache, ["config", "--get", "remote.origin.promisor"])).toBe("true");
+    expect(present("docs/NODE.md")).toBe(true);
+    expect(present("src/code.ts")).toBe(false);
+    expect(present("code.ts")).toBe(false);
+    expect(present("handbook/NODE.md")).toBe(false);
+  }, 20_000);
 
   it("creates a new snapshot offline from an existing bare cache without touching a legacy snapshot", () => {
     const { home, project } = fixture();
