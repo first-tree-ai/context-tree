@@ -26,7 +26,8 @@ export function directorySource(project: string, path: string): TreeSource {
 export function connectTree(project: string, source: TreeSource, runner?: CommandRunner): ResolvedTree {
   const root = projectRoot(project, runner);
   const candidate = connectionSchema.parse({ projectRoot: root, source });
-  const resolved = resolveSource(candidate, true, runner);
+  // Connecting is explicit, so it always reads the remote head.
+  const resolved = resolveSource(candidate, true, runner, 0);
   return {
     ...resolved,
     connection: connect(
@@ -42,12 +43,18 @@ export function initTree(project: string, path: string, runner?: CommandRunner):
   // Failed attachment leaves the successfully initialized content available to connect explicitly.
   return connectTree(root, directorySource(root, treeRoot), runner);
 }
-export function syncTrees(project: string, selector?: string, offline = false, runner?: CommandRunner): SyncResult {
+export function syncTrees(
+  project: string,
+  selector?: string,
+  offline = false,
+  runner?: CommandRunner,
+  maxAgeMs?: number,
+): SyncResult {
   return {
     schemaVersion: SCHEMA_VERSION,
     connections: connections(project, selector, runner).map((entry) => {
       try {
-        return { ok: true as const, ...resolveSource(entry, !offline, runner) };
+        return { ok: true as const, ...resolveSource(entry, !offline, runner, maxAgeMs) };
       } catch (error) {
         return {
           ok: false as const,

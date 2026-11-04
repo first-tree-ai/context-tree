@@ -269,7 +269,7 @@ describe("managed Git subtrees", () => {
     if (!cached?.ok) throw new Error("Expected cached tree");
     expect(fetchCount()).toBe(before);
     expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
-    const fresh = syncTrees(project, undefined, false, runner).connections[0];
+    const fresh = syncTrees(project, undefined, false, runner, 0).connections[0];
     expect(fresh?.ok).toBe(true);
     if (!fresh?.ok) throw new Error("Expected refreshed tree");
     expect(fetchCount()).toBe(before + 1);

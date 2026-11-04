@@ -24,7 +24,7 @@ function age(path: string, ms: number): void {
 }
 
 function synced(project: string, runner: Parameters<typeof syncTrees>[3]): string {
-  const result = syncTrees(project, undefined, false, runner).connections[0];
+  const result = syncTrees(project, undefined, false, runner, 0).connections[0];
   if (!result?.ok || !result.repository) throw new Error(`Expected a synced snapshot: ${JSON.stringify(result)}`);
   return result.repository.root;
 }

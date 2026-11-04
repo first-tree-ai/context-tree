@@ -90,9 +90,17 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
     });
   select(program.command("sync"))
     .option("--offline", "use local directories and cached Git snapshots without fetching")
+    .option("--max-age <seconds>", "reuse a fetch of the same branch younger than this; 0 always fetches", "60")
     .description("Locate connected trees and refresh Git snapshots; use --offline to skip fetching.")
-    .action((options: Selection & { offline?: boolean }) => {
-      const result = syncTrees(project(options), options.tree, options.offline);
+    .action((options: Selection & { offline?: boolean; maxAge: string }) => {
+      if (!/^\d{1,6}$/u.test(options.maxAge)) throw new Error("--max-age must be a whole number of seconds.");
+      const result = syncTrees(
+        project(options),
+        options.tree,
+        options.offline,
+        undefined,
+        Number(options.maxAge) * 1000,
+      );
       if (result.connections.some((entry) => !entry.ok)) exitCode = 1;
       emit(result, true, "");
     });
