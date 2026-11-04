@@ -31,10 +31,17 @@ export function addManagedWorktree(
       { runner },
     );
     if (sparse) {
-      git(root, ["sparse-checkout", "set", "--cone", "--no-sparse-index", "--skip-checks", "--", `./${directory}`], {
-        runner,
-      });
+      git(
+        root,
+        ["sparse-checkout", "set", "--no-cone", "--no-sparse-index", "--skip-checks", "--", subtreePattern(directory)],
+        { runner },
+      );
       git(root, ["read-tree", "-mu", "HEAD"], { runner });
     }
   });
+}
+
+/** An anchored, literal sparse pattern that materializes exactly one subtree and nothing beside it. */
+export function subtreePattern(directory: string): string {
+  return `/${directory.replace(/[\\*?[\]]/gu, "\\$&")}/`;
 }
