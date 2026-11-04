@@ -2,7 +2,7 @@ import { lstatSync, realpathSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { type CommandRunner, git, gitRaw, optionalGit } from "../adapters/git.js";
-import { stateDirectory, withLock } from "../adapters/state.js";
+import { stateDirectory, withLock, withLockWait } from "../adapters/state.js";
 
 /** A superseded snapshot stays at its path for at least this long after its last use. */
 export const SNAPSHOT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -14,17 +14,28 @@ export function touchSnapshot(root: string, now: Date = new Date()): void {
   utimesSync(root, now, now);
 }
 
-/** Record a use when an explicit content root lies inside a managed snapshot; other paths are ignored. */
+/**
+ * Record a use when an explicit content root lies inside a managed snapshot; other paths are ignored.
+ *
+ * The use is recorded under the snapshot lock, which eviction holds from its final use-time
+ * check through removal, so a snapshot is either removed before this use or kept after it.
+ */
 export function touchSnapshotContaining(path: string, now: Date = new Date()): void {
+  let name: string;
   try {
     const parent = realpathSync(join(homedir(), ".context-tree", "snapshots"));
     const inside = relative(parent, realpathSync(path));
-    const name = inside.split(sep)[0] ?? "";
+    name = inside.split(sep)[0] ?? "";
     if (!inside || inside.startsWith("..") || !SNAPSHOT_NAME.test(name)) return;
-    touchSnapshot(join(parent, name), now);
   } catch {
     // Missing state or an unreadable path records no use; the read itself reports real errors.
+    return;
   }
+  const root = join(homedir(), ".context-tree", "snapshots", name);
+  withLockWait(`${root}.lock`, () => {
+    // A snapshot evicted before this use is gone; the read then reports the missing path.
+    if (lstatSync(root, { throwIfNoEntry: false })?.isDirectory()) touchSnapshot(root, now);
+  });
 }
 
 /**
@@ -61,14 +72,15 @@ export function evictIdleSnapshots(
     try {
       const real = realpathSync(path);
       if (dirname(real) !== parent || real === keep) continue;
-      // The snapshot lock excludes a concurrent resolve of this exact snapshot. The repository
-      // lock is not taken so eviction never makes a concurrent snapshot creation report busy.
-      withLock(`${path}.lock`, () => {
-        // A resolve that finished just before this lock was taken has refreshed the use time.
+      // `worktree remove` without --force also refuses modified or untracked content.
+      if (gitRaw(path, ["status", "--porcelain", "--untracked-files=all", "--ignored"], { runner }).length) continue;
+      // The snapshot lock excludes a concurrent resolve or explicit read of this exact snapshot,
+      // and is held from the final use-time check through removal. The repository lock is not
+      // taken so eviction never makes a concurrent snapshot creation report busy.
+      withLock(`${join(stateDirectory("snapshots"), basename(real))}.lock`, () => {
+        // A use recorded since the first check, including during the status check, keeps the snapshot.
         const latest = lstatSync(path, { throwIfNoEntry: false });
         if (!latest || now - latest.mtimeMs < SNAPSHOT_RETENTION_MS) return;
-        // `worktree remove` without --force also refuses modified or untracked content.
-        if (gitRaw(path, ["status", "--porcelain", "--untracked-files=all", "--ignored"], { runner }).length) return;
         git(repository.root, ["worktree", "remove", "--", path], { runner });
         evicted.push(path);
       });
