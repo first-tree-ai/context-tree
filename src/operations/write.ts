@@ -12,7 +12,14 @@ import {
 } from "../contracts/index.js";
 import { ContextTreeError } from "../errors.js";
 import { sourceSelector } from "../sources/identity.js";
-import { directoryRoot, inspectRepository, literalPathspec, resolveSource, validateTree } from "../sources/resolve.js";
+import {
+  directoryRoot,
+  inspectRepository,
+  literalPathspec,
+  recordPublished,
+  resolveSource,
+  validateTree,
+} from "../sources/resolve.js";
 import { addManagedWorktree } from "../sources/worktree.js";
 import { realDirectoryWithoutSymlinks } from "../tree/path.js";
 import { connection } from "./connections.js";
@@ -201,6 +208,7 @@ export function finishWrite(id: string, message: string, publish = false, runner
         throw new ContextTreeError(CLI_ERROR_CODES.writeOutdated, `The target advanced; session ${id} is preserved.`);
       throw error;
     }
+    recordPublished(source, repository.sha, session.commit, runner);
     const result: FinishWriteResult = {
       schemaVersion: SCHEMA_VERSION,
       outcome: "published",

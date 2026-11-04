@@ -64,7 +64,7 @@ export function managedRepository(
   maxAgeMs: number = FETCH_FRESHNESS_MS,
 ): { root: string; sha: string } {
   const parent = stateDirectory("repositories");
-  const root = join(parent, `${identityId(source.repository)}.git`);
+  const root = repositoryCacheRoot(source);
   return withLockWait(`${root}.lock`, () => {
     const expected = `https://github.com/${githubRepositoryIdentitySchema.parse(source.repository)}.git`;
     if (!lstatSync(root, { throwIfNoEntry: false })) {
@@ -96,6 +96,41 @@ export function managedRepository(
   });
 }
 
+function repositoryCacheRoot(source: Extract<TreeSource, { kind: "git" }>): string {
+  return join(stateDirectory("repositories"), `${identityId(source.repository)}.git`);
+}
+
+/**
+ * Advance the cache's remote-tracking ref to a commit this machine just pushed.
+ *
+ * The push proves the remote branch pointed at `published` at that moment, so it counts as a
+ * fresh fetch and a sync within the window resolves the published commit. The ref moves only
+ * from `previous` (compare-and-swap under the cache lock). If the ref holds anything else, its
+ * fetch record is dropped so the next sync fetches instead of trusting the cache.
+ */
+export function recordPublished(
+  source: Extract<TreeSource, { kind: "git" }>,
+  previous: string,
+  published: string,
+  runner?: CommandRunner,
+): void {
+  const root = repositoryCacheRoot(source);
+  withLockWait(`${root}.lock`, () => {
+    const ref = `refs/remotes/origin/${source.ref}`;
+    const current = optionalGit(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], runner);
+    if (current === published) return recordFetch(root, ref);
+    if (current === previous) {
+      try {
+        git(root, ["update-ref", "-m", "context-tree: publish", ref, published, previous], { runner });
+        return recordFetch(root, ref);
+      } catch {
+        // The ref moved concurrently; the next sync fetches rather than trusting it.
+      }
+    }
+    forgetFetch(root, ref);
+  });
+}
+
 /** Fetch times per remote-tracking ref, shared by every process using this cache. */
 function fetchState(root: string): string {
   return `${root}.fetched.json`;
@@ -112,15 +147,21 @@ function fetchedRecently(root: string, ref: string, maxAgeMs: number, runner?: C
   if (typeof at !== "number" || !(Date.now() - at < maxAgeMs && at <= Date.now())) return false;
   return optionalGit(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], runner) !== undefined;
 }
-function recordFetch(root: string, ref: string): void {
-  let fetched: Record<string, unknown> = {};
+function fetchRecords(root: string): Record<string, unknown> {
   try {
     const state = readState(fetchState(root));
-    if (state && typeof state === "object" && !Array.isArray(state)) fetched = { ...state };
+    if (state && typeof state === "object" && !Array.isArray(state)) return { ...state };
   } catch {
     // An unreadable record is replaced.
   }
-  atomicState(fetchState(root), { ...fetched, [ref]: Date.now() });
+  return {};
+}
+function recordFetch(root: string, ref: string): void {
+  atomicState(fetchState(root), { ...fetchRecords(root), [ref]: Date.now() });
+}
+function forgetFetch(root: string, ref: string): void {
+  const { [ref]: _forgotten, ...rest } = fetchRecords(root);
+  atomicState(fetchState(root), rest);
 }
 
 function snapshot(
