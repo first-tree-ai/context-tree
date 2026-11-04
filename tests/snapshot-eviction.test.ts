@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { git } from "../src/adapters/git.js";
 import { withLock } from "../src/adapters/state.js";
 import { connectTree, syncTrees } from "../src/operations/trees.js";
 import { abortWrite, prepareWrite } from "../src/operations/write.js";
-import { SNAPSHOT_RETENTION_MS } from "../src/sources/eviction.js";
+import { SNAPSHOT_RETENTION_MS, touchSnapshotContaining } from "../src/sources/eviction.js";
 import { commit, node, remoteFixture, useFixture } from "./helpers.js";
 
 const fixture = useFixture();
@@ -81,5 +81,18 @@ describe("snapshot eviction", () => {
     age(first, 2 * SNAPSHOT_RETENTION_MS);
     syncTrees(project, undefined, true, runner);
     expect(existsSync(first)).toBe(true);
+  });
+
+  it("records a use when reading an explicit path inside a snapshot", () => {
+    const { project, home } = fixture();
+    const { runner } = remoteFixture(home);
+    const tree = connectTree(project, source, runner);
+    const root = tree.repository?.root ?? "";
+    age(root, 2 * SNAPSHOT_RETENTION_MS);
+    touchSnapshotContaining(join(tree.treeRoot, "NODE.md"));
+    expect(Date.now() - statSync(root).mtimeMs).toBeLessThan(SNAPSHOT_RETENTION_MS);
+    age(root, 2 * SNAPSHOT_RETENTION_MS);
+    touchSnapshotContaining(project);
+    expect(Date.now() - statSync(root).mtimeMs).toBeGreaterThan(SNAPSHOT_RETENTION_MS);
   });
 });

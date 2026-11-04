@@ -9,6 +9,7 @@ import { cleanupLogs, cleanupStatus, removeCleanup, runCleanup, scheduleCleanup 
 import { connection, disconnect } from "../operations/connections.js";
 import { connectTree, directorySource, initTree, syncTrees } from "../operations/trees.js";
 import { abortWrite, finishWrite, prepareWrite } from "../operations/write.js";
+import { touchSnapshotContaining } from "../sources/eviction.js";
 import { sourceSelector } from "../sources/identity.js";
 import { projectRoot } from "../sources/project.js";
 import { resolveSource } from "../sources/resolve.js";
@@ -111,6 +112,7 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
       const root = options.treePath
         ? resolve(io.cwd(), options.treePath)
         : resolveSource(connection(project(options), options.tree)).treeRoot;
+      if (options.treePath) touchSnapshotContaining(root);
       if (name === "read") {
         const result = readTree(root, path);
         emit(result, options.json, formatRead(result));

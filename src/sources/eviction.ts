@@ -1,5 +1,6 @@
 import { lstatSync, realpathSync, utimesSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { type CommandRunner, git, gitRaw, optionalGit } from "../adapters/git.js";
 import { stateDirectory, withLock } from "../adapters/state.js";
 
@@ -11,6 +12,19 @@ const SNAPSHOT_NAME = /^[a-f0-9]{64}-[a-f0-9]{40,64}$/u;
 /** Record a use; eviction measures idleness from the snapshot directory's modification time. */
 export function touchSnapshot(root: string, now: Date = new Date()): void {
   utimesSync(root, now, now);
+}
+
+/** Record a use when an explicit content root lies inside a managed snapshot; other paths are ignored. */
+export function touchSnapshotContaining(path: string, now: Date = new Date()): void {
+  try {
+    const parent = realpathSync(join(homedir(), ".context-tree", "snapshots"));
+    const inside = relative(parent, realpathSync(path));
+    const name = inside.split(sep)[0] ?? "";
+    if (!inside || inside.startsWith("..") || !SNAPSHOT_NAME.test(name)) return;
+    touchSnapshot(join(parent, name), now);
+  } catch {
+    // Missing state or an unreadable path records no use; the read itself reports real errors.
+  }
 }
 
 /**
