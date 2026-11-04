@@ -16,6 +16,11 @@ never traverse symlinks or leave the worktree.
   members does not make personal preferences shared policy. Avoid cosmetic
   rewrites, invented decisions, new top-level domains, and structure without a
   retrieval benefit. Preserve uncertain claims; report unresolved contradictions.
+- Keep sections or pages that start with `> **Planned — not yet implemented.**
+  Tracking: <issue>`; they are decisions awaiting implementation, not stale
+  status. Do not delete or rewrite them or their markers. Checking the tracking
+  issue's state is the only permitted outside lookup; if it is closed, report the
+  page and issue. If you cannot check, leave the marker unreported.
 - Update indexes, incoming links, and links inside moved documents.
   `soft_links` are tree-root-relative; other relative links start at the containing
   document. Preserve required frontmatter and each directory's `NODE.md`.

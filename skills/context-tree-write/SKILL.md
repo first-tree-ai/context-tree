@@ -7,6 +7,8 @@ description: Persist durable project knowledge or useful agent memory to a conne
 
 Save decisions, constraints, rationale, and reusable lessons. Skip task transcripts, generic advice, temporary status, and details already easy to recover from code. Select the connection and narrowest useful existing location; do not duplicate knowledge across trees.
 
+Record a decision once it is made, even before code implements it. Describe the target state, and make the first line of the decided section (or of the page, when all of it is unimplemented) `> **Planned — not yet implemented.** Tracking: <issue link or #number>`. Where it conflicts with current behavior, say what it replaces and keep the current description until implementation lands. The tracking issue lists the pages to update; the implementing change removes the marker and rewrites the text as current behavior. Use no other marker form or frontmatter key.
+
 Run from the target project. Select a source declared in `.context-tree.json`; omit `--tree` when only one is connected.
 
 - **Directory:** run `context-tree sync --offline --tree <name-or-source>`, edit the returned `treeRoot`, then run `context-tree verify --tree-path <treeRoot> --json`. Use the project's normal commit workflow when authorized.
