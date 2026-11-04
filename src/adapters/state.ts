@@ -122,6 +122,28 @@ export function withLock<T>(path: string, operation: () => T): T {
     release();
   }
 }
+/** Wait for a live owner to release `path` instead of failing as busy; dead owners are reclaimed. */
+export function withLockWait<T>(path: string, operation: () => T, timeoutMs: number = LOCK_WAIT_MS): T {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let release: (() => void) | undefined;
+    try {
+      release = acquireLock(path);
+    } catch (error) {
+      if (!(error instanceof ContextTreeError && error.code === CLI_ERROR_CODES.busy) || Date.now() >= deadline)
+        throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+      continue;
+    }
+    try {
+      return operation();
+    } finally {
+      release();
+    }
+  }
+}
+/** Long enough for a concurrent clone or fetch of the same repository to finish. */
+export const LOCK_WAIT_MS = 120_000;
 export async function withAsyncLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
   const release = acquireLock(path);
   try {
