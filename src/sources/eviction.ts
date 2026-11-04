@@ -50,6 +50,9 @@ export function evictIdleSnapshots(
       // The snapshot lock excludes a concurrent resolve of this exact snapshot. The repository
       // lock is not taken so eviction never makes a concurrent snapshot creation report busy.
       withLock(`${path}.lock`, () => {
+        // A resolve that finished just before this lock was taken has refreshed the use time.
+        const latest = lstatSync(path, { throwIfNoEntry: false });
+        if (!latest || now - latest.mtimeMs < SNAPSHOT_RETENTION_MS) return;
         // `worktree remove` without --force also refuses modified or untracked content.
         if (gitRaw(path, ["status", "--porcelain", "--untracked-files=all", "--ignored"], { runner }).length) return;
         git(repository.root, ["worktree", "remove", "--", path], { runner });
