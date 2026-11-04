@@ -26,6 +26,18 @@ function setup(): ReturnType<typeof remoteFixture> {
   return remote;
 }
 
+function filteringRunner(remote: string): CommandRunner {
+  git(remote, ["config", "uploadpack.allowFilter", "true"]);
+  return (command, args) =>
+    defaultRunner(command, [
+      "-c",
+      `url.file://${remote}.insteadOf=https://github.com/acme/context.git`,
+      "-c",
+      "protocol.file.allow=always",
+      ...args,
+    ]);
+}
+
 describe("managed sparse worktrees", () => {
   it("separates snapshots by subtree and reuses the same path and commit across refs", () => {
     const { project } = fixture();
@@ -44,7 +56,7 @@ describe("managed sparse worktrees", () => {
     expect(readdirSync(join(docs.treeRoot, ".."))).toEqual([".git", "docs"]);
     const clones = calls.filter((args) => args.includes("clone"));
     expect(clones).toHaveLength(1);
-    expect(clones[0]).toContain("--filter=blob:none");
+    expect(clones[0]).toContain("--filter=tree:0");
     const selected = connection(project, sourceSelector(project, source));
     expect(resolveSource(selected, false, runner).treeRoot).toBe(docs.treeRoot);
   });
@@ -63,18 +75,10 @@ describe("managed sparse worktrees", () => {
     abortWrite(session.id, runner);
   });
 
-  it("downloads only the selected subtree's blobs from a filtering remote", () => {
+  it("downloads only the selected subtree from a filtering remote", () => {
     const { project } = fixture();
     const { remote } = setup();
-    git(remote, ["config", "uploadpack.allowFilter", "true"]);
-    const runner: CommandRunner = (command, args) =>
-      defaultRunner(command, [
-        "-c",
-        `url.file://${remote}.insteadOf=https://github.com/acme/context.git`,
-        "-c",
-        "protocol.file.allow=always",
-        ...args,
-      ]);
+    const runner = filteringRunner(remote);
     const tree = connectTree(project, source, runner);
     expect(readFileSync(join(tree.treeRoot, "NODE.md"), "utf8")).toContain("Docs");
     const cache = managedRepository(source, false, runner).root;
@@ -82,11 +86,49 @@ describe("managed sparse worktrees", () => {
     const present = (path: string): boolean =>
       defaultRunner("git", ["-C", cache, "cat-file", "-e", blob(path)]).status === 0;
     expect(git(cache, ["config", "--get", "remote.origin.promisor"])).toBe("true");
+    expect(git(cache, ["config", "--get", "remote.origin.partialclonefilter"])).toBe("tree:0");
     expect(present("docs/NODE.md")).toBe(true);
     expect(present("src/code.ts")).toBe(false);
     expect(present("code.ts")).toBe(false);
     expect(present("handbook/NODE.md")).toBe(false);
-  }, 20_000);
+  }, 30_000);
+
+  it("commits, publishes, and preserves a rejected push through a treeless cache", () => {
+    const { project } = fixture();
+    const { remote, seed } = setup();
+    const runner = filteringRunner(remote);
+    connectTree(project, source, runner);
+    const base = git(remote, ["rev-parse", "main"]);
+    const outside = (ref: string): string[] =>
+      git(remote, ["ls-tree", "-r", ref])
+        .split("\n")
+        .filter((line) => !line.split("\t")[1]?.startsWith("docs/"));
+
+    const first = prepareWrite(project, undefined, runner);
+    expect(readdirSync(first.worktreeRoot).sort()).toEqual([".git", "docs"]);
+    writeFileSync(join(first.treeRoot, "choice.md"), node("Choice"));
+    expect(finishWrite(first.id, "Record choice", true, runner).outcome).toBe("published");
+    expect(git(remote, ["show", "main:docs/choice.md"])).toContain("Choice");
+    expect(outside("main")).toEqual(outside(base));
+
+    const second = prepareWrite(project, undefined, runner);
+    writeFileSync(join(second.treeRoot, "later.md"), node("Later"));
+    git(seed, ["pull", "--quiet", remote, "main"]);
+    writeFileSync(join(seed, "docs/concurrent.md"), node("Concurrent"));
+    commit(seed);
+    git(seed, ["push", remote, "main"]);
+    expect(() => finishWrite(second.id, "Record later", true, runner)).toThrow(
+      expect.objectContaining({ code: "WRITE_OUTDATED" }),
+    );
+    expect(loadWriteSession(second.id).commit).not.toBeNull();
+    expect(readFileSync(join(second.treeRoot, "later.md"), "utf8")).toContain("Later");
+
+    const retry = prepareWrite(project, undefined, runner);
+    expect(existsSync(join(retry.treeRoot, "concurrent.md"))).toBe(true);
+    writeFileSync(join(retry.treeRoot, "later.md"), node("Later"));
+    expect(finishWrite(retry.id, "Record later", true, runner).outcome).toBe("published");
+    expect(git(remote, ["show", "main:docs/later.md"])).toContain("Later");
+  }, 30_000);
 
   it("creates a new snapshot offline from an existing bare cache without touching a legacy snapshot", () => {
     const { home, project } = fixture();
