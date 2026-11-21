@@ -16,10 +16,10 @@ A tree is useful only while it is fresh: readers search for a subject and trust 
 - Node text carries no PR numbers, dates, or delivery status; Git and pull requests keep those. Actionable future work belongs in an issue, not in the tree.
 - Before editing, read the root and nearby indexes, then find and read the node that already covers the topic. Update it rather than adding a parallel one; add a node only when the topic has its own identity.
 - When a decision spans two areas, keep it in the more specific one and link to it from the other.
-- Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
+- Leave the area you touch better than you found it. People rarely read the tree, so structure is the agents' job: around your edit, split, merge, move, retitle, fix descriptions, and remove stale or historical text on your own, without rewriting unrelated parts of the tree.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
 - As long as the information stays well structured and token-efficient, each team decides where information goes and how its tree is structured. Follow the conventions the tree's root describes.
-- Help the team shape its tree as you write. When a write meets a structural question the root does not settle (no fitting area, recurring doubt about placement, a node outgrowing its siblings, a missing convention), propose an option to the person; once they agree, record it in the root so later agents follow it. Do not silently invent team conventions.
+- Ask a person only for choices the root reserves for people, or for a genuinely team-level convention the root does not settle; record what they agree in the root so later agents follow it.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
 ## Keep the tree balanced
