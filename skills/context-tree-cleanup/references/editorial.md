@@ -11,6 +11,8 @@ or edit outside the worktree.
 
 - Remove noise, redundant history, obsolete task logs, and implementation
   walkthroughs. Preserve decisions, unique rationale, constraints, and qualifications.
+- Remove raw logs, raw meeting notes, and transcripts after distilling any
+  settled decision they hold into its topic node.
 - Fold changelog, decision-log, and meeting-log sections into the topic nodes
   they concern as current state, drop history and claims that a newer settled
   decision replaced, and split nodes far larger than their siblings by topic. When it is

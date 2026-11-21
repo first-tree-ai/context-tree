@@ -11,6 +11,7 @@ Save decisions, constraints, rationale, and reusable lessons so a future agent c
 
 A tree is useful only while it is fresh: readers search for a subject and trust what they find. Record what holds now and why. History is low-density information that readers must replay to learn what still holds, and it leaves replaced decisions looking current, so changelogs, decision logs, and meeting logs do not belong in the tree; Git and the source records keep them. Each decision belongs on the node for its subject, which keeps lookups short and updates in one place.
 
+- Do not record history, raw logs, or raw meeting notes and transcripts. Distill what they settled into the topic nodes they concern, as current state.
 - Before editing, read the root and nearby indexes, then find and read the node that already covers the topic. Update it rather than adding a parallel one; add a node only when the topic has its own identity.
 - Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
