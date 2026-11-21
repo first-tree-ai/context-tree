@@ -28,7 +28,7 @@ Run from the target project. Select a source declared in `.context-tree.json`; o
 - **Directory:** run `context-tree sync --offline --tree <name-or-source>`, edit the returned `treeRoot`, then run `context-tree verify --tree-path <treeRoot> --json`. Use the project's normal commit workflow when authorized.
 - **Git source or requested review branch:** run `context-tree write prepare --tree <name-or-source>` directly; it fetches Git sources and requires a committed revision and clean subtree. Save the session `id`, edit only its `treeRoot`, then run `context-tree write finish <id> --message "Describe the durable update"` to validate and retain a review commit.
 
-Preserve other authors' content and uncertainty. Put personal memory under the correct `members/<member>/` subtree; avoid inferring an identity. Never follow symlinks.
+Preserve other authors' content and uncertainty. Never follow symlinks.
 
 Each content directory needs `NODE.md`; every Markdown document needs a YAML `title`. Only the root has `schemaVersion: 1`. Optional `description` summarizes content; `soft_links` are tree-root-relative. Keep indexes and links consistent after moves.
 

@@ -1,6 +1,6 @@
 ---
 name: context-tree-cleanup
-description: Remove noise, consolidate duplicates, and improve placement throughout a connected Context Tree, including every member directory. Use for an explicit cleanup request or a host-scheduled cleanup pass.
+description: Remove noise, consolidate duplicates, and improve placement throughout a connected Context Tree. Use for an explicit cleanup request or a host-scheduled cleanup pass.
 ---
 
 # Context Tree Cleanup
