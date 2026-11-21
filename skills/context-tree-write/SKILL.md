@@ -17,6 +17,14 @@ Readers search for a subject and trust what they find. Each decision belongs on 
 - Follow the organization and writing conventions the tree's root describes.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
+## When a node grows
+
+Every reader pays for a whole page to use part of it, so a page should hold one topic a reader needs as a unit. Split when the page has become hard to scan, when it holds several topics a reader would want separately, or when other nodes need to link to one part of it; not before, because premature structure costs more than missing structure.
+
+- Give each topic its own node with a noun-phrase title and a description that lets a reader decide from the index whether to open it.
+- Keep a short summary and the links in the parent. A topic with several cohesive pages of its own becomes a directory with a `NODE.md` index.
+- Move content rather than copying it, and fix indexes, `soft_links`, and incoming links in the same change.
+
 ## Planned decisions
 
 Record a decision once it is made, even before code implements it. Describe the target state, and make the first line of the decided section (or of the page, when all of it is unimplemented) `> **Planned — not yet implemented.** Tracking: <issue link or #number>`. Where it conflicts with current behavior, say what it replaces and keep the current description until implementation lands. The tracking issue lists the pages to update; the implementing change removes the marker and rewrites the text as current behavior. Use no other marker form or frontmatter key.
