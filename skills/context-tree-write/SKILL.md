@@ -5,15 +5,18 @@ description: Persist durable project knowledge or useful agent memory to a conne
 
 # Context Tree Write
 
-Save decisions, constraints, rationale, and reusable lessons so a future agent can find what holds now. Skip task transcripts, generic advice, temporary status, and details already easy to recover from code. Select the connection and narrowest useful existing location; do not duplicate knowledge across trees.
+Save decisions, constraints, rationale, and reusable lessons so a future agent can find what holds now. Write what a future agent must respect when deciding, and what would still hold if the implementation were rewritten; details that rot with the next refactor stay in the code. Skip task transcripts, generic advice, temporary status, and details already easy to recover from code. Select the connection and narrowest useful existing location; do not duplicate knowledge across trees.
 
 ## Current state, organized by topic
 
 A tree is useful only while it is fresh: readers search for a subject and trust what they find. Record what holds now and why. History is low-density information that readers must replay to learn what still holds, and it leaves replaced decisions looking current, so changelogs, decision logs, and meeting logs do not belong in the tree; Git and the source records keep them. Each decision belongs on the node for its subject, which keeps lookups short and updates in one place.
 
 - Do not record history, raw logs, or raw meeting notes and transcripts. Distill what they settled into the topic nodes they concern, as current state.
+- Record only what was settled: not proposals still under discussion, guesses, or your own unconfirmed inferences, and never secrets. Do not turn a one-off request into a standing rule.
+- Node text carries no PR numbers, dates, or delivery status; Git and pull requests keep those. Actionable future work belongs in an issue, not in the tree.
 - Before editing, read the root and nearby indexes, then find and read the node that already covers the topic. Update it rather than adding a parallel one; add a node only when the topic has its own identity.
-- Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
+- When a decision spans two areas, keep it in the more specific one and link to it from the other.
+- Keep the edit as narrow as the decision, and keep one decision per change so it can be reviewed and reverted on its own. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
 - Follow the organization and writing conventions the tree's root describes.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
