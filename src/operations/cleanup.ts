@@ -207,7 +207,11 @@ export async function runCleanup(
         await (dependencies.agent ?? runAgent)(
           config,
           session.treeRoot,
-          `${editorial}\n\nEdit only this tree directory. Do not stage, commit, publish, or invoke lifecycle commands. Report unresolved issues outside tree files.`,
+          [
+            editorial,
+            `The principles to apply are in ${resolvePackagedResource("skills", "context-tree-write", "SKILL.md")} and ${resolvePackagedResource("skills", "context-tree-read", "SKILL.md")}; read them first. Their command steps do not apply to this run.`,
+            "Edit only this tree directory. Do not stage, commit, publish, or invoke lifecycle commands. Report unresolved issues outside tree files.",
+          ].join("\n\n"),
           controller.signal,
           undefined,
           (source, text) => history.event(source, text),
