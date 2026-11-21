@@ -1,6 +1,6 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, posix, relative, resolve } from "node:path";
-
+import { fromMarkdown } from "mdast-util-from-markdown";
 import {
   type ContextTreeReadChild,
   type ContextTreeReadHeading,
@@ -9,6 +9,7 @@ import {
   SCHEMA_VERSION,
 } from "../contracts/index.js";
 import { classifyContextContent } from "./content-class.js";
+
 import { readNodeDocument, readUtf8File } from "./document.js";
 import { isPathInside, resolveTreeRoot, toPosixPath } from "./path.js";
 import { readRootNode } from "./root.js";
@@ -61,24 +62,32 @@ export type ReadTreeOptions = {
   section?: string;
 };
 
-const HEADING = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u;
-const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})/u;
+type MarkdownNode = {
+  type: string;
+  depth?: number;
+  value?: string;
+  children?: MarkdownNode[];
+  position?: { start: { line: number } };
+};
 
-/** Headings outside fenced code, with 1-based line numbers in the whole file. */
+function plainText(node: MarkdownNode): string {
+  if (typeof node.value === "string") return node.value;
+  return (node.children ?? []).map(plainText).join("");
+}
+
+/** Headings as parsed by the Markdown parser (ATX, indented, Setext), with 1-based file line numbers. */
 function outlineOf(lines: readonly string[], firstLine: number): ContextTreeReadHeading[] {
+  const root = fromMarkdown(lines.join("\n")) as MarkdownNode;
   const headings: ContextTreeReadHeading[] = [];
-  let fence: string | null = null;
-  lines.forEach((text, index) => {
-    const marker = FENCE.exec(text)?.[1];
-    if (marker !== undefined) {
-      if (fence === null) fence = marker;
-      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+  const visit = (node: MarkdownNode): void => {
+    if (node.type === "heading" && node.depth !== undefined && node.position) {
+      const title = plainText(node).trim();
+      if (title.length > 0) headings.push({ level: node.depth, line: firstLine - 1 + node.position.start.line, title });
       return;
     }
-    if (fence !== null) return;
-    const match = HEADING.exec(text);
-    if (match?.[1] && match[2]) headings.push({ level: match[1].length, line: firstLine + index, title: match[2] });
-  });
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(root);
   return headings;
 }
 

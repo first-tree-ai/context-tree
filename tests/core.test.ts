@@ -245,6 +245,45 @@ describe("indexed reading", () => {
     expect(() => readTree(root, "guide.md", { full: true, section: "Setup" })).toThrow(/--full or --section/u);
   });
 
+  it("outlines headings the way the Markdown parser reads them", () => {
+    const root = join(tempRoot(), "outline-forms");
+    cpSync(join(FIXTURES, "valid"), root, { recursive: true });
+    writeFileSync(
+      join(root, "forms.md"),
+      [
+        "---",
+        'title: "Forms"',
+        "---",
+        "",
+        "## C#",
+        "",
+        "````markdown",
+        "```js",
+        "## Fake",
+        "```",
+        "````",
+        "",
+        "  ## Indented",
+        "",
+        "Setext",
+        "------",
+        "",
+        "Body.",
+        "",
+        "## Real",
+        "",
+        "Last.",
+        "",
+      ].join("\n"),
+    );
+    const outline = readTree(root, "forms.md").node.outline;
+    expect(outline.map((heading) => heading.title)).toEqual(["C#", "Indented", "Setext", "Real"]);
+    expect(outline.map((heading) => heading.line)).toEqual([5, 13, 15, 20]);
+    expect(readTree(root, "forms.md", { section: "C#" }).node.body).toContain("## Fake");
+    expect(readTree(root, "forms.md", { section: "setext" }).node.body).toContain("Body.");
+    expect(readTree(root, "forms.md", { section: "Real" }).node.body).toContain("Last.");
+  });
+
   it("returns a selected body and immediate child summaries", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
