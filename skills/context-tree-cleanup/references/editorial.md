@@ -11,8 +11,9 @@ or edit outside the worktree.
 
 - Remove noise, redundant history, obsolete task logs, and implementation
   walkthroughs. Preserve decisions, unique rationale, constraints, and qualifications.
-- Fold dated log, meeting, and changelog sections into the topic nodes they
-  concern, and remove claims that a newer settled decision replaced. When it is
+- Fold changelog, decision-log, and meeting-log sections into the topic nodes
+  they concern as current state, drop history and claims that a newer settled
+  decision replaced, and split nodes far larger than their siblings by topic. When it is
   unclear which claim is newer, keep both and report the conflict.
 - Consolidate duplicates and move misplaced content to the narrowest suitable
   existing location. Preserve intended audience and ownership; do not turn

@@ -7,9 +7,9 @@ description: Persist durable project knowledge or useful agent memory to a conne
 
 Save decisions, constraints, rationale, and reusable lessons so a future agent can find what holds now. Skip task transcripts, generic advice, temporary status, and details already easy to recover from code. Select the connection and narrowest useful existing location; do not duplicate knowledge across trees.
 
-## Organize by topic, not by time
+## Current state, organized by topic
 
-Readers search for a subject and trust what they find. Each decision belongs on the node for its subject; a dated log, meeting, or changelog page makes readers replay history to learn what still holds, and leaves replaced decisions looking current.
+A tree is useful only while it is fresh: readers search for a subject and trust what they find. Record what holds now and why. History is low-density information that readers must replay to learn what still holds, and it leaves replaced decisions looking current, so changelogs, decision logs, and meeting logs do not belong in the tree; Git and the source records keep them. Each decision belongs on the node for its subject, which keeps lookups short and updates in one place.
 
 - Before editing, read the root and nearby indexes, then find and read the node that already covers the topic. Update it rather than adding a parallel one; add a node only when the topic has its own identity.
 - Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
@@ -17,9 +17,9 @@ Readers search for a subject and trust what they find. Each decision belongs on 
 - Follow the organization and writing conventions the tree's root describes.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
-## When a node grows
+## Keep the tree balanced
 
-Every reader pays for a whole page to use part of it, so a page should hold one topic a reader needs as a unit. Split when the page has become hard to scan, when it holds several topics a reader would want separately, or when other nodes need to link to one part of it; not before, because premature structure costs more than missing structure.
+Keep information spread evenly: no node should be far larger or denser than its siblings. Every reader pays for a whole page to use part of it, and an oversized node hides what it holds from the index, so a page should hold one topic a reader needs as a unit. Split when the page has become hard to scan, when it holds several topics a reader would want separately, or when other nodes need to link to one part of it; not before, because premature structure costs more than missing structure.
 
 - Give each topic its own node with a noun-phrase title and a description that lets a reader decide from the index whether to open it.
 - Keep a short summary and the links in the parent. A topic with several cohesive pages of its own becomes a directory with a `NODE.md` index.
