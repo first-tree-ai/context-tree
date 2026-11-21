@@ -9,7 +9,7 @@ Run from the target project's root: `context-tree init <directory> --json`. The 
 
 This adds a root `NODE.md` and a declaration in `.context-tree.json`. Existing content must already satisfy the tree format; initialization never converts or overwrites documents. If validation fails, inspect the findings and prepare a targeted conversion only within the user's request.
 
-Edit the returned `treeRoot`'s `NODE.md` to explain the tree's scope and navigation.
+Edit the returned `treeRoot`'s `NODE.md` to explain the tree's scope and navigation. Propose an initial map of areas and the few conventions that matter, agree them with the person, and record them in the root.
 
 Run `context-tree verify --tree-path <treeRoot> --json`. Commit through the project's normal workflow when authorized. Initialization does not create a repository, commit, push, or alter project instructions.
 

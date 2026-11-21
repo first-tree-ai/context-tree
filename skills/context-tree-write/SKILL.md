@@ -19,6 +19,7 @@ A tree is useful only while it is fresh: readers search for a subject and trust 
 - Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
 - As long as the information stays well structured and token-efficient, each team decides where information goes and how its tree is structured. Follow the conventions the tree's root describes.
+- Help the team shape its tree as you write. When a write meets a structural question the root does not settle (no fitting area, recurring doubt about placement, a node outgrowing its siblings, a missing convention), propose an option to the person; once they agree, record it in the root so later agents follow it. Do not silently invent team conventions.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
 ## Keep the tree balanced
