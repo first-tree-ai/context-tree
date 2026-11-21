@@ -7,9 +7,9 @@ Read the root and every index, then the content the review needs. You may read s
 ## Two modes
 
 - **Daily tidy:** review what changed since the previous cleanup, in the tree and in the related repositories its root lists (merged pull requests and commits). Bring in durable decisions and behavior changes that never reached the tree, fix claims those changes made stale, and tidy the areas involved.
-- **Structural review:** less often, or when the tree shows the need (several oversized nodes, repeated doubt about placement, an area that has outgrown its parent), look at the whole structure and reorganize areas, splits, and merges for retrieval.
+- **Structural review:** at the end of each tidy, judge from signals whether the whole structure needs a review, and do it then: reorganize areas, splits, and merges for retrieval. Signals include siblings far apart in size or one area growing much faster than the rest, the same kind of content repeatedly misplaced or moved, many nodes changed since the last structural review, topics scattered across areas or reachable only through many hops, and recent code changes opening a direction the tree has no place for. If none has happened for a long time, do one anyway.
 
-The tree's root sets the cadence and lists the related repositories; without them, tidy daily and review the structure when the signals appear.
+The tree's root lists the related repositories and may say how long is too long between structural reviews.
 
 ## What to look for
 
