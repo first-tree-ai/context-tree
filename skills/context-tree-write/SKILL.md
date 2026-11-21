@@ -19,7 +19,7 @@ A tree is useful only while it is fresh: readers search for a subject and trust 
 - A tree's structure grows as the team works, shaped by what it does first and what it prefers; grow it with the people on purpose rather than imposing a layout. Leave the area you touch better than you found it. People rarely read the tree, so structure is the agents' job: around your edit, split, merge, move, retitle, fix descriptions, and remove stale or historical text on your own, without rewriting unrelated parts of the tree.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
 - As long as the information stays well structured and token-efficient, each team decides where information goes and how its tree is structured. Follow the conventions the tree's root describes.
-- Act on clear improvements yourself. When you are unsure how an update should land (placement, structure, or whether it is settled), raise it with the person proactively and propose how to do it. Choices the root reserves for people, and team-level conventions it does not settle, go to a person too; record what they agree in the root so later agents follow it.
+- Structure is yours to decide: placement, splitting, naming. Ask people only about substance, in their terms, and proactively with your own judgment for them to confirm: is this settled, is it a lasting rule or a one-off, and which wins when it conflicts with an earlier claim. Choices the root reserves for people go to them as well; record what they agree in the root.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
 ## Keep the tree balanced
