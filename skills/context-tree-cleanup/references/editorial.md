@@ -13,6 +13,9 @@ or edit outside the worktree.
 - Remove noise, redundant history, obsolete task logs, and implementation
   walkthroughs. Preserve decisions, unique rationale, constraints, qualifications,
   and useful member working memory, including active work and personal context.
+- Fold dated log, meeting, and changelog sections into the topic nodes they
+  concern, and remove claims that a newer settled decision replaced. When it is
+  unclear which claim is newer, keep both and report the conflict.
 - Consolidate duplicates and move misplaced content to the narrowest suitable
   existing location. Preserve intended audience and ownership; access to all
   members does not make personal preferences shared policy. Avoid cosmetic
