@@ -19,8 +19,10 @@ This creates a tree in `docs/` and connects it to your project.
 Read its index:
 
 ```sh
-context-tree read
+context-tree read --full
 ```
+
+Without `--full`, `read` prints a node's title, description, heading outline with line numbers, and child summaries; `--section <heading>` prints one section.
 
 Edit the Markdown yourself or ask your agent to update it. Check your changes with `context-tree verify`, then commit them with your code.
 

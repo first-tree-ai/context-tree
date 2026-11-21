@@ -25,9 +25,9 @@ Keep the `treeRoot` each successful result returned for the rest of the task, so
 
 Read as much as the decision at hand needs, and judge for yourself how to find it. Missing a recorded constraint costs a wrong decision; reading pages that do not bear on the task costs context.
 
-- Read each tree's root first with `context-tree read --tree-path <treeRoot>`. It is short, maps the domains, and often says how that tree is organized and maintained.
-- Then find the relevant nodes the way that suits the task: search `treeRoot` with `rg` or `grep` for the task's names and terms, or walk down with `context-tree read <path> --tree-path <treeRoot>`, which shows an index and its children's titles and descriptions.
-- Decide from titles and descriptions whether a page is worth opening. In a long page, locate the sections that matter (for example `rg -n`) and read those rather than the whole file. Follow a `soft_link` when it bears on the decision.
+- Read each tree's root first, in full, with `context-tree read --tree-path <treeRoot> --full`. It is short, maps the domains, and often says how that tree is organized and maintained.
+- Then find the relevant nodes the way that suits the task: search `treeRoot` with `rg` or `grep` for the task's names and terms, or walk down with `context-tree read <path> --tree-path <treeRoot>`. By default `read` returns a node's title, description, heading outline with line numbers, and its children's titles and descriptions, not the body.
+- Decide from titles, descriptions, and outlines what to open. Add `--section <heading>` to read one section, or `--full` when the whole page matters. Follow a `soft_link` when it bears on the decision.
 - Stop once you have the decisions and constraints that govern what you are about to do.
 - When you notice a structural or freshness problem in what you read, fix it in passing if it is small and the task allows writing; otherwise leave it to the cleanup review.
 

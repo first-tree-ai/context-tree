@@ -162,7 +162,7 @@ describe("verification", () => {
     expect(findings).toContainEqual(expect.objectContaining({ code: "TREE_SYMLINK_UNSUPPORTED", path: "regular.md" }));
   });
 
-  it("requires NODE.md in normal and member directories", () => {
+  it("requires NODE.md in every content directory", () => {
     const root = validTree();
     mkdirSync(join(root, "members/bob"), { recursive: true });
     writeFileSync(join(root, "members/bob/notes.md"), node("Notes"));
@@ -193,20 +193,72 @@ describe("verification", () => {
 });
 
 describe("indexed reading", () => {
+  it("returns metadata and a line-numbered outline by default, and one section on request", () => {
+    const root = join(tempRoot(), "outline");
+    cpSync(join(FIXTURES, "valid"), root, { recursive: true });
+    writeFileSync(
+      join(root, "guide.md"),
+      [
+        "---",
+        'title: "Guide"',
+        'description: "How the guide works."',
+        "---",
+        "",
+        "# Guide",
+        "",
+        "## Setup",
+        "",
+        "Install it.",
+        "",
+        "```md",
+        "## Not a heading",
+        "```",
+        "",
+        "### Details",
+        "",
+        "More setup.",
+        "",
+        "## Usage",
+        "",
+        "Run it.",
+        "",
+      ].join("\n"),
+    );
+
+    const outline = readTree(root, "guide.md").node;
+    expect(outline.body).toBeUndefined();
+    expect(outline.lineCount).toBe(22);
+    expect(outline.outline).toEqual([
+      { level: 1, line: 6, title: "Guide" },
+      { level: 2, line: 8, title: "Setup" },
+      { level: 3, line: 16, title: "Details" },
+      { level: 2, line: 20, title: "Usage" },
+    ]);
+
+    const section = readTree(root, "guide.md", { section: "setup" }).node;
+    expect(section.section).toBe("setup");
+    expect(section.body).toContain("Install it.");
+    expect(section.body).toContain("More setup.");
+    expect(section.body).not.toContain("Run it.");
+    expect(readTree(root, "guide.md", { full: true }).node.body).toContain("Run it.");
+    expect(() => readTree(root, "guide.md", { section: "Missing" })).toThrow(/Section not found/u);
+    expect(() => readTree(root, "guide.md", { full: true, section: "Setup" })).toThrow(/--full or --section/u);
+  });
+
   it("returns a selected body and immediate child summaries", () => {
     const root = join(tempRoot(), "existing");
     cpSync(join(FIXTURES, "valid"), root, { recursive: true });
 
-    const rootRead = readTree(root);
+    const rootRead = readTree(root, ".", { full: true });
     expect(rootRead.node).toMatchObject({ body: expect.stringContaining("Canonical durable context"), path: "." });
     expect(rootRead.node.body).not.toContain("schemaVersion:");
     expect(rootRead.children.map((child) => child.path)).toEqual(["members", "overview.md", "product"]);
     expect(rootRead.children.map((child) => child.path)).not.toContain("product/runtime.md");
 
     expect(readTree(root, "members").children.map((child) => child.path)).toEqual(["members/alice"]);
-    expect(readTree(root, "members/alice/memory.md").node).toMatchObject({
+    expect(readTree(root, "members/alice/memory.md", { full: true }).node).toMatchObject({
       body: expect.stringContaining("Agent-specific working context"),
-      contentClass: "member",
+      contentClass: "normal",
       path: "members/alice/memory.md",
     });
     expect(readTree(root, "members/alice/memory.md").children).toEqual([]);
