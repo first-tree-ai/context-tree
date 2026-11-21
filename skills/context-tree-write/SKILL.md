@@ -18,7 +18,7 @@ A tree is useful only while it is fresh: readers search for a subject and trust 
 - When a decision spans two areas, keep it in the more specific one and link to it from the other.
 - Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
-- Follow the organization and writing conventions the tree's root describes.
+- These are principles, not a structure: several layouts can satisfy them, and the concrete structure, processes, and team conventions are each tree's choice, described at its root. Follow them.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
 
 ## Keep the tree balanced
