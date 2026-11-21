@@ -6,10 +6,10 @@ Read the root and every index, then the content the review needs. You may read s
 
 ## Two modes
 
-- **Daily tidy:** review what changed since the previous cleanup, in the tree and in the related repositories its root lists (merged pull requests and commits). Bring in durable decisions and behavior changes that never reached the tree, fix claims those changes made stale, and tidy the areas involved.
-- **Structural review:** at the end of each tidy, judge from signals whether the whole structure needs a review, and do it then: reorganize areas, splits, and merges for retrieval. Signals include siblings far apart in size or one area growing much faster than the rest, the same kind of content repeatedly misplaced or moved, many nodes changed since the last structural review, topics scattered across areas or reachable only through many hops, and recent code changes opening a direction the tree has no place for. If none has happened for a long time, do one anyway.
+- **Routine tidy (each run, typically daily):** review what changed since the previous cleanup, in the tree and in the related repositories its root lists (merged pull requests and commits). Bring in durable decisions and behavior changes that never reached the tree, fix claims those changes made stale, and tidy the areas involved.
+- **Structural review:** at the end of each tidy, judge from signals whether the whole structure needs a review, and do it then: reorganize areas, splits, and merges for retrieval. Signals include siblings far apart in size or one area growing much faster than the rest, the same kind of content repeatedly misplaced or moved, many nodes changed since the last structural review, topics scattered across areas or reachable only through many hops, and recent code changes opening a direction the tree has no place for. If none has happened for a week, do one anyway.
 
-The tree's root lists the related repositories and may say how long is too long between structural reviews.
+The tree's root lists the related repositories.
 
 ## What to look for
 
