@@ -12,6 +12,7 @@ Save decisions, constraints, rationale, and reusable lessons so a future agent c
 Readers search for a subject and trust what they find. Each decision belongs on the node for its subject; a dated log, meeting, or changelog page makes readers replay history to learn what still holds, and leaves replaced decisions looking current.
 
 - Before editing, read the root and nearby indexes, then find and read the node that already covers the topic. Update it rather than adding a parallel one; add a node only when the topic has its own identity.
+- Keep the edit as narrow as the decision. Change other nodes only where this decision makes them wrong: a contradicting claim, an index entry or description, or a link. Leave unaffected neighbors alone.
 - When a decision changes, rewrite or remove the claims it replaces in the same change, so the node states the current decision and its surviving rationale. Git keeps the history.
 - Follow the organization and writing conventions the tree's root describes.
 - At the end of a task, consider whether it settled anything durable. Most tasks did not.
