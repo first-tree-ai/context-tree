@@ -237,13 +237,21 @@ export type UpgradeDependencies = {
   nodePath: string;
 };
 
+/**
+ * npm and pnpm are .cmd shims on Windows, which only start through a shell. Their arguments here
+ * are fixed and space-free; every other command, such as node.exe with user paths, runs directly
+ * because a shell would split its unquoted paths.
+ */
+export function needsShell(command: string, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" && (command === "npm" || command === "pnpm");
+}
+
 export function upgradeRunner(command: string, args: string[]): ReturnType<CommandRunner> {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 300_000,
-    // npm and pnpm are .cmd shims on Windows, which only start through a shell.
-    shell: process.platform === "win32",
+    shell: needsShell(command),
     windowsHide: true,
   });
   return {

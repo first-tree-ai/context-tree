@@ -8,12 +8,14 @@ import {
   currentUpdateNotice,
   detectInstallMethod,
   managingHost,
+  needsShell,
   owningPackage,
   registryUrl,
   type UpgradeDependencies,
   updateCheckDisabled,
   updateNotice,
   upgradeInstallation,
+  upgradeRunner,
   writeUpdateCache,
 } from "../src/adapters/update.js";
 import { runContextTreeCli } from "../src/cli/api.js";
@@ -268,6 +270,24 @@ describe("upgrade", () => {
     expect(JSON.parse(json.out).error.code).toBe("UPGRADE_UNAVAILABLE");
     const text = await cli(["upgrade"], { upgrade: () => deps });
     expect(text.err).toBe("context-tree: OpenTag manages this copy of context-tree; update it there.\n");
+  });
+
+  it("starts only the package manager shims through a Windows shell", () => {
+    expect(needsShell("npm", "win32")).toBe(true);
+    expect(needsShell("pnpm", "win32")).toBe(true);
+    expect(needsShell("C:\\Program Files\\nodejs\\node.exe", "win32")).toBe(false);
+    expect(needsShell("npm", "linux")).toBe(false);
+  });
+
+  it("passes paths containing spaces to node as single arguments", () => {
+    const { home } = fixture();
+    const directory = join(home, "path with spaces");
+    mkdirSync(directory);
+    const script = join(directory, "echo args.mjs");
+    writeFileSync(script, "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n");
+    const result = upgradeRunner(process.execPath, [script, join(directory, "a b"), "skills"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([join(directory, "a b"), "skills"]);
   });
 
   it("prints a text summary", async () => {
