@@ -23,6 +23,8 @@ const npmEnvironment = {
   GIT_CONFIG_GLOBAL: gitConfig,
   GIT_CONFIG_NOSYSTEM: "1",
   HOME: temporaryRoot,
+  // The background update check would outlive this script and write into the removed HOME.
+  CONTEXT_TREE_NO_UPDATE_CHECK: "1",
   npm_config_cache: join(temporaryRoot, "npm-cache"),
 };
 

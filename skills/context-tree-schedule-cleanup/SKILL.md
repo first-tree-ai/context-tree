@@ -13,4 +13,4 @@ The CLI installs a local launchd or systemd user job, prepares isolated sessions
 
 Use `cleanup run --tree <name-or-source> --json` for an explicitly requested immediate run, `cleanup logs --tree <name-or-source> --json` to inspect output, and `cleanup remove --tree <name-or-source> --json` to disable and unregister the job. Report cadence, agent, publication policy, and retained work when relevant.
 
-Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.

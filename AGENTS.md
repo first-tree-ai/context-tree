@@ -10,6 +10,7 @@ Distribution is npm only: the package exposes a `bin`, and `postinstall` runs `c
 - Host Git tools own private-repository authentication.
 - Zod schemas are the source of truth for public wire contracts.
 - `init`, `connect`, `disconnect`, `read`, and `verify` default to human-readable text and print one line of JSON to stdout only with `--json`; their text-mode failures print a sanitized line to stderr. `sync`, `write` subcommands, and `skills` subcommands always print exactly one line of JSON to stdout and nothing to stderr. Skills pass `--json` for structured output.
+- The update notice never blocks or fails a command: it reads a daily cache, refreshes it in a detached process, and appears as the `update` JSON field or one final stderr line in text mode.
 - Install and uninstall own exactly the `context-tree-` prefix in each host's skills directory; nothing else is ever replaced or removed.
 - Use `unknown` plus narrowing; avoid `any`, enums, and unjustified type assertions.
 - Keep public functions explicitly typed and use `import type`.

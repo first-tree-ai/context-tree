@@ -33,6 +33,7 @@ export const CLI_ERROR_CODES = {
   writeOutdated: "WRITE_OUTDATED",
   scopeViolation: "OUTSIDE_TREE",
   busy: "BUSY",
+  upgradeUnavailable: "UPGRADE_UNAVAILABLE",
 } as const;
 
 function hasUnsafeCharacter(value: string): boolean {
@@ -108,6 +109,22 @@ export const contextContentClassCountsSchema = z
   .strict();
 export type ContextContentClassCounts = z.infer<typeof contextContentClassCountsSchema>;
 
+/**
+ * Present on a result when a newer release is published. `command` upgrades this copy; it is null
+ * when `managedBy` names the host or package that owns the installed version.
+ */
+export const updateNoticeSchema = z
+  .object({
+    current: z.string().min(1),
+    latest: z.string().min(1),
+    command: z.string().min(1).nullable(),
+    managedBy: z.string().min(1).optional(),
+    message: z.string().min(1),
+  })
+  .strict();
+export type UpdateNotice = z.infer<typeof updateNoticeSchema>;
+const updateField = { update: updateNoticeSchema.optional() };
+
 export const SKILL_HOSTS = ["claude", "codex", "pi"] as const;
 export const skillHostSchema = z.enum(SKILL_HOSTS);
 export type SkillHost = z.infer<typeof skillHostSchema>;
@@ -135,6 +152,7 @@ export const installSkillsResultSchema = z
     schemaVersion: z.literal(SCHEMA_VERSION),
     skipped: z.array(skillInstallSkipSchema),
     version: z.string().trim().min(1),
+    ...updateField,
   })
   .strict();
 export type InstallSkillsResult = z.infer<typeof installSkillsResultSchema>;
@@ -145,6 +163,7 @@ export const uninstallSkillsResultSchema = z
     schemaVersion: z.literal(SCHEMA_VERSION),
     skipped: z.array(skillInstallSkipSchema),
     version: z.string().trim().min(1),
+    ...updateField,
   })
   .strict();
 export type UninstallSkillsResult = z.infer<typeof uninstallSkillsResultSchema>;
@@ -197,6 +216,7 @@ export const contextTreeReadResultSchema = z
     root: z.string(),
     schemaVersion: z.literal(SCHEMA_VERSION),
     target: z.string(),
+    ...updateField,
   })
   .strict();
 export type ContextTreeReadResult = z.infer<typeof contextTreeReadResultSchema>;
@@ -208,6 +228,7 @@ export const verifyTreeReportSchema = z
     root: z.string(),
     scannedByContentClass: contextContentClassCountsSchema,
     schemaVersion: z.literal(SCHEMA_VERSION),
+    ...updateField,
   })
   .strict();
 export type VerifyTreeReport = z.infer<typeof verifyTreeReportSchema>;
@@ -293,6 +314,7 @@ export const syncResultSchema = z
   .object({
     schemaVersion: z.literal(SCHEMA_VERSION),
     connections: z.array(discoverySchema),
+    ...updateField,
   })
   .strict();
 export type SyncResult = z.infer<typeof syncResultSchema>;
@@ -306,6 +328,7 @@ export const writeSessionSchema = z
     worktreeRoot: absoluteSingleLinePathSchema,
     taskBranch: branchSchema,
     commit: z.string().nullable(),
+    ...updateField,
   })
   .strict();
 export type WriteSession = z.infer<typeof writeSessionSchema>;
@@ -317,6 +340,7 @@ export const finishWriteResultSchema = z
     branch: z.string().nullable(),
     sha: z.string().nullable(),
     sessionId: z.string().uuid().nullable(),
+    ...updateField,
   })
   .strict();
 export type FinishWriteResult = z.infer<typeof finishWriteResultSchema>;
@@ -386,6 +410,7 @@ export const cleanupLogsResultSchema = z
     runs: z.array(cleanupRunMetadataSchema),
     selectedRunId: z.string().uuid().nullable(),
     events: z.array(cleanupLogEventSchema),
+    ...updateField,
   })
   .strict();
 export type CleanupLogsResult = z.infer<typeof cleanupLogsResultSchema>;
@@ -396,6 +421,19 @@ export const cleanupResultSchema = z
     registered: z.boolean(),
     running: z.boolean(),
     latest: cleanupOutcomeSchema.nullable(),
+    ...updateField,
   })
   .strict();
 export type CleanupResult = z.infer<typeof cleanupResultSchema>;
+export const upgradeResultSchema = z
+  .object({
+    schemaVersion: z.literal(SCHEMA_VERSION),
+    upgraded: z.boolean(),
+    method: z.enum(["npm", "pnpm"]),
+    previous: z.string().min(1),
+    current: z.string().min(1),
+    latest: z.string().min(1).nullable(),
+    skills: installSkillsResultSchema.nullable(),
+  })
+  .strict();
+export type UpgradeResult = z.infer<typeof upgradeResultSchema>;

@@ -14,4 +14,4 @@ For Git sources, obtain the intended branch from the request or inspect the repo
 
 Connections live in `.context-tree.json`. Paths inside the project are relative and work across clones and worktrees; an absolute path attaches an external local directory. Report the source. Use its directory or repository name with `--tree`; omit the selector when only one tree is connected. If a name is ambiguous, use an exact source selector shown by the CLI. To detach, use `context-tree disconnect --tree <name-or-source> --json`; content is retained.
 
-Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.
