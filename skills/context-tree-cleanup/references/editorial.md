@@ -6,10 +6,32 @@ Read the root and every index, then the content the review needs. You may read s
 
 ## Two modes
 
-- **Routine tidy (each run, typically daily):** review what changed since the previous cleanup, in the tree and in the related repositories its root lists (merged pull requests and commits). Bring in durable decisions and behavior changes that never reached the tree, fix claims those changes made stale, and tidy the areas involved.
-- **Structural review:** at the end of each tidy, judge from signals whether the whole structure needs a review, and do it then: reorganize areas, splits, and merges for retrieval. Signals include siblings far apart in size or one area growing much faster than the rest, the same kind of content repeatedly misplaced or moved, many nodes changed since the last structural review, topics scattered across areas or reachable only through many hops, and recent code changes opening a direction the tree has no place for. If none has happened for a week, do one anyway.
+- **Routine tidy (each run, typically daily):** start from the previous successful review. Use the host's changed-path list when supplied, then read changed sections and the pages they affect, including incoming references to moved or deleted pages. Check merged work since the supplied comparison time in the related repositories listed at the root. Bring in durable decisions and behavior changes that never reached the tree and fix claims those changes made stale. If the tree did not change, check the related repositories and structural signals as usual.
+- **Structural review:** establish a full-tree baseline if none exists and refresh it at least weekly. During a routine tidy, request a structural review if siblings are far apart in size, an area grows faster than the rest, related topics are scattered, content is repeatedly misplaced or moved, many nodes have changed, or recent code changes expose a missing area. In a hosted routine phase, record that signal before editing so the host can start the structural pass.
 
 The tree's root lists the related repositories.
+
+## Large structural reviews
+
+1. Cover the original Markdown snapshot in bounded read-only batches. Keep
+   findings tied to their file and section or fragment. Tag important claims
+   with specific, reusable topic keys. Resume from the saved checkpoint for
+   the same snapshot. If the host supplies fragments and item IDs, acknowledge
+   exactly the items reviewed.
+2. Compare original passages side by side for cross-batch candidates. Include
+   chapters linked across batches, boundaries between parts of long pages, and
+   matching headings or topic keys. Check duplicates, conflicts, scopes and
+   references. Record the source locations and leave uncertain claims intact.
+   The relation checks cover the identified candidates; discovery can miss
+   implicit relationships.
+3. In the editorial phase, inspect the findings by topic in bounded sections
+   and consult relevant original passages before acting. Check references and
+   the complete diff. Summarize changes, preserved uncertainties, or why no
+   change was needed. Complete the host record only after these checks.
+
+For a manual structural review, keep your own reading and relation checklist
+outside the tree and reread any section omitted by truncated output. For a
+hosted review, the runner verifies and checkpoints both stages before editing.
 
 ## What to look for
 
