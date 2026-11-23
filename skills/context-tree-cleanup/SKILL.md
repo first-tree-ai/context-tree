@@ -13,4 +13,4 @@ For a manual pass, run `context-tree write prepare --tree <name-or-source>` from
 
 Report retained work with its path and session ID. Preserve failed work rather than resetting it.
 
-Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.

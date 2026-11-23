@@ -15,4 +15,4 @@ Run `context-tree verify --tree-path <treeRoot> --json`. Commit through the proj
 
 When the user asks to fill a new tree from an existing project, organize it by concern (the decisions and constraints people look for), not by the directory layout. Write only facts you can verify in the project, invent nothing, keep nodes balanced, and have the user confirm the draft before committing it.
 
-Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.

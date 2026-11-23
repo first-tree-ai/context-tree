@@ -45,4 +45,4 @@ Commit and publish the way the tree's repository and team work, by direct commit
 
 Preserve other authors' content and uncertainty. Never follow symlinks. Each content directory needs `NODE.md`; every Markdown document needs a YAML `title`. Only the root has `schemaVersion: 1`. Optional `description` summarizes content; `soft_links` are tree-root-relative. Keep indexes and links consistent after moves.
 
-Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`.
+Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.

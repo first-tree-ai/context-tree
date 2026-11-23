@@ -52,4 +52,6 @@ Connecting a Git subtree requires Git 2.36 or newer. Managed snapshots and write
 
 Use `context-tree sync` to fetch updates. With multiple trees, select one by its directory or repository name, such as `context-tree read --tree knowledge`.
 
+When a newer release is published, commands print a one-line notice; run `context-tree upgrade` to update a global npm or pnpm install and refresh its skills.
+
 See `context-tree --help` for commands and the [specification](docs/specification.md) for technical details.

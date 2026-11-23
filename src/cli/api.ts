@@ -3,7 +3,21 @@ import { Command, CommanderError, Option } from "commander";
 import { sanitizeCommandOutput } from "../adapters/git.js";
 import { installSkills, uninstallSkills } from "../adapters/install.js";
 import { readPackageVersion } from "../adapters/package.js";
-import { CLI_ERROR_CODES, SCHEMA_VERSION, skillHostSchema, treeSourceSchema } from "../contracts/index.js";
+import {
+  currentUpdateNotice,
+  defaultUpgradeDependencies,
+  formatUpgrade,
+  refreshUpdateCache,
+  type UpgradeDependencies,
+  upgradeInstallation,
+} from "../adapters/update.js";
+import {
+  CLI_ERROR_CODES,
+  SCHEMA_VERSION,
+  skillHostSchema,
+  treeSourceSchema,
+  type UpdateNotice,
+} from "../contracts/index.js";
 import { ContextTreeError } from "../errors.js";
 import { cleanupLogs, cleanupStatus, removeCleanup, runCleanup, scheduleCleanup } from "../operations/cleanup.js";
 import { connection, disconnect } from "../operations/connections.js";
@@ -17,19 +31,42 @@ import { readTree } from "../tree/read.js";
 import { verifyTree } from "../tree/verify.js";
 import { formatRead, formatVerify } from "./format.js";
 
-type CliIo = { cwd: () => string; stdout: (text: string) => void; stderr?: (text: string) => void };
+type CliIo = {
+  cwd: () => string;
+  stdout: (text: string) => void;
+  stderr?: (text: string) => void;
+  /** Omitted, as in tests, to skip the update check. */
+  updateNotice?: () => UpdateNotice | undefined;
+  upgrade?: () => UpgradeDependencies;
+};
 type Selection = { projectPath: string; tree?: string; json?: boolean };
 const defaultIo: CliIo = {
   cwd: () => process.cwd(),
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
+  updateNotice: () => currentUpdateNotice(process.env),
+  upgrade: defaultUpgradeDependencies,
 };
 const MACHINE_COMMANDS = new Set(["sync", "write", "skills"]);
+/** Commands and flags that never carry the update notice. */
+const NO_NOTICE = new Set(["upgrade", "update-check", "help", "--help", "-h", "--version", "-V"]);
 
 export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo = defaultIo): Promise<number> {
   let exitCode = 0;
-  const emit = (value: unknown, json: boolean | undefined, text: string): void =>
-    io.stdout(`${json ? JSON.stringify(value) : text}\n`);
+  const notice =
+    argv[2] === undefined || argv.slice(2).some((arg) => NO_NOTICE.has(arg)) ? undefined : io.updateNotice?.();
+  // JSON results carry the notice as a field; text output gets one stderr line at the end.
+  let textNotice = notice !== undefined;
+  const emit = (value: unknown, json: boolean | undefined, text: string): void => {
+    if (json && notice && typeof value === "object" && value !== null && !Array.isArray(value)) {
+      textNotice = false;
+      io.stdout(`${JSON.stringify({ ...value, update: notice })}\n`);
+    } else io.stdout(`${json ? JSON.stringify(value) : text}\n`);
+  };
+  const finish = (code: number): number => {
+    if (notice && textNotice) (io.stderr ?? io.stdout)(`context-tree: ${notice.message}\n`);
+    return code;
+  };
   const project = (options: Selection): string => resolve(io.cwd(), options.projectPath);
   const select = (command: Command): Command =>
     command
@@ -251,9 +288,20 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
       },
     );
   }
+  json(program.command("upgrade"))
+    .description("Upgrade a global npm or pnpm install to the newest release and refresh its skills.")
+    .action(async (options: { json?: boolean }) => {
+      if (!io.upgrade) throw new Error("Upgrade is unavailable in this context.");
+      const result = await upgradeInstallation(io.upgrade());
+      emit(result, options.json, formatUpgrade(result));
+    });
+  program
+    .command("update-check", { hidden: true })
+    .description("Refresh the cached newest release.")
+    .action(() => refreshUpdateCache(process.env));
   try {
     await program.parseAsync(argv);
-    return exitCode;
+    return finish(exitCode);
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
     const detail = {
@@ -263,6 +311,6 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
     if (argv.includes("--json") || MACHINE_COMMANDS.has(argv[2] ?? ""))
       emit({ schemaVersion: SCHEMA_VERSION, ok: false, error: detail }, true, "");
     else (io.stderr ?? io.stdout)(`context-tree: ${detail.message}\n`);
-    return 1;
+    return finish(1);
   }
 }
