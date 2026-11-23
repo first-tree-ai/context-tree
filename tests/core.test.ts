@@ -282,6 +282,28 @@ describe("indexed reading", () => {
     expect(readTree(root, "forms.md", { section: "C#" }).node.body).toContain("## Fake");
     expect(readTree(root, "forms.md", { section: "setext" }).node.body).toContain("Body.");
     expect(readTree(root, "forms.md", { section: "Real" }).node.body).toContain("Last.");
+    writeFileSync(
+      join(root, "images.md"),
+      [
+        "---",
+        'title: "Images"',
+        "---",
+        "",
+        "## ![Operations](ops.svg)",
+        "",
+        "Ops body.",
+        "",
+        "## Next",
+        "",
+        "Next body.",
+        "",
+      ].join("\n"),
+    );
+    const imageOutline = readTree(root, "images.md").node.outline;
+    expect(imageOutline.map((heading) => heading.title)).toEqual(["Operations", "Next"]);
+    const operations = readTree(root, "images.md", { section: "Operations" }).node.body;
+    expect(operations).toContain("Ops body.");
+    expect(operations).not.toContain("Next body.");
   });
 
   it("returns a selected body and immediate child summaries", () => {

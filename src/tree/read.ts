@@ -66,12 +66,14 @@ type MarkdownNode = {
   type: string;
   depth?: number;
   value?: string;
+  alt?: string | null;
   children?: MarkdownNode[];
   position?: { start: { line: number } };
 };
 
 function plainText(node: MarkdownNode): string {
   if (typeof node.value === "string") return node.value;
+  if (node.type === "image" || node.type === "imageReference") return node.alt ?? "";
   return (node.children ?? []).map(plainText).join("");
 }
 
@@ -82,7 +84,7 @@ function outlineOf(lines: readonly string[], firstLine: number): ContextTreeRead
   const visit = (node: MarkdownNode): void => {
     if (node.type === "heading" && node.depth !== undefined && node.position) {
       const title = plainText(node).trim();
-      if (title.length > 0) headings.push({ level: node.depth, line: firstLine - 1 + node.position.start.line, title });
+      headings.push({ level: node.depth, line: firstLine - 1 + node.position.start.line, title });
       return;
     }
     for (const child of node.children ?? []) visit(child);
