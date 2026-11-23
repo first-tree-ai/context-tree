@@ -84,7 +84,7 @@ export const contextTreeRootNodeSchema = z.object({
 
 export type ContextTreeRootNode = z.infer<typeof contextTreeRootNodeSchema>;
 
-export const contextContentClassSchema = z.enum(["normal", "member", "repo-infra"]);
+export const contextContentClassSchema = z.enum(["normal", "repo-infra"]);
 export type ContextContentClass = z.infer<typeof contextContentClassSchema>;
 
 export const validationCodeSchema = z.enum(VALIDATION_CODES);
@@ -103,7 +103,6 @@ export type TreeValidationFinding = z.infer<typeof treeValidationFindingSchema>;
 export const contextContentClassCountsSchema = z
   .object({
     normal: z.number().int().nonnegative(),
-    member: z.number().int().nonnegative(),
     "repo-infra": z.number().int().nonnegative(),
   })
   .strict();
@@ -157,10 +156,26 @@ const contextTreeReadCommonFields = {
   path: z.string(),
 };
 
+export const contextTreeReadHeadingSchema = z
+  .object({
+    level: z.number().int().min(1).max(6),
+    line: z.number().int().positive(),
+    title: z.string(),
+  })
+  .strict();
+export type ContextTreeReadHeading = z.infer<typeof contextTreeReadHeadingSchema>;
+
+/**
+ * `body` is present only when the full document or one section was requested; by default a read
+ * returns metadata and a heading outline with 1-based file line numbers.
+ */
 export const contextTreeReadNodeSchema = z
   .object({
-    body: z.string(),
+    body: z.string().optional(),
     frontmatter: z.record(z.string(), z.unknown()),
+    lineCount: z.number().int().nonnegative(),
+    outline: z.array(contextTreeReadHeadingSchema),
+    section: z.string().optional(),
     ...contextTreeReadCommonFields,
   })
   .strict();

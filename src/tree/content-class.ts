@@ -17,10 +17,6 @@ export function classifyContextContent(relativePath: string): ContextContentClas
     return "repo-infra";
   }
 
-  if (parts[0] === "members") {
-    return "member";
-  }
-
   return "normal";
 }
 

@@ -111,18 +111,28 @@ export async function runContextTreeCli(argv: string[] = process.argv, io: CliIo
     );
     command.description(
       name === "read"
-        ? "Read a document or index and its immediate child summaries."
+        ? "Read a node's metadata, heading outline, and child summaries; --full or --section adds content."
         : "Validate tree structure, metadata, and links.",
     );
-    if (name === "read") command.argument("[path]", "tree-relative node", ".");
-    const action = (path: string, options: Selection & { treePath?: string }): void => {
+    if (name === "read")
+      command
+        .argument("[path]", "tree-relative node", ".")
+        .option("--full", "include the whole document body")
+        .option("--section <heading>", "include only the section under this heading");
+    const action = (
+      path: string,
+      options: Selection & { treePath?: string; full?: boolean; section?: string },
+    ): void => {
       if (options.treePath && options.tree) throw new Error("Choose --tree or --tree-path.");
       const root = options.treePath
         ? resolve(io.cwd(), options.treePath)
         : resolveSource(connection(project(options), options.tree)).treeRoot;
       if (options.treePath) touchSnapshotContaining(root);
       if (name === "read") {
-        const result = readTree(root, path);
+        const result = readTree(root, path, {
+          ...(options.full ? { full: true } : {}),
+          ...(options.section === undefined ? {} : { section: options.section }),
+        });
         emit(result, options.json, formatRead(result));
       } else {
         const result = verifyTree(root);

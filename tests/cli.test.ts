@@ -31,7 +31,7 @@ describe("CLI contracts", () => {
     expect(synced.err).toBe("");
     expect(synced.out.trim().split("\n")).toHaveLength(1);
     expect(syncResultSchema.parse(JSON.parse(synced.out)).connections[0]?.ok).toBe(true);
-    expect((await cli(["read"])).out).toContain("Durable context");
+    expect((await cli(["read", "--full"])).out).toContain("Durable context");
     const offline = syncResultSchema.parse(JSON.parse((await cli(["sync", "--offline"])).out));
     const tree = offline.connections[0];
     if (!tree?.ok) throw new Error("Expected local tree");

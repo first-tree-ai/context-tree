@@ -1,14 +1,16 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, posix, relative, resolve } from "node:path";
-
+import { fromMarkdown } from "mdast-util-from-markdown";
 import {
   type ContextTreeReadChild,
+  type ContextTreeReadHeading,
   type ContextTreeReadNode,
   type ContextTreeReadResult,
   SCHEMA_VERSION,
 } from "../contracts/index.js";
 import { classifyContextContent } from "./content-class.js";
-import { readNodeDocument } from "./document.js";
+
+import { readNodeDocument, readUtf8File } from "./document.js";
 import { isPathInside, resolveTreeRoot, toPosixPath } from "./path.js";
 import { readRootNode } from "./root.js";
 
@@ -53,7 +55,69 @@ function canonicalTarget(
   return { absolutePath, kind: entry.isDirectory() ? "directory" : "file", relativePath };
 }
 
-function readNode(path: string, relativePath: string, kind: "directory" | "file"): ContextTreeReadNode {
+export type ReadTreeOptions = {
+  /** Include the whole document body. */
+  full?: boolean;
+  /** Include only the section under this heading (case-insensitive), with its subsections. */
+  section?: string;
+};
+
+type MarkdownNode = {
+  type: string;
+  depth?: number;
+  value?: string;
+  alt?: string | null;
+  children?: MarkdownNode[];
+  position?: { start: { line: number } };
+};
+
+function plainText(node: MarkdownNode): string {
+  if (typeof node.value === "string") return node.value;
+  if (node.type === "image" || node.type === "imageReference") return node.alt ?? "";
+  return (node.children ?? []).map(plainText).join("");
+}
+
+/** Headings as parsed by the Markdown parser (ATX, indented, Setext), with 1-based file line numbers. */
+function outlineOf(lines: readonly string[], firstLine: number): ContextTreeReadHeading[] {
+  const root = fromMarkdown(lines.join("\n")) as MarkdownNode;
+  const headings: ContextTreeReadHeading[] = [];
+  const visit = (node: MarkdownNode): void => {
+    if (node.type === "heading" && node.depth !== undefined && node.position) {
+      const title = plainText(node).trim();
+      headings.push({ level: node.depth, line: firstLine - 1 + node.position.start.line, title });
+      return;
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  visit(root);
+  return headings;
+}
+
+function sectionOf(
+  lines: readonly string[],
+  firstLine: number,
+  outline: readonly ContextTreeReadHeading[],
+  wanted: string,
+  relativePath: string,
+): string {
+  const key = wanted.trim().toLowerCase();
+  const start = outline.findIndex((heading) => heading.title.trim().toLowerCase() === key);
+  const heading = outline[start];
+  if (heading === undefined) throw new Error(`Section not found in ${relativePath || "."}: ${wanted}`);
+  const next = outline.slice(start + 1).find((candidate) => candidate.level <= heading.level);
+  const end = next === undefined ? lines.length : next.line - firstLine;
+  return lines
+    .slice(heading.line - firstLine, end)
+    .join("\n")
+    .trimEnd();
+}
+
+function readNode(
+  path: string,
+  relativePath: string,
+  kind: "directory" | "file",
+  options: ReadTreeOptions,
+): ContextTreeReadNode {
   const documentPath = kind === "directory" ? join(path, "NODE.md") : path;
   const entry = lstatSync(documentPath);
   if (entry.isSymbolicLink() || !entry.isFile()) {
@@ -63,11 +127,24 @@ function readNode(path: string, relativePath: string, kind: "directory" | "file"
   if (document === null) {
     throw new Error(`Context Tree document has invalid or missing metadata: ${relativePath || "."}`);
   }
+  const source = readUtf8File(documentPath);
+  const firstLine = source.slice(0, source.length - document.body.length).split("\n").length;
+  const lines = document.body.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const outline = outlineOf(lines, firstLine);
+  const selected =
+    options.section !== undefined
+      ? { body: sectionOf(lines, firstLine, outline, options.section, relativePath), section: options.section }
+      : options.full
+        ? { body: document.body }
+        : {};
   return {
-    body: document.body,
+    ...selected,
     contentClass: classifyContextContent(relativePath),
     frontmatter: document.frontmatter,
     kind,
+    lineCount: firstLine - 1 + lines.length,
+    outline,
     path: relativePath || ".",
   };
 }
@@ -104,11 +181,12 @@ function childSummary(root: string, parentPath: string, name: string): ContextTr
   };
 }
 
-export function readTree(treePath: string, path?: string): ContextTreeReadResult {
+export function readTree(treePath: string, path?: string, options: ReadTreeOptions = {}): ContextTreeReadResult {
+  if (options.full && options.section !== undefined) throw new Error("Choose --full or --section.");
   const root = resolveTreeRoot(treePath);
   readRootNode(root);
   const target = canonicalTarget(root, path);
-  const node = readNode(target.absolutePath, target.relativePath, target.kind);
+  const node = readNode(target.absolutePath, target.relativePath, target.kind, options);
   const children =
     target.kind === "file"
       ? []

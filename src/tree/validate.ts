@@ -149,7 +149,7 @@ function validateMarkdownLinks(
 
 export function collectNodeValidationFindings(treeRoot: string): NodeValidationResult {
   const findings: TreeValidationFinding[] = [];
-  const scannedByContentClass: ContextContentClassCounts = { normal: 0, member: 0, "repo-infra": 0 };
+  const scannedByContentClass: ContextContentClassCounts = { normal: 0, "repo-infra": 0 };
   const content = collectContextMarkdownContent(treeRoot);
 
   for (const directory of content.directories) {

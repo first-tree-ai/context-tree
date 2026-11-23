@@ -60,7 +60,7 @@ describe("directory sources", () => {
     writeFileSync(join(tree.treeRoot, "choice.md"), node("Revised choice"));
     expect(verifyTree(tree.treeRoot).ok).toBe(true);
     expect(gitRaw(project, ["diff", "--cached"])).toBe(index);
-    expect(readTree(join(project, "docs"), "choice.md").node.body).toContain("Revised");
+    expect(readTree(join(project, "docs"), "choice.md", { full: true }).node.body).toContain("Revised");
   });
   it("resolves relative declarations inside each worktree", () => {
     const { home, project } = fixture();
@@ -273,7 +273,7 @@ describe("managed Git subtrees", () => {
     expect(fresh?.ok).toBe(true);
     if (!fresh?.ok) throw new Error("Expected refreshed tree");
     expect(fetchCount()).toBe(before + 1);
-    expect(readTree(fresh.treeRoot, "choice.md").node.body).toContain("New");
+    expect(readTree(fresh.treeRoot, "choice.md", { full: true }).node.body).toContain("New");
     expect(existsSync(join(cached.treeRoot, "choice.md"))).toBe(false);
   });
   it("shares repository storage while distinguishing subtree and ref identities", () => {
@@ -330,7 +330,7 @@ describe("managed Git subtrees", () => {
     expect(existsSync(second.treeRoot)).toBe(true);
     expect(git(remote, ["rev-parse", "main"])).toBe(winner.sha);
     const retry = prepareWrite(project, undefined, runner);
-    expect(readTree(retry.treeRoot, "first.md").node.body).toContain("First");
+    expect(readTree(retry.treeRoot, "first.md", { full: true }).node.body).toContain("First");
   });
   it("returns independent failures without hiding healthy sources", () => {
     const { home, project } = fixture();
