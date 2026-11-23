@@ -374,6 +374,7 @@ export const cleanupOutcomeSchema = z
       "committed",
       "published",
       "running",
+      "reviewing",
       "failed",
       "cancelled",
       "publication-uncertain",

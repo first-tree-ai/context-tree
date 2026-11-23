@@ -11,6 +11,8 @@ Create or update with `context-tree cleanup schedule --tree <name-or-source> --a
 
 The CLI installs a local launchd or systemd user job, prepares isolated sessions, and runs the packaged review rules. Do not create another scheduler. When the tree is unchanged since the last successful pass, the agent still runs once a day, so it can check the related repositories and the structure. Source, branch, or schedule changes stop a running pass.
 
+Routine tidy uses the last successful review as its comparison base. Structural review checks the full snapshot in bounded batches, then compares identified relations using the original passages. A `reviewing` result means the work is pending or checkpointed. The next run continues the same structural snapshot or starts from the new snapshot if the source moved. Only a completed review can produce a new baseline, commit, or publication.
+
 Use `cleanup run --tree <name-or-source> --json` for an explicitly requested immediate run, `cleanup logs --tree <name-or-source> --json` to inspect output, and `cleanup remove --tree <name-or-source> --json` to disable and unregister the job. Report cadence, agent, publication policy, and retained work when relevant.
 
 Invoke `context-tree` on PATH. If missing, install with `npm install --global @first-tree-ai/context-tree`. If a result carries `update` or prints an update notice, tell the owner once per task; offer `context-tree upgrade` when it names that command, otherwise relay which host manages the version.
