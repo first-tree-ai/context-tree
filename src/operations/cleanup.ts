@@ -23,6 +23,19 @@ import { classifyContextContent } from "../tree/content-class.js";
 import { connection } from "./connections.js";
 import { abortWrite, changedPaths, finishWrite, prepareWrite } from "./write.js";
 
+/**
+ * An unchanged tree still gets an agent pass once a day: the review also checks the related
+ * repositories its root lists and decides whether a structural review is due, which the tree
+ * digest alone cannot see.
+ */
+const UNCHANGED_REVIEW_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function skipUnchanged(success: unknown, digest: string): boolean {
+  if (typeof success !== "object" || success === null) return false;
+  const { at, digest: previous } = success as { at?: unknown; digest?: unknown };
+  return previous === digest && typeof at === "number" && Date.now() - at < UNCHANGED_REVIEW_INTERVAL_MS;
+}
+
 export function parseCleanupInterval(value: string): number {
   const match = /^(\d+)(m|h|d)$/u.exec(value);
   const minutes = Number(match?.[1]) * (match?.[2] === "d" ? 1440 : match?.[2] === "h" ? 60 : 1);
@@ -181,7 +194,7 @@ export async function runCleanup(
         ["rev-parse", session.repository.directory === "." ? "HEAD^{tree}" : `HEAD:${session.repository.directory}`],
         { runner: dependencies.runner },
       );
-      if (readState(statePath(config.id, "success")) === digest) {
+      if (skipUnchanged(readState(statePath(config.id, "success")), digest)) {
         abortWrite(session.id, dependencies.runner);
         session = undefined;
         return record("unchanged");
@@ -207,7 +220,11 @@ export async function runCleanup(
         await (dependencies.agent ?? runAgent)(
           config,
           session.treeRoot,
-          `${editorial}\n\nEdit only this tree directory. Do not stage, commit, publish, or invoke lifecycle commands. Report unresolved issues outside tree files.`,
+          [
+            editorial,
+            `The principles to apply are in ${resolvePackagedResource("skills", "context-tree-write", "SKILL.md")} and ${resolvePackagedResource("skills", "context-tree-read", "SKILL.md")}; read them first. Their command steps do not apply to this run.`,
+            "Edit only this tree directory. Do not stage, commit, publish, or invoke lifecycle commands. Report unresolved issues outside tree files.",
+          ].join("\n\n"),
           controller.signal,
           undefined,
           (source, text) => history.event(source, text),
@@ -231,7 +248,7 @@ export async function runCleanup(
       }
       publishing = config.publish;
       const finished = finishWrite(session.id, "Clean up Context Tree content", config.publish, dependencies.runner);
-      atomicState(statePath(config.id, "success"), digest);
+      atomicState(statePath(config.id, "success"), { at: Date.now(), digest });
       const outcome =
         finished.outcome === "unchanged" ? "noop" : finished.outcome === "published" ? "published" : "committed";
       if (!finished.sessionId) session = undefined;

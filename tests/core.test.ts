@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { formatRead } from "../src/cli/format.js";
 import { readTree } from "../src/tree/read.js";
 import { scaffoldTree } from "../src/tree/scaffold.js";
 import { verifyTree } from "../src/tree/verify.js";
@@ -209,6 +210,7 @@ describe("indexed reading", () => {
       path: "members/alice/memory.md",
     });
     expect(readTree(root, "members/alice/memory.md").children).toEqual([]);
+    expect(formatRead(readTree(root, "product/runtime.md"))).toContain("Soft links: overview.md");
     expect(readTree(root)).toEqual(readTree(root, "NODE.md"));
     expect(readTree(root, "product")).toEqual(readTree(root, "product/NODE.md"));
   });

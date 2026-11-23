@@ -59,6 +59,13 @@ describe("cleanup through isolated sessions", () => {
     commit(project, "Unrelated code edit");
     expect((await runCleanup(project, undefined, undefined, { agent })).outcome).toBe("unchanged");
     expect(agent).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ now: Date.now() + 25 * 60 * 60 * 1000, toFake: ["Date"] });
+    try {
+      expect((await runCleanup(project, undefined, undefined, { agent })).outcome).not.toBe("unchanged");
+      expect(agent).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
     expect(removeCleanup(project, undefined, scheduler).schedule?.enabled).toBe(false);
     expect((await runCleanup(project, undefined, undefined, { agent })).outcome).toBe("inactive");
   });

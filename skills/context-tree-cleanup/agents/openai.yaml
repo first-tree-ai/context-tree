@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Tree Cleanup"
-  short_description: "Consolidate and organize durable tree content"
-  default_prompt: "Use $context-tree-cleanup to consolidate and organize durable tree content."
+  short_description: "Review and tidy a tree against its principles"
+  default_prompt: "Use $context-tree-cleanup to review and tidy this Context Tree."

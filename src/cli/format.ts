@@ -6,6 +6,10 @@ export function formatRead(result: ContextTreeReadResult): string {
   if (typeof title === "string" && title.trim().length > 0) lines.push(title.trim());
   lines.push(`Path: ${result.node.path} (${result.node.kind}, ${result.node.contentClass})`);
   lines.push(`Root: ${result.root}`);
+  const softLinks = result.node.frontmatter.soft_links;
+  if (Array.isArray(softLinks) && softLinks.length > 0) {
+    lines.push(`Soft links: ${softLinks.filter((link) => typeof link === "string").join(", ")}`);
+  }
   if (result.node.body.trim().length > 0) {
     lines.push("", result.node.body.trimEnd());
   }
